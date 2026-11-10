@@ -1,0 +1,76 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Navigator",
+        "description": "Navigator adds a sidebar map to search destinations and plan routes using free OpenStreetMap-based services (Valhalla, OSRM, Photon, Nominatim). No API key needed."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Navigator is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Map servers",
+        "description": "Use the free public servers (default) or your own Valhalla/OSRM/Photon/Nominatim instances.",
+        "data": {
+          "valhalla_url": "Valhalla routing server",
+          "osrm_url": "OSRM routing server (fallback)",
+          "photon_url": "Photon search server",
+          "nominatim_url": "Nominatim search server"
+        }
+      }
+    },
+    "error": {
+      "invalid_url": "Invalid URL: must start with http:// or https://"
+    }
+  },
+  "selector": {
+    "mode": {
+      "options": {
+        "auto": "Car",
+        "moto": "Motorcycle",
+        "bici": "Bicycle",
+        "piedi": "Walking"
+      }
+    }
+  },
+  "services": {
+    "plan_route": {
+      "name": "Plan route",
+      "description": "Compute travel time and distance of a route (for automations). Returns duration, distance, tolls and instructions.",
+      "fields": {
+        "origin": {
+          "name": "Origin",
+          "description": "Address, \"lat,lon\" coordinates or entity (zone.home, person.john…)"
+        },
+        "destination": {
+          "name": "Destination",
+          "description": "Address, \"lat,lon\" coordinates or entity"
+        },
+        "via": {
+          "name": "Stops",
+          "description": "Intermediate stops (optional)"
+        },
+        "mode": {
+          "name": "Mode",
+          "description": "Travel mode"
+        },
+        "avoid_tolls": {
+          "name": "Avoid tolls",
+          "description": "Avoid toll roads"
+        },
+        "avoid_highways": {
+          "name": "Avoid highways",
+          "description": "Avoid motorways"
+        },
+        "avoid_ferries": {
+          "name": "Avoid ferries",
+          "description": "Avoid ferries"
+        }
+      }
+    }
+  }
+}

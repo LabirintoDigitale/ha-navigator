@@ -1,0 +1,76 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Navigator",
+        "description": "Navigator aggiunge alla barra laterale una mappa per cercare destinazioni e pianificare itinerari usando servizi gratuiti basati su OpenStreetMap (Valhalla, OSRM, Photon, Nominatim). Non serve alcuna chiave."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Navigator è già configurato."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Server delle mappe",
+        "description": "Puoi usare i server pubblici gratuiti (predefiniti) oppure i tuoi server Valhalla/OSRM/Photon/Nominatim.",
+        "data": {
+          "valhalla_url": "Server percorsi Valhalla",
+          "osrm_url": "Server percorsi OSRM (riserva)",
+          "photon_url": "Server ricerca Photon",
+          "nominatim_url": "Server ricerca Nominatim"
+        }
+      }
+    },
+    "error": {
+      "invalid_url": "Indirizzo non valido: deve iniziare con http:// o https://"
+    }
+  },
+  "selector": {
+    "mode": {
+      "options": {
+        "auto": "Auto",
+        "moto": "Moto",
+        "bici": "Bicicletta",
+        "piedi": "A piedi"
+      }
+    }
+  },
+  "services": {
+    "plan_route": {
+      "name": "Calcola percorso",
+      "description": "Calcola tempo e distanza di un percorso (per le automazioni). Restituisce durata, distanza, pedaggi e istruzioni.",
+      "fields": {
+        "origin": {
+          "name": "Partenza",
+          "description": "Indirizzo, coordinate \"lat,lon\" o entità (zone.home, person.mario…)"
+        },
+        "destination": {
+          "name": "Arrivo",
+          "description": "Indirizzo, coordinate \"lat,lon\" o entità"
+        },
+        "via": {
+          "name": "Tappe",
+          "description": "Tappe intermedie (facoltative)"
+        },
+        "mode": {
+          "name": "Mezzo",
+          "description": "Mezzo di trasporto"
+        },
+        "avoid_tolls": {
+          "name": "Evita pedaggi",
+          "description": "Evita le strade a pagamento"
+        },
+        "avoid_highways": {
+          "name": "Evita autostrade",
+          "description": "Evita autostrade e superstrade"
+        },
+        "avoid_ferries": {
+          "name": "Evita traghetti",
+          "description": "Evita i traghetti"
+        }
+      }
+    }
+  }
+}

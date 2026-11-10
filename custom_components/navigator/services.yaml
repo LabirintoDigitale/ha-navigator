@@ -1,0 +1,39 @@
+plan_route:
+  fields:
+    origin:
+      required: true
+      example: "zone.home"
+      selector:
+        text:
+    destination:
+      required: true
+      example: "Piazza del Duomo, Milano"
+      selector:
+        text:
+    via:
+      example: "45.07,7.68"
+      selector:
+        text:
+          multiple: true
+    mode:
+      default: auto
+      selector:
+        select:
+          translation_key: mode
+          options:
+            - auto
+            - moto
+            - bici
+            - piedi
+    avoid_tolls:
+      default: false
+      selector:
+        boolean:
+    avoid_highways:
+      default: false
+      selector:
+        boolean:
+    avoid_ferries:
+      default: false
+      selector:
+        boolean:
