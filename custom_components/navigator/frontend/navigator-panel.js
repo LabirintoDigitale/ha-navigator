@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.0.7";
+const PANEL_VERSION = "1.0.8";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 const ICON = new URL("./icon.png", import.meta.url).href;
@@ -261,12 +261,22 @@ const STYLE = `
   .navtop .d { font-size: 24px; font-weight: 700; white-space: nowrap; }
   .navtop .t { font-size: 15px; line-height: 1.25; }
   .navtop.wait { background: #37474f; }
-  .navbot { position: absolute; z-index: 1001; bottom: 22px; left: 10px; right: 60px; display: flex; align-items: center; gap: 10px;
+  .navbot { position: absolute; z-index: 1001; bottom: 20px; left: 10px; right: 10px; display: flex; align-items: center; gap: 8px 12px;
     flex-wrap: wrap; background: var(--card-background-color, #fff); color: var(--primary-text-color); border-radius: 12px;
-    padding: 8px 12px; box-shadow: 0 2px 10px rgba(0,0,0,.3); font-size: 14px; }
-  .navbot .rem { font-size: 18px; font-weight: 600; } .navbot .sp { flex: 1; }
-  .navbot button { padding: 6px 10px; font-size: 13px; }
-  .navbot button.stop { background: #c62828; color: #fff; border-color: #c62828; }
+    padding: 8px 10px; box-shadow: 0 2px 10px rgba(0,0,0,.3); font-size: 14px; }
+  .navbot .info { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; flex: 1 1 auto; min-width: 150px; }
+  .navbot .rem { font-size: 18px; font-weight: 600; }
+  .navbot .tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+  .navbot button { padding: 0 10px; height: 36px; min-width: 36px; font-size: 15px; }
+  .navbot button.attn { background: var(--primary-color); color: var(--text-primary-color, #fff); border-color: var(--primary-color); }
+  .navbot button.stop { background: #c62828; color: #fff; border-color: #c62828; font-size: 14px; }
+  .navbot select { height: 36px; font: inherit; font-size: 13px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--divider-color);
+    background: var(--card-background-color, #fff); color: var(--primary-text-color); max-width: 150px; }
+  .main.guida .ctl.br { display: none; }
+  @media (max-width: 800px) {
+    .navbot .tools { width: 100%; margin-left: 0; flex-wrap: nowrap; }
+    .navbot select { flex: 1; min-width: 0; max-width: none; }
+  }
   .navpop { position: absolute; z-index: 1002; left: 50%; top: 38%; transform: translate(-50%, -50%); min-width: 230px; max-width: 85%;
     background: rgba(33,33,33,.94); color: #fff; padding: 16px 20px; border-radius: 14px; text-align: center; font-size: 16px;
     box-shadow: 0 4px 18px rgba(0,0,0,.4); }
@@ -410,9 +420,7 @@ class NavigatorPanel extends HTMLElement {
           <div class="navpop" id="navpop" hidden></div>
           <div class="gattr" id="gattr" hidden></div>
           <div class="ctl br">
-            <button id="modebtn" class="mode" hidden></button>
-            <button id="zin" title="Ingrandisci" hidden>+</button>
-            <button id="zout" title="Riduci" hidden>−</button>
+            <button id="modebtn" class="mode go" hidden>▶ Parti</button>
             <button id="locate" title="La mia posizione">◎</button>
             <button id="fit" title="Mostra tutto il percorso">⤢</button>
           </div>
@@ -450,8 +458,6 @@ class NavigatorPanel extends HTMLElement {
       this._renderNav();
     });
     $("modebtn").addEventListener("click", () => this._toggleView());
-    $("zin").addEventListener("click", () => { this._map.zoomIn(); this._afterZoom(); });
-    $("zout").addEventListener("click", () => { this._map.zoomOut(); this._afterZoom(); });
     $("fit").addEventListener("click", () => this._fit());
     $("go").addEventListener("click", () => this._compute());
     $("addstop").addEventListener("click", () => { this._points.splice(this._points.length - 1, 0, null); this._renderPoints(true); });
@@ -826,7 +832,7 @@ class NavigatorPanel extends HTMLElement {
     return `<div class="sec"><h3>Navigazione</h3>
       <label class="muted" style="display:block;margin-bottom:4px">Segui la posizione di</label>
       <select class="inp" id="navsrc">${opts}</select>
-      <div class="row" style="margin-top:8px"><button class="primary" data-a="navstart" style="flex:1">▶ Avvia navigazione</button></div>${hint}</div>`;
+      <div class="row" style="margin-top:8px"><button class="primary" data-a="navstart" style="flex:1">▶ Parti</button></div>${hint}</div>`;
   }
 
   async _startNav(source) {
@@ -843,6 +849,7 @@ class NavigatorPanel extends HTMLElement {
     this._drawRoute();
     this._drawMarkers();
     this._renderResults();
+    this._buildNavBar();
     this._applyView();
     this._renderNav();
     if (source === "gps") {
@@ -1043,17 +1050,15 @@ class NavigatorPanel extends HTMLElement {
       this._startNav(chosen);
       return;
     }
-    this._stopNav(); // Mappa: esce dalla navigazione e torna alla vista normale
+    this._stopNav();
   }
 
+  // "Parti" compare con un percorso calcolato; durante la navigazione i comandi sono nella barra in basso
   _updateModeBtn() {
     const b = this.$("modebtn");
     if (!b) return;
-    const g = this._isGuida();
-    b.hidden = !this._result;
-    b.classList.toggle("go", !g);
-    b.textContent = g ? "🗺 Mappa" : "🧭 Guida";
-    b.title = g ? "Torna alla mappa ed esci dalla navigazione" : "Avvia la guida con indicazioni";
+    b.hidden = !this._result || !!this._nav;
+    b.title = "Parti: guida con indicazioni";
   }
 
   _applyView() {
@@ -1076,8 +1081,6 @@ class NavigatorPanel extends HTMLElement {
         m.setZoom(Math.round(m.getZoom()), { animate: false });
       }
     }
-    this.$("zin").hidden = this.$("zout").hidden = !g;
-    this.$("fit").hidden = g;
     this.$("gattr").hidden = !g;
     if (g) this.$("gattr").innerHTML = LAYERS[this._layer][3];
     this._updateModeBtn();
@@ -1251,7 +1254,7 @@ class NavigatorPanel extends HTMLElement {
       const next = ms[k + 1] || ms[k];
       const toNext = Math.max(0, rt._cum[next.begin] - along);
       top.className = "navtop";
-      top.innerHTML = `<span class="ic">${maneuverIcon(next)}</span><div><div class="d">${fmtDist(toNext)}</div><div class="t">${esc(next.text)}</div></div>`;
+      top.innerHTML = `<span class="ic">${maneuverIcon(next)}</span><div><div class="d">${toNext < 15 ? "Ora" : fmtDist(toNext)}</div><div class="t">${esc(next.text)}</div></div>`;
     }
     // tempo e distanza rimanenti
     let remTime = rt.summary.time;
@@ -1262,12 +1265,38 @@ class NavigatorPanel extends HTMLElement {
       const len = rt._cum[cur.end] - rt._cum[cur.begin];
       remTime = (len > 0 ? cur.time * Math.max(0, rt._cum[cur.end] - along) / len : 0) + ms.slice(k + 1).reduce((a, m) => a + m.time, 0);
     }
-    bot.innerHTML = `<span class="rem">${fmtTime(remTime)}</span><span>${fmtKm(remM / 1000)} · arrivo ${arrival(remTime)}</span><span class="sp"></span>
-      ${nav.follow ? "" : '<button data-n="center">◎ Ricentra</button>'}<button class="stop" data-n="stop">■ Esci</button>`;
-    bot.querySelector('[data-n="center"]')?.addEventListener("click", () => {
-      nav.follow = true;
-      if (nav.fix) this._followView();
+    if (!bot.querySelector(".info")) this._buildNavBar();
+    bot.querySelector(".info").innerHTML = `<span class="rem">${fmtTime(remTime)}</span><span>${fmtKm(remM / 1000)} · arrivo ${arrival(remTime)}</span>`;
+    const c = bot.querySelector('[data-n="center"]');
+    c.classList.toggle("attn", !nav.follow);
+    c.title = nav.follow ? "La mappa segue la tua posizione" : "Torna sulla tua posizione";
+  }
+
+  // barra in basso della guida: tempi e, sotto, zoom, centra, tipo di mappa ed Esci
+  _buildNavBar() {
+    const bot = this.$("navbot");
+    const opts = Object.entries(LAYERS).map(([k, v]) => `<option value="${k}" ${k === this._layer ? "selected" : ""}>${esc(v[0])}</option>`).join("");
+    bot.innerHTML = `<div class="info"></div>
+      <div class="tools">
+        <button data-n="out" title="Riduci">−</button>
+        <button data-n="in" title="Ingrandisci">+</button>
+        <button data-n="center" title="Centra sulla tua posizione">◎</button>
+        <select data-n="layer" title="Tipo di mappa">${opts}</select>
+        <button class="stop" data-n="stop" title="Esci dalla navigazione">■ Esci</button>
+      </div>`;
+    bot.querySelector('[data-n="out"]').addEventListener("click", () => { this._map.zoomOut(); this._afterZoom(); });
+    bot.querySelector('[data-n="in"]').addEventListener("click", () => { this._map.zoomIn(); this._afterZoom(); });
+    bot.querySelector('[data-n="center"]').addEventListener("click", () => {
+      if (!this._nav) return;
+      this._nav.follow = true;
+      if (this._nav.fix) this._followView();
       this._renderNav();
+    });
+    bot.querySelector('[data-n="layer"]').addEventListener("change", (e) => {
+      this._setLayer(e.target.value);
+      this.$("layer").value = e.target.value;
+      this.$("gattr").innerHTML = LAYERS[this._layer][3];
+      this._saveState();
     });
     bot.querySelector('[data-n="stop"]').addEventListener("click", () => this._stopNav());
   }

@@ -87,10 +87,14 @@ Dopo aver calcolato un percorso, nella sezione **Navigazione** scegli da dove pr
 - **Una persona o un dispositivo di Home Assistant** (`person.…`, `device_tracker.…`): la posizione inviata dall'**app Companion**, funziona anche in http.
   Per aggiornamenti ogni pochi secondi attiva nell'app *Impostazioni → App Companion → Gestisci sensori → Posizione in background → Modalità alta precisione*.
 
-Con un percorso calcolato l'icona **🧭 Guida** sulla mappa avvia la navigazione; durante la guida la stessa icona diventa **🗺 Mappa**, che (come **Esci**) chiude la navigazione e torna alla vista normale.
+Con un percorso calcolato premi **▶ Parti** (sulla mappa o nella sezione *Navigazione*): la mappa passa a tutto schermo e
+**ruota con la direzione di marcia** (avanti è sempre in alto, la destra è la destra del veicolo). Il veicolo è un fuoristrada
+blu visto dall'alto, nel terzo basso dello schermo per vedere la strada davanti.
 
-- **🧭 Guida**: il veicolo è un fuoristrada blu visto dall'alto, col muso nella direzione di marcia; mappa a tutto schermo che **ruota con la direzione di marcia** (avanti è sempre in alto, la destra è la destra del veicolo), con la tua posizione nel terzo basso per vedere la strada davanti. Puoi trascinare la mappa col mouse o con un dito e ingrandire con due dita (o con **+**, **−** e la rotellina): la mappa smette di seguirti finché non premi **◎ Ricentra**.
-- **🗺 Mappa**: vista normale con il pannello e nord in alto, senza navigazione.
+La **barra in basso** contiene tutto: tempo, km e orario di arrivo e, sotto, **−** e **+** (zoom), **◎** (centra sulla tua
+posizione), il **tipo di mappa** (stradale, topografica, scura, satellite, escursionistica) e **■ Esci**, che chiude la
+navigazione e torna alla vista normale. La mappa si può anche trascinare col mouse o con un dito e ingrandire con due dita:
+in quel caso smette di seguirti finché non premi **◎**.
 
 Navigator considera "fuori percorso" una posizione a più di 45 m dalla strada (30 m a piedi o in bici, più l'imprecisione del GPS).
 Se resti fuori per almeno 6 secondi (e almeno due posizioni) ricalcola il percorso dalla posizione attuale; trascinando la mappa smette di seguirti finché non premi **Ricentra**.
