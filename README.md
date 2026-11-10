@@ -23,7 +23,7 @@ Cerca un indirizzo o un'attività, imposta partenza, tappe e destinazione e calc
   - **Togli** una singola tratta: il percorso viene ricalcolato senza quella tratta (segnata con ✕ sulla mappa); le tratte tolte si possono ripristinare.
 - **Indicazioni passo passo** in italiano: clic su un passo per vederlo sulla mappa.
 - Apri il percorso in **Google Maps**, **Waze** o **OpenStreetMap**, oppure copia il riepilogo.
-- Mappe: stradale (OpenStreetMap), chiara e scura (CARTO), topografica (OpenTopoMap), satellite (Esri).
+- Mappe gratuite senza chiave: stradale, topografica, scura e satellite (Esri), escursionistica (OpenTopoMap).
 - Servizio **`navigator.plan_route`** per le automazioni (tempo di viaggio, distanza, pedaggi).
 
 | Togli una tratta a pagamento | Ricalcola senza pedaggi |
@@ -56,7 +56,7 @@ Tutte le richieste partono da Home Assistant (nessuna chiave, nessun account):
 | Percorsi (riserva) | [OSRM](https://project-osrm.org/) su `routing.openstreetmap.de` (FOSSGIS) | usato solo se Valhalla non risponde; senza opzioni "evita" |
 | Ricerca | [Photon](https://photon.komoot.io) (komoot) | suggerimenti mentre scrivi |
 | Ricerca e indirizzi (riserva) | [Nominatim](https://nominatim.org) di OpenStreetMap | max 1 richiesta al secondo |
-| Mappe | OpenStreetMap, CARTO, OpenTopoMap, Esri | caricate dal browser |
+| Mappe | Esri (stradale, topografica, scura, satellite), OpenTopoMap | caricate dal browser; i server di OpenStreetMap bloccano le richieste da un Home Assistant in rete locale |
 
 Sono servizi gratuiti offerti dalla comunità con limiti d'uso "ragionevole": Navigator è pensato per l'uso personale.
 Nelle **opzioni dell'integrazione** puoi indicare i tuoi server Valhalla, OSRM, Photon o Nominatim.

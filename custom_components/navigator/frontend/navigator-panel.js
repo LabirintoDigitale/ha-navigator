@@ -4,23 +4,28 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.0.2";
+const PANEL_VERSION = "1.0.3";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 const ICON = new URL("./icon.png", import.meta.url).href;
 const STORE_KEY = "navigator-panel-state";
 
+// Fonti delle mappe gratuite e senza chiave. I server di OpenStreetMap bloccano le richieste che arrivano da un
+// Home Assistant in rete locale ("Access blocked", 403) e CARTO risponde con "API KEY REQUIRED": come in MeshCore BBS
+// si usano le mappe Esri (anch'esse basate in parte su OpenStreetMap).
+const ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services";
+const OSM_C = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>';
 const LAYERS = {
-  osm: ["Stradale (OpenStreetMap)", "https://tile.openstreetmap.org/{z}/{x}/{y}.png", 19,
-    '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'],
-  voyager: ["Chiara (CARTO)", "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", 20,
-    '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions" target="_blank">CARTO</a>'],
-  dark: ["Scura (CARTO)", "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", 20,
-    '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions" target="_blank">CARTO</a>'],
-  topo: ["Topografica (OpenTopoMap)", "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", 17,
-    '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>, SRTM | &copy; <a href="https://opentopomap.org" target="_blank">OpenTopoMap</a>'],
-  sat: ["Satellite (Esri)", "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", 19,
+  strade: ["Stradale (Esri)", `${ESRI}/World_Street_Map/MapServer/tile/{z}/{y}/{x}`, 19,
+    `Mappa &copy; Esri — Esri, HERE, Garmin, ${OSM_C} e GIS User Community`],
+  topo: ["Topografica (Esri)", `${ESRI}/World_Topo_Map/MapServer/tile/{z}/{y}/{x}`, 19,
+    `Mappa &copy; Esri — Esri, HERE, Garmin, FAO, NOAA, USGS, ${OSM_C}`],
+  scura: ["Scura (Esri)", `${ESRI}/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}`, 16,
+    "Mappa &copy; Esri — Esri, HERE, Garmin"],
+  sat: ["Satellite (Esri)", `${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`, 19,
     "Immagini &copy; Esri, Maxar, Earthstar Geographics"],
+  otm: ["Escursionistica (OpenTopoMap)", "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", 17,
+    `${OSM_C}, SRTM | &copy; <a href="https://opentopomap.org" target="_blank" rel="noopener">OpenTopoMap</a>`],
 };
 
 const MODES = [
@@ -289,7 +294,7 @@ class NavigatorPanel extends HTMLElement {
           </div>
           <div id="results"></div>
           <div class="sec" id="favsec"></div>
-          <div class="sec muted" style="font-size:12px">Percorsi: Valhalla (FOSSGIS) · OSRM — Ricerca: Photon (komoot) · Nominatim — Mappe © OpenStreetMap e collaboratori.
+          <div class="sec muted" style="font-size:12px">Percorsi: Valhalla (FOSSGIS) · OSRM — Ricerca: Photon (komoot) · Nominatim — Mappe Esri e OpenTopoMap, dati © OpenStreetMap e collaboratori.
             Servizi gratuiti con limiti d'uso: le richieste passano da Home Assistant.
             <div class="footver"><img src="${ICON}" alt=""> Navigator versione ${PANEL_VERSION} ·
               <a href="https://github.com/LabirintoDigitale/ha-navigator" target="_blank" rel="noopener">LabirintoDigitale/ha-navigator</a></div></div>
@@ -313,7 +318,7 @@ class NavigatorPanel extends HTMLElement {
     const home = [this._hass.config.latitude, this._hass.config.longitude];
     this._map = L.map($("map"), { zoomControl: true, attributionControl: true }).setView(home, 12);
     const dark = this._hass.themes?.darkMode;
-    if (!this._layer || !LAYERS[this._layer]) this._layer = dark ? "dark" : "osm";
+    if (!this._layer || !LAYERS[this._layer]) this._layer = dark ? "scura" : "strade";
     for (const [k, v] of Object.entries(LAYERS)) $("layer").insertAdjacentHTML("beforeend", `<option value="${k}">${v[0]}</option>`);
     $("layer").value = this._layer;
     $("layer").addEventListener("change", (e) => { this._setLayer(e.target.value); this._saveState(); });
@@ -366,7 +371,7 @@ class NavigatorPanel extends HTMLElement {
   _setLayer(key) {
     const [, url, maxZoom, attribution] = LAYERS[key];
     if (this._tiles) this._map.removeLayer(this._tiles);
-    this._tiles = L.tileLayer(url, { maxZoom, attribution, subdomains: "abcd".slice(0, key === "topo" ? 3 : 4) }).addTo(this._map);
+    this._tiles = L.tileLayer(url, { maxZoom, attribution, subdomains: "abc" }).addTo(this._map);
     this._layer = key;
   }
 
