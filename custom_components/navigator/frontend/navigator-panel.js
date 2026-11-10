@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.0.4";
+const PANEL_VERSION = "1.0.5";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 const ICON = new URL("./icon.png", import.meta.url).href;
@@ -248,6 +248,20 @@ const STYLE = `
     box-shadow: 0 4px 18px rgba(0,0,0,.4); }
   .navpop.warn { background: rgba(230,81,0,.95); } .navpop.ok { background: rgba(11,110,58,.95); }
   .navpop .big { font-size: 30px; margin-bottom: 4px; }
+  /* modalità guida: mappa a tutto schermo che ruota con la direzione di marcia */
+  .mapwrap { overflow: hidden; }
+  .main.guida .side { display: none; }
+  .main.guida .mapwrap { flex: 1; height: auto; }
+  .main.guida .leaflet-control-container { display: none; }
+  #map.rot { transition: transform .8s ease-out; }
+  .ctl button.mode { width: auto; height: 42px; padding: 0 12px; font-size: 14px; font-weight: 600; white-space: nowrap; }
+  .ctl button.mode.go { background: #0b6e3a; color: #fff; }
+  .gattr { position: absolute; z-index: 1000; bottom: 2px; right: 6px; font-size: 10px; color: #333; padding: 0 4px;
+    background: rgba(255,255,255,.75); border-radius: 3px; max-width: 70%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .gattr a { color: inherit; }
+  @media (max-width: 800px) {
+    .main.guida .mapwrap { flex: none; height: calc(100vh - var(--header-height, 56px)); height: calc(100dvh - var(--header-height, 56px)); }
+  }
   .nav-me { width: 22px; height: 22px; border-radius: 50%; background: #1a73e8; border: 3px solid #fff;
     box-shadow: 0 0 0 7px rgba(26,115,232,.25), 0 1px 4px rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center; }
   .nav-me span { color: #fff; font: 700 11px sans-serif; display: block; }
@@ -282,7 +296,7 @@ class NavigatorPanel extends HTMLElement {
   connectedCallback() {
     if (this._hass && !this._started) this._init();
     else if (this._map) {
-      this._ro?.observe(this.$("map"));
+      this._ro?.observe(this.$("mapwrap"));
       setTimeout(() => this._map.invalidateSize(), 50);
     }
   }
@@ -331,7 +345,7 @@ class NavigatorPanel extends HTMLElement {
       <div class="toolbar"><ha-menu-button></ha-menu-button>
         <div class="title"><span class="brand"><img src="${ICON}" alt=""> Navigator</span><span class="ver">versione ${PANEL_VERSION}</span></div></div>
       <div id="verwarn"></div>
-      <div class="main">
+      <div class="main" id="mainbox">
         <div class="side">
           <div class="sec">
             <h3>Cerca un luogo</h3>
@@ -358,13 +372,17 @@ class NavigatorPanel extends HTMLElement {
             <div class="footver"><img src="${ICON}" alt=""> Navigator versione ${PANEL_VERSION} ·
               <a href="https://github.com/LabirintoDigitale/ha-navigator" target="_blank" rel="noopener">LabirintoDigitale/ha-navigator</a></div></div>
         </div>
-        <div class="mapwrap">
+        <div class="mapwrap" id="mapwrap">
           <div id="map"></div>
           <div class="ctl tr" id="ctltr"><select id="layer"></select></div>
           <div class="navtop" id="navtop" hidden></div>
           <div class="navbot" id="navbot" hidden></div>
           <div class="navpop" id="navpop" hidden></div>
+          <div class="gattr" id="gattr" hidden></div>
           <div class="ctl br">
+            <button id="modebtn" class="mode" hidden></button>
+            <button id="zin" title="Ingrandisci" hidden>+</button>
+            <button id="zout" title="Riduci" hidden>−</button>
             <button id="locate" title="La mia posizione">◎</button>
             <button id="fit" title="Mostra tutto il percorso">⤢</button>
           </div>
@@ -389,12 +407,20 @@ class NavigatorPanel extends HTMLElement {
     this._markerLayer = L.layerGroup().addTo(this._map);
     this._map.on("click", (e) => this._mapClick(e.latlng));
     this._map.on("dragstart", () => { if (this._nav && this._nav.follow) { this._nav.follow = false; this._renderNav(); } });
-    this._ro = new ResizeObserver(() => this._map.invalidateSize());
-    this._ro.observe($("map"));
+    this._ro = new ResizeObserver(() => this._relayout());
+    this._ro.observe($("mapwrap"));
     setTimeout(() => this._map.invalidateSize(), 300);
 
     // controlli
-    $("locate").addEventListener("click", () => this._locate(true));
+    $("locate").addEventListener("click", () => {
+      if (!this._nav) { this._locate(true); return; }
+      this._nav.follow = true; // in navigazione: torna a seguire la posizione
+      if (this._nav.fix) this._followView();
+      this._renderNav();
+    });
+    $("modebtn").addEventListener("click", () => this._toggleView());
+    $("zin").addEventListener("click", () => { this._map.zoomIn(); this._afterZoom(); });
+    $("zout").addEventListener("click", () => { this._map.zoomOut(); this._afterZoom(); });
     $("fit").addEventListener("click", () => this._fit());
     $("go").addEventListener("click", () => this._compute());
     $("addstop").addEventListener("click", () => { this._points.splice(this._points.length - 1, 0, null); this._renderPoints(true); });
@@ -583,6 +609,7 @@ class NavigatorPanel extends HTMLElement {
   }
 
   async _mapClick(latlng) {
+    if (this._isGuida()) return;
     const el = document.createElement("div");
     el.className = "popup";
     el.innerHTML = `<div class="n"><span class="loading"></span> Cerco l'indirizzo…</div><div class="a">${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}</div>
@@ -780,15 +807,17 @@ class NavigatorPanel extends HTMLElement {
     try { localStorage.setItem(`${STORE_KEY}-navsrc`, source); } catch (e) { /* storage non disponibile */ }
     this._sel = 0;
     this._nav = { source, follow: true, idx: 0, passed: 0, offSince: null, offCount: 0, rerouting: false, lastReroute: 0,
-      lastKey: null, fix: null, arrived: false };
+      lastKey: null, fix: null, arrived: false, view: "guida", dir: null };
     this.$("ctltr").hidden = true;
     this._drawRoute();
     this._drawMarkers();
     this._renderResults();
+    this._applyView();
     this._renderNav();
     if (source === "gps") {
       this._nav.watch = window.navigator.geolocation.watchPosition(
-        (pos) => this._onFix({ lat: pos.coords.latitude, lon: pos.coords.longitude, acc: pos.coords.accuracy || 0 }),
+        (pos) => this._onFix({ lat: pos.coords.latitude, lon: pos.coords.longitude, acc: pos.coords.accuracy || 0,
+          heading: pos.coords.heading, speed: pos.coords.speed }),
         (err) => this._navPopup("warn", "📡", `GPS non disponibile: ${esc(err.message)}`, 4000),
         { enableHighAccuracy: true, maximumAge: 2000, timeout: 30000 });
       // schermo acceso durante la guida, dove il browser lo permette
@@ -810,6 +839,7 @@ class NavigatorPanel extends HTMLElement {
     this._meMarker = this._accCircle = null;
     for (const id of ["navtop", "navbot", "navpop"]) this.$(id).hidden = true;
     this.$("ctltr").hidden = false;
+    this._applyView();
     this._drawRoute();
     this._drawMarkers();
     this._renderResults();
@@ -864,8 +894,6 @@ class NavigatorPanel extends HTMLElement {
       nav.heading = bearing([nav.fix.lat, nav.fix.lon], [fix.lat, fix.lon]);
     }
     nav.fix = { ...fix, time: now };
-    this._drawMe();
-    if (nav.follow) this._map.setView([fix.lat, fix.lon], Math.max(this._map.getZoom(), 16), { animate: true });
 
     const rt = this._geom(this._result.routes[this._sel]);
     const snap = this._snap(rt, fix, nav.idx);
@@ -873,6 +901,10 @@ class NavigatorPanel extends HTMLElement {
     // tolleranza: strada + imprecisione del GPS
     const limit = (slow ? 30 : 45) + Math.min(fix.acc || 0, 80);
     nav.snap = snap;
+    nav.dir = this._direction(rt, snap, fix, limit);
+    this._drawMe();
+    this._applyRotation();
+    if (nav.follow) this._followView();
 
     const total = rt._cum[rt._cum.length - 1];
     const dest = this._points[this._points.length - 1];
@@ -936,7 +968,7 @@ class NavigatorPanel extends HTMLElement {
   _drawMe() {
     const f = this._nav.fix;
     const ll = [f.lat, f.lon];
-    const h = this._nav.heading;
+    const h = this._nav.dir;
     const icon = L.divIcon({ className: "", iconSize: [22, 22], iconAnchor: [11, 11],
       html: `<div class="nav-me"><span style="${h != null ? `transform:rotate(${Math.round(h)}deg)` : ""}">${h != null ? "▲" : ""}</span></div>` });
     if (!this._meMarker) {
@@ -946,6 +978,132 @@ class NavigatorPanel extends HTMLElement {
       this._meMarker.setLatLng(ll).setIcon(icon);
       this._accCircle.setLatLng(ll).setRadius(f.acc || 0);
     }
+  }
+
+  _isGuida() {
+    return !!this._nav && this._nav.view === "guida";
+  }
+
+  // direzione di marcia: quella della strada davanti a te quando sei sul percorso, altrimenti quella del movimento
+  _direction(rt, snap, fix, limit) {
+    const sh = rt.shape;
+    if (snap.dist <= limit && sh.length > 1) {
+      const i = Math.min(snap.idx, sh.length - 2);
+      const here = [sh[i][0] + snap.t * (sh[i + 1][0] - sh[i][0]), sh[i][1] + snap.t * (sh[i + 1][1] - sh[i][1])];
+      let j = i + 1;
+      while (j < sh.length - 1 && rt._cum[j] - snap.along < 25) j++;
+      if (distM(here, sh[j]) > 1) return bearing(here, sh[j]);
+    }
+    if (fix.heading != null && !Number.isNaN(fix.heading) && (fix.speed || 0) > 1) return fix.heading;
+    return this._nav.heading ?? this._nav.dir;
+  }
+
+  // icona sulla mappa: con un percorso avvia la guida, durante la navigazione passa da guida a mappa e viceversa
+  _toggleView() {
+    if (!this._nav) {
+      if (!this._result) return;
+      const list = this._navSources();
+      const chosen = this.shadowRoot.getElementById("navsrc")?.value || this._defaultNavSource(list);
+      this._startNav(chosen);
+      return;
+    }
+    this._nav.view = this._isGuida() ? "mappa" : "guida";
+    if (this._isGuida()) this._nav.follow = true;
+    this._applyView();
+  }
+
+  _updateModeBtn() {
+    const b = this.$("modebtn");
+    if (!b) return;
+    const g = this._isGuida();
+    b.hidden = !this._result;
+    b.classList.toggle("go", !g);
+    b.textContent = g ? "🗺 Mappa" : "🧭 Guida";
+    b.title = g ? "Modalità mappa: nord in alto, mappa libera, la navigazione continua"
+      : this._nav ? "Torna alla guida con indicazioni" : "Avvia la guida con indicazioni";
+  }
+
+  _applyView() {
+    const g = this._isGuida();
+    const m = this._map;
+    this.$("mainbox").classList.toggle("guida", g);
+    if (g) {
+      m.dragging.disable();
+      m.doubleClickZoom.disable();
+      m.options.scrollWheelZoom = "center"; // lo zoom resta sul centro: con la mappa ruotata il punto del mouse non torna
+      m.options.touchZoom = "center";
+    } else {
+      m.dragging.enable();
+      m.doubleClickZoom.enable();
+      m.options.scrollWheelZoom = true;
+      m.options.touchZoom = true;
+    }
+    this.$("zin").hidden = this.$("zout").hidden = !g;
+    this.$("fit").hidden = g;
+    this.$("gattr").hidden = !g;
+    if (g) this.$("gattr").innerHTML = LAYERS[this._layer][3];
+    this._updateModeBtn();
+    this._relayout();
+    requestAnimationFrame(() => this._relayout());
+    if (this._nav) this._renderNav();
+  }
+
+  // dopo un cambio di dimensioni: mappa sulla posizione seguita, altrimenti sul centro di prima
+  _relayout() {
+    const m = this._map;
+    if (!m) return;
+    const c = m.getCenter();
+    this._layoutRot();
+    m.invalidateSize({ pan: false });
+    if (this._nav?.fix && this._nav.follow) this._followView(false);
+    else m.setView(c, m.getZoom(), { animate: false });
+  }
+
+  // in guida la mappa è un quadrato grande quanto la diagonale, così ruotando copre sempre tutto lo schermo
+  _layoutRot() {
+    const wrap = this.$("mapwrap");
+    const el = this.$("map");
+    if (!wrap || !el) return;
+    if (this._isGuida()) {
+      const w = wrap.clientWidth;
+      const h = wrap.clientHeight;
+      const d = Math.ceil(Math.hypot(w, h));
+      Object.assign(el.style, { width: `${d}px`, height: `${d}px`, left: `${(w - d) / 2}px`, top: `${(h - d) / 2}px`, right: "auto", bottom: "auto" });
+      el.classList.add("rot");
+      el.style.transform = `rotate(${-(this._rot || 0)}deg)`;
+    } else {
+      for (const k of ["width", "height", "left", "top", "right", "bottom", "transform"]) el.style[k] = "";
+      el.classList.remove("rot");
+      this._rot = 0;
+    }
+  }
+
+  _applyRotation() {
+    if (!this._isGuida() || this._nav.dir == null) return;
+    const cur = this._rot || 0;
+    const delta = ((((this._nav.dir - cur) % 360) + 540) % 360) - 180; // giro più corto
+    this._rot = cur + delta;
+    this.$("map").style.transform = `rotate(${-this._rot}deg)`;
+  }
+
+  // centra la mappa sulla posizione; in guida la posizione sta nel terzo basso dello schermo, con la strada davanti
+  _followView(animate = true) {
+    const nav = this._nav;
+    const f = nav.fix;
+    // al primo aggancio almeno zoom 16, poi resta quello scelto con + e −
+    const z = nav.zoomed ? this._map.getZoom() : Math.max(this._map.getZoom(), 16);
+    nav.zoomed = true;
+    let ll = L.latLng(f.lat, f.lon);
+    if (this._isGuida() && nav.dir != null) {
+      const d = this.$("mapwrap").clientHeight * 0.25;
+      const rad = (nav.dir * Math.PI) / 180;
+      ll = this._map.unproject(this._map.project(ll, z).add(L.point(Math.sin(rad) * d, -Math.cos(rad) * d)), z);
+    }
+    this._map.setView(ll, z, { animate });
+  }
+
+  _afterZoom() {
+    if (this._nav?.fix && this._nav.follow) setTimeout(() => this._followView(), 300);
   }
 
   _navPopup(kind, big, html, ms) {
@@ -1004,7 +1162,7 @@ class NavigatorPanel extends HTMLElement {
       ${nav.follow ? "" : '<button data-n="center">◎ Ricentra</button>'}<button class="stop" data-n="stop">■ Esci</button>`;
     bot.querySelector('[data-n="center"]')?.addEventListener("click", () => {
       nav.follow = true;
-      if (nav.fix) this._map.setView([nav.fix.lat, nav.fix.lon], Math.max(this._map.getZoom(), 16));
+      if (nav.fix) this._followView();
       this._renderNav();
     });
     bot.querySelector('[data-n="stop"]').addEventListener("click", () => this._stopNav());
@@ -1145,6 +1303,7 @@ class NavigatorPanel extends HTMLElement {
       }
       html += `</div>`;
     }
+    this._updateModeBtn();
     if (r) html += this._navSectionHtml();
     // tratte escluse
     if (this._excluded.length) {

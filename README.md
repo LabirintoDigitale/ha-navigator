@@ -87,6 +87,11 @@ Dopo aver calcolato un percorso, nella sezione **Navigazione** scegli da dove pr
 - **Una persona o un dispositivo di Home Assistant** (`person.…`, `device_tracker.…`): la posizione inviata dall'**app Companion**, funziona anche in http.
   Per aggiornamenti ogni pochi secondi attiva nell'app *Impostazioni → App Companion → Gestisci sensori → Posizione in background → Modalità alta precisione*.
 
+Durante la navigazione l'icona sulla mappa passa fra due modalità (con un percorso calcolato, la stessa icona avvia la guida):
+
+- **🧭 Guida**: mappa a tutto schermo che **ruota con la direzione di marcia** (avanti è sempre in alto, la destra è la destra del veicolo), con la tua posizione nel terzo basso per vedere la strada davanti; zoom con **+** e **−**.
+- **🗺 Mappa**: vista normale con il pannello, nord in alto e mappa libera da spostare; la navigazione e il ricalcolo continuano.
+
 Navigator considera "fuori percorso" una posizione a più di 45 m dalla strada (30 m a piedi o in bici, più l'imprecisione del GPS).
 Se resti fuori per almeno 6 secondi (e almeno due posizioni) ricalcola il percorso dalla posizione attuale; trascinando la mappa smette di seguirti finché non premi **Ricentra**.
 
