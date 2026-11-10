@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.0.10";
+const PANEL_VERSION = "1.0.11";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 const ICON = new URL("./icon.png", import.meta.url).href;
@@ -829,6 +829,16 @@ class NavigatorPanel extends HTMLElement {
 
   _locate(fly) {
     return new Promise((resolve) => {
+      if (this._companion() === "android") {
+        const me = this._myPerson();
+        const st = me && this._hass.states[me.id];
+        if (!st) { this._gpsHelp(true); resolve(null); return; }
+        this._me = { lat: st.attributes.latitude, lon: st.attributes.longitude };
+        this._drawMarkers();
+        if (fly) this._map.flyTo([this._me.lat, this._me.lon], 15, { duration: 0.8 });
+        resolve(this._me);
+        return;
+      }
       if (!window.navigator.geolocation) { this._msg("Questo browser non fornisce la posizione"); resolve(null); return; }
       if (!window.isSecureContext) {
         this._msg("La posizione del dispositivo richiede Home Assistant in HTTPS (o l'app Companion)");
@@ -853,13 +863,22 @@ class NavigatorPanel extends HTMLElement {
   // fonti della posizione: GPS del browser (solo in HTTPS) o entità di Home Assistant aggiornate dall'app Companion
   _navSources() {
     const secure = window.isSecureContext && !!window.navigator.geolocation;
-    const out = [{ id: "gps", name: secure ? "📱 GPS di questo dispositivo" : "📱 GPS di questo dispositivo (serve HTTPS)", ok: secure }];
+    const android = this._companion() === "android";
+    const gpsName = android ? "📱 GPS di questo dispositivo (non disponibile nell'app Android)"
+      : secure ? "📱 GPS di questo dispositivo" : "📱 GPS di questo dispositivo (serve HTTPS)";
+    const out = [{ id: "gps", name: gpsName, ok: secure && !android }];
     for (const [id, st] of Object.entries(this._hass?.states || {})) {
       if (!id.startsWith("person.") && !id.startsWith("device_tracker.")) continue;
       if (st.attributes.latitude == null || st.attributes.longitude == null) continue;
       out.push({ id, name: `${id.startsWith("person.") ? "👤" : "📡"} ${st.attributes.friendly_name || id}`, ok: true });
     }
     return out;
+  }
+
+  _myPerson(list = this._navSources()) {
+    const uid = this._hass?.user?.id;
+    return list.find((s) => s.id.startsWith("person.") && s.ok && this._hass.states[s.id].attributes.user_id === uid)
+      || list.find((s) => s.id.startsWith("person.") && s.ok) || list.find((s) => s.id !== "gps" && s.ok) || null;
   }
 
   _defaultNavSource(list) {
@@ -883,7 +902,11 @@ class NavigatorPanel extends HTMLElement {
     const list = this._navSources();
     const def = this._defaultNavSource(list);
     const opts = list.map((s) => `<option value="${esc(s.id)}" ${s.id === def ? "selected" : ""} ${s.ok ? "" : "disabled"}>${esc(s.name)}</option>`).join("");
-    const hint = window.isSecureContext ? ""
+    const hint = this._companion() === "android"
+      ? `<div class="muted" style="margin-top:6px">Nell'app Android il GPS arriva tramite la tua persona: per seguirti bene in auto attiva
+         nell'app la posizione ad alta precisione (Impostazioni → App Companion → Gestisci sensori → Posizione in background →
+         Modalità alta precisione).</div>`
+      : window.isSecureContext ? ""
       : `<div class="muted" style="margin-top:6px">Home Assistant è aperto in http: il browser non concede il GPS. Usa la posizione che l'app
          Companion invia a Home Assistant; per aggiornamenti ogni pochi secondi attiva nell'app la posizione ad alta precisione
          (Impostazioni → App Companion → Gestisci sensori → Posizione in background → Modalità alta precisione).</div>`;
@@ -896,6 +919,7 @@ class NavigatorPanel extends HTMLElement {
 
   async _startNav(source) {
     if (!this._result) return;
+    if (source === "gps" && this._companion() === "android") { this._androidHelp(); return; }
     if (source === "gps" && !(window.isSecureContext && window.navigator.geolocation)) {
       this._msg("Il GPS del browser richiede Home Assistant in HTTPS: scegli la posizione dell'app Companion");
       return;
@@ -1305,11 +1329,10 @@ class NavigatorPanel extends HTMLElement {
     let steps;
     let links = "";
     if (app === "android") {
-      steps = `<li>Apri le <b>Impostazioni di Android</b> → <b>App</b> → <b>Home Assistant</b> → <b>Autorizzazioni</b> → <b>Posizione</b>.</li>
-        <li>Scegli <b>Consenti solo mentre l'app è in uso</b> (o <b>Consenti sempre</b>) e attiva <b>Usa posizione precisa</b>.</li>
-        <li>Chiudi del tutto l'app Home Assistant e riaprila.</li>`;
-      links = `<a class="pri" href="intent:package:io.homeassistant.companion.android#Intent;action=android.settings.APPLICATION_DETAILS_SETTINGS;end">⚙ Apri le impostazioni di Android per Home Assistant</a>`;
-    } else if (app === "ios") {
+      this._androidHelp();
+      return;
+    }
+    if (app === "ios") {
       steps = `<li>Apri <b>Impostazioni</b> dell'iPhone → <b>Home Assistant</b> → <b>Posizione</b>.</li>
         <li>Scegli <b>Mentre usi l'app</b> (o <b>Sempre</b>) e attiva <b>Posizione esatta</b>.</li>
         <li>Chiudi del tutto l'app Home Assistant e riaprila.</li>`;
@@ -1342,6 +1365,40 @@ class NavigatorPanel extends HTMLElement {
     });
     el.querySelector('[data-h="person"]')?.addEventListener("click", () => {
       el.hidden = true;
+      this._startNav(person.id);
+    });
+  }
+
+  // app Companion Android: la sua WebView non passa mai il GPS alle pagine, anche con tutte le autorizzazioni concesse.
+  // La posizione arriva a Home Assistant dal sensore dell'app, nella propria persona.
+  _androidHelp() {
+    const person = this._myPerson();
+    const el = this.$("navpop");
+    clearTimeout(this._nav?.popTimer);
+    el.className = "navpop help";
+    el.innerHTML = `<div class="big">📡</div><h4>GPS nell'app Android</h4>
+      <div>Non è un problema di autorizzazioni: l'app Companion per Android <b>non passa il GPS alle pagine</b> che mostra, anche
+        con tutte le autorizzazioni concesse. La posizione arriva però a Home Assistant dal sensore dell'app: Navigator usa quella,
+        tramite la tua <b>persona</b>.</div>
+      <ol>
+        <li>Nella sezione <i>Navigazione</i> scegli la tua persona${person ? ` (<b>${esc(person.name.replace(/^\S+\s/, ""))}</b>)` : ""}.</li>
+        <li>Per aggiornamenti ogni pochi secondi, nell'app apri <b>Impostazioni</b> → <b>App Companion</b> → <b>Gestisci sensori</b> →
+          <b>Posizione in background</b> e attiva la <b>Modalità alta precisione</b> (anche solo quando sei in auto o collegato al Bluetooth dell'auto).</li>
+      </ol>
+      <div class="acts">
+        ${person && this._result ? `<button class="pri" data-h="person">👤 Parti con la posizione di ${esc(person.name.replace(/^\S+\s/, ""))}</button>` : ""}
+        <button data-h="app">📱 Apri le impostazioni dell'app Companion</button>
+        <button class="close" data-h="close">Chiudi</button>
+      </div>
+      ${person ? "" : `<div class="note">Non trovo una persona con posizione: nell'app attiva i sensori di posizione e collega il dispositivo a una persona (Impostazioni → Persone).</div>`}`;
+    el.hidden = false;
+    el.querySelector('[data-h="close"]').addEventListener("click", () => { el.hidden = true; });
+    el.querySelector('[data-h="app"]').addEventListener("click", () => {
+      if (!this._openCompanionSettings()) this._msg("Questa versione dell'app non permette di aprire le impostazioni da qui");
+    });
+    el.querySelector('[data-h="person"]')?.addEventListener("click", () => {
+      el.hidden = true;
+      try { localStorage.setItem(`${STORE_KEY}-navsrc`, person.id); } catch (e) { /* storage non disponibile */ }
       this._startNav(person.id);
     });
   }
