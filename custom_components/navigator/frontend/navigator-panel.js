@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.0.6";
+const PANEL_VERSION = "1.0.7";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 const ICON = new URL("./icon.png", import.meta.url).href;
@@ -79,6 +79,30 @@ function maneuverIcon(m) {
   if (txt.includes("sinistra")) return "↰";
   return "↑";
 }
+
+// il veicolo in navigazione: fuoristrada blu scuro visto dall'alto, tetto in due pannelli e hardtop posteriore grigio;
+// il muso è in alto (direzione di marcia)
+const CAR_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 80" width="26" height="47">
+  <defs>
+    <linearGradient id="nvb" x1="0" x2="1"><stop offset="0" stop-color="#0a2150"/><stop offset=".5" stop-color="#173a7a"/><stop offset="1" stop-color="#0a2150"/></linearGradient>
+    <linearGradient id="nvg" x1="0" x2="1"><stop offset="0" stop-color="#7d8792"/><stop offset=".5" stop-color="#aeb6bf"/><stop offset="1" stop-color="#7d8792"/></linearGradient>
+    <linearGradient id="nvv" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5c7fb8"/><stop offset="1" stop-color="#1c355f"/></linearGradient>
+  </defs>
+  <rect x="1" y="12" width="5" height="13" rx="2" fill="#151515"/><rect x="38" y="12" width="5" height="13" rx="2" fill="#151515"/>
+  <rect x="1" y="54" width="5" height="13" rx="2" fill="#151515"/><rect x="38" y="54" width="5" height="13" rx="2" fill="#151515"/>
+  <rect x="4" y="2" width="36" height="76" rx="8" fill="url(#nvb)" stroke="#fff" stroke-width="1.6"/>
+  <rect x="7" y="3.2" width="7" height="2.6" rx="1.2" fill="#ffe28a"/><rect x="30" y="3.2" width="7" height="2.6" rx="1.2" fill="#ffe28a"/>
+  <rect x="7" y="74.4" width="6" height="2.4" rx="1" fill="#e53935"/><rect x="31" y="74.4" width="6" height="2.4" rx="1" fill="#e53935"/>
+  <path d="M15 6 L15 18 M29 6 L29 18" stroke="#2b5299" stroke-width="1.2" stroke-linecap="round"/>
+  <ellipse cx="3" cy="27" rx="3" ry="1.8" fill="#0a2150" stroke="#fff" stroke-width=".8"/>
+  <ellipse cx="41" cy="27" rx="3" ry="1.8" fill="#0a2150" stroke="#fff" stroke-width=".8"/>
+  <path d="M8 29 Q22 20 36 29 L34 33 Q22 27 10 33 Z" fill="url(#nvv)"/>
+  <rect x="10" y="33.5" width="11.3" height="14" rx="2" fill="#123372" stroke="#06142f" stroke-width=".8"/>
+  <rect x="22.7" y="33.5" width="11.3" height="14" rx="2" fill="#123372" stroke="#06142f" stroke-width=".8"/>
+  <rect x="9" y="48.5" width="26" height="22" rx="2.5" fill="url(#nvg)" stroke="#5a636c" stroke-width=".8"/>
+  <path d="M15 51 L15 68 M19.7 51 L19.7 68 M24.3 51 L24.3 68 M29 51 L29 68" stroke="#6c757e" stroke-width="1" stroke-linecap="round"/>
+  <rect x="11" y="70.8" width="22" height="2.6" rx="1" fill="#1c355f"/>
+</svg>`;
 
 // fuori percorso per almeno questo tempo (e due posizioni) prima di ricalcolare
 const OFF_ROUTE_MS = 6000;
@@ -265,6 +289,9 @@ const STYLE = `
   @media (max-width: 800px) {
     .main.guida .mapwrap { flex: none; height: calc(100vh - var(--header-height, 56px)); height: calc(100dvh - var(--header-height, 56px)); }
   }
+  .nav-car { width: 47px; height: 47px; display: flex; align-items: center; justify-content: center;
+    filter: drop-shadow(0 2px 3px rgba(0,0,0,.45)); }
+  .nav-car svg { display: block; transition: transform .6s ease-out; }
   .nav-me { width: 22px; height: 22px; border-radius: 50%; background: #1a73e8; border: 3px solid #fff;
     box-shadow: 0 0 0 7px rgba(26,115,232,.25), 0 1px 4px rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center; }
   .nav-me span { color: #fff; font: 700 11px sans-serif; display: block; }
@@ -972,16 +999,21 @@ class NavigatorPanel extends HTMLElement {
   _drawMe() {
     const f = this._nav.fix;
     const ll = [f.lat, f.lon];
-    const h = this._nav.dir;
-    const icon = L.divIcon({ className: "", iconSize: [22, 22], iconAnchor: [11, 11],
-      html: `<div class="nav-me"><span style="${h != null ? `transform:rotate(${Math.round(h)}deg)` : ""}">${h != null ? "▲" : ""}</span></div>` });
+    // l'auto ruota con la direzione di marcia; in guida la mappa ruota al contrario, così resta col muso in alto
+    const h = this._nav.dir ?? 0;
     if (!this._meMarker) {
+      const icon = L.divIcon({ className: "", iconSize: [47, 47], iconAnchor: [23.5, 23.5], html: `<div class="nav-car">${CAR_SVG}</div>` });
       this._accCircle = L.circle(ll, { radius: f.acc || 0, color: "#1a73e8", weight: 1, fillOpacity: 0.1, interactive: false }).addTo(this._map);
       this._meMarker = L.marker(ll, { icon, interactive: false, zIndexOffset: 1000 }).addTo(this._map);
+      this._carRot = h;
     } else {
-      this._meMarker.setLatLng(ll).setIcon(icon);
+      this._meMarker.setLatLng(ll);
       this._accCircle.setLatLng(ll).setRadius(f.acc || 0);
+      // giro più corto, come la mappa
+      this._carRot = (this._carRot ?? h) + ((((h - (this._carRot ?? h)) % 360) + 540) % 360) - 180;
     }
+    const svg = this._meMarker.getElement()?.querySelector("svg");
+    if (svg) svg.style.transform = `rotate(${this._carRot}deg)`;
   }
 
   _isGuida() {
@@ -1002,7 +1034,7 @@ class NavigatorPanel extends HTMLElement {
     return this._nav.heading ?? this._nav.dir;
   }
 
-  // icona sulla mappa: con un percorso avvia la guida, durante la navigazione passa da guida a mappa e viceversa
+  // icona sulla mappa: con un percorso avvia la guida; in guida torna alla mappa ed esce dalla navigazione
   _toggleView() {
     if (!this._nav) {
       if (!this._result) return;
@@ -1011,9 +1043,7 @@ class NavigatorPanel extends HTMLElement {
       this._startNav(chosen);
       return;
     }
-    this._nav.view = this._isGuida() ? "mappa" : "guida";
-    if (this._isGuida()) this._nav.follow = true;
-    this._applyView();
+    this._stopNav(); // Mappa: esce dalla navigazione e torna alla vista normale
   }
 
   _updateModeBtn() {
@@ -1023,8 +1053,7 @@ class NavigatorPanel extends HTMLElement {
     b.hidden = !this._result;
     b.classList.toggle("go", !g);
     b.textContent = g ? "🗺 Mappa" : "🧭 Guida";
-    b.title = g ? "Modalità mappa: nord in alto, mappa libera, la navigazione continua"
-      : this._nav ? "Torna alla guida con indicazioni" : "Avvia la guida con indicazioni";
+    b.title = g ? "Torna alla mappa ed esci dalla navigazione" : "Avvia la guida con indicazioni";
   }
 
   _applyView() {
