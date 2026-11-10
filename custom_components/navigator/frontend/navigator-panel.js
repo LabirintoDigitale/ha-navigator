@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.0.0";
+const PANEL_VERSION = "1.0.1";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 const ICON = new URL("./icon.png", import.meta.url).href;
@@ -76,24 +76,26 @@ function maneuverIcon(m) {
 }
 
 const STYLE = `
-  :host { display: block; height: 100%; background: var(--primary-background-color); color: var(--primary-text-color);
+  :host { display: flex; flex-direction: column; height: 100vh; height: 100dvh; overflow: hidden; background: var(--primary-background-color); color: var(--primary-text-color);
     font-family: var(--paper-font-body1_-_font-family, Roboto, sans-serif); }
   * { box-sizing: border-box; }
-  .toolbar { display: flex; align-items: center; height: var(--header-height, 56px); padding: 0 12px 0 4px;
+  .toolbar { flex: none; display: flex; align-items: center; height: var(--header-height, 56px); padding: 0 12px 0 4px;
     background: var(--app-header-background-color, var(--primary-color)); color: var(--app-header-text-color, #fff);
     border-bottom: var(--app-header-border-bottom, none); }
   .toolbar .title { font-size: 20px; margin-left: 8px; display: flex; align-items: baseline; gap: 10px; flex: 1; min-width: 0; }
   .toolbar .ver { font-size: 12px; opacity: .7; }
   .toolbar .brand { display: inline-flex; align-items: center; gap: 8px; }
   .toolbar .brand img { width: 30px; height: 30px; align-self: center; background: #fff; border-radius: 50%; padding: 1px; }
-  .main { display: flex; height: calc(100% - var(--header-height, 56px)); }
+  /* altezza presa dalla finestra: dentro Home Assistant il 100% del pannello può risultare nullo e la mappa sparire */
+  .main { flex: 1; min-height: 0; display: flex; }
+  #verwarn { flex: none; }
   .side { width: 390px; flex: none; overflow-y: auto; border-right: 1px solid var(--divider-color);
     background: var(--card-background-color, #fff); }
-  .mapwrap { flex: 1; position: relative; min-width: 0; }
+  .mapwrap { flex: 1; position: relative; min-width: 0; min-height: 300px; }
   #map { position: absolute; inset: 0; background: #ddd; }
   @media (max-width: 800px) {
-    :host { overflow-y: auto; }
-    .main { flex-direction: column-reverse; height: auto; min-height: calc(100% - var(--header-height, 56px)); }
+    :host { display: block; overflow-y: auto; }
+    .main { flex-direction: column-reverse; }
     .mapwrap { flex: none; height: 52vh; }
     .side { width: 100%; border-right: none; overflow: visible; }
   }
