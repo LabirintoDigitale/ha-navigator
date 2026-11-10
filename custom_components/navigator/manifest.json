@@ -1,0 +1,21 @@
+{
+  "domain": "navigator",
+  "name": "Navigator",
+  "codeowners": [
+    "@LabirintoDigitale"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "frontend",
+    "http",
+    "panel_custom",
+    "websocket_api"
+  ],
+  "documentation": "https://github.com/LabirintoDigitale/ha-navigator",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/LabirintoDigitale/ha-navigator/issues",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "1.0.0"
+}
