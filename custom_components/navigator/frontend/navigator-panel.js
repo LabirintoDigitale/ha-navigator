@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.0.3";
+const PANEL_VERSION = "1.0.4";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 const ICON = new URL("./icon.png", import.meta.url).href;
@@ -78,6 +78,40 @@ function maneuverIcon(m) {
   if (txt.includes("destra")) return "↱";
   if (txt.includes("sinistra")) return "↰";
   return "↑";
+}
+
+// fuori percorso per almeno questo tempo (e due posizioni) prima di ricalcolare
+const OFF_ROUTE_MS = 6000;
+
+// distanza in metri fra due punti [lat, lon]
+function distM(a, b) {
+  const kx = 111320 * Math.cos((a[0] * Math.PI) / 180);
+  const dx = (b[1] - a[1]) * kx;
+  const dy = (b[0] - a[0]) * 110540;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+// distanza (m) del punto pos {lat, lon} dal segmento a-b e posizione t (0..1) del punto più vicino
+function segDist(pos, a, b) {
+  const kx = 111320 * Math.cos((pos.lat * Math.PI) / 180);
+  const ax = (a[1] - pos.lon) * kx, ay = (a[0] - pos.lat) * 110540;
+  const bx = (b[1] - pos.lon) * kx, by = (b[0] - pos.lat) * 110540;
+  const vx = bx - ax, vy = by - ay;
+  const l2 = vx * vx + vy * vy;
+  const t = l2 > 0 ? Math.max(0, Math.min(1, -(ax * vx + ay * vy) / l2)) : 0;
+  const x = ax + t * vx, y = ay + t * vy;
+  return { dist: Math.sqrt(x * x + y * y), t };
+}
+
+// direzione di marcia in gradi (0 = nord)
+function bearing(a, b) {
+  const kx = Math.cos((a[0] * Math.PI) / 180);
+  return ((Math.atan2((b[1] - a[1]) * kx, b[0] - a[0]) * 180) / Math.PI + 360) % 360;
+}
+
+function fmtDist(m) {
+  if (m < 1000) return `${m < 100 ? Math.round(m / 10) * 10 : Math.round(m / 50) * 50} m`;
+  return `${(m / 1000).toLocaleString("it-IT", { maximumFractionDigits: m < 10000 ? 1 : 0 })} km`;
 }
 
 const STYLE = `
@@ -194,6 +228,30 @@ const STYLE = `
   .popup .n { font-weight: 600; font-size: 14px; } .popup .a { font-size: 12px; color: #666; margin: 2px 0 8px; }
   .popup .row button { font-size: 12px; padding: 5px 7px; background: #fff; color: #222; border: 1px solid #ccc; }
   .verwarn { background: var(--error-color, #db4437); color: #fff; padding: 8px 14px; font-size: 14px; }
+  /* navigazione */
+  select.inp { width: 100%; font: inherit; font-size: 14px; padding: 8px; border-radius: 8px; border: 1px solid var(--divider-color);
+    background: var(--secondary-background-color, #f5f5f5); color: var(--primary-text-color); }
+  .navtop { position: absolute; z-index: 1001; top: 10px; left: 54px; right: 10px; display: flex; align-items: center; gap: 12px;
+    background: #0b6e3a; color: #fff; border-radius: 12px; padding: 10px 14px; box-shadow: 0 2px 10px rgba(0,0,0,.35); }
+  .navtop .ic { font-size: 34px; width: 40px; text-align: center; flex: none; }
+  .navtop .d { font-size: 24px; font-weight: 700; white-space: nowrap; }
+  .navtop .t { font-size: 15px; line-height: 1.25; }
+  .navtop.wait { background: #37474f; }
+  .navbot { position: absolute; z-index: 1001; bottom: 22px; left: 10px; right: 60px; display: flex; align-items: center; gap: 10px;
+    flex-wrap: wrap; background: var(--card-background-color, #fff); color: var(--primary-text-color); border-radius: 12px;
+    padding: 8px 12px; box-shadow: 0 2px 10px rgba(0,0,0,.3); font-size: 14px; }
+  .navbot .rem { font-size: 18px; font-weight: 600; } .navbot .sp { flex: 1; }
+  .navbot button { padding: 6px 10px; font-size: 13px; }
+  .navbot button.stop { background: #c62828; color: #fff; border-color: #c62828; }
+  .navpop { position: absolute; z-index: 1002; left: 50%; top: 38%; transform: translate(-50%, -50%); min-width: 230px; max-width: 85%;
+    background: rgba(33,33,33,.94); color: #fff; padding: 16px 20px; border-radius: 14px; text-align: center; font-size: 16px;
+    box-shadow: 0 4px 18px rgba(0,0,0,.4); }
+  .navpop.warn { background: rgba(230,81,0,.95); } .navpop.ok { background: rgba(11,110,58,.95); }
+  .navpop .big { font-size: 30px; margin-bottom: 4px; }
+  .nav-me { width: 22px; height: 22px; border-radius: 50%; background: #1a73e8; border: 3px solid #fff;
+    box-shadow: 0 0 0 7px rgba(26,115,232,.25), 0 1px 4px rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center; }
+  .nav-me span { color: #fff; font: 700 11px sans-serif; display: block; }
+  [hidden] { display: none !important; }
 `;
 
 class NavigatorPanel extends HTMLElement {
@@ -216,6 +274,7 @@ class NavigatorPanel extends HTMLElement {
     const first = !this._hass;
     this._hass = hass;
     if (this._menuBtn) this._menuBtn.hass = hass;
+    if (this._nav && this._nav.source !== "gps") this._entityFix();
     // Home Assistant passa hass prima di inserire il pannello nella pagina: la mappa va creata solo quando è visibile
     if (first && this.isConnected) this._init();
   }
@@ -301,7 +360,10 @@ class NavigatorPanel extends HTMLElement {
         </div>
         <div class="mapwrap">
           <div id="map"></div>
-          <div class="ctl tr"><select id="layer"></select></div>
+          <div class="ctl tr" id="ctltr"><select id="layer"></select></div>
+          <div class="navtop" id="navtop" hidden></div>
+          <div class="navbot" id="navbot" hidden></div>
+          <div class="navpop" id="navpop" hidden></div>
           <div class="ctl br">
             <button id="locate" title="La mia posizione">◎</button>
             <button id="fit" title="Mostra tutto il percorso">⤢</button>
@@ -326,6 +388,7 @@ class NavigatorPanel extends HTMLElement {
     this._routeLayer = L.layerGroup().addTo(this._map);
     this._markerLayer = L.layerGroup().addTo(this._map);
     this._map.on("click", (e) => this._mapClick(e.latlng));
+    this._map.on("dragstart", () => { if (this._nav && this._nav.follow) { this._nav.follow = false; this._renderNav(); } });
     this._ro = new ResizeObserver(() => this._map.invalidateSize());
     this._ro.observe($("map"));
     setTimeout(() => this._map.invalidateSize(), 300);
@@ -609,7 +672,7 @@ class NavigatorPanel extends HTMLElement {
     this._markerLayer.clearLayers();
     const n = this._points.length;
     this._points.forEach((p, i) => {
-      if (!p) return;
+      if (!p || (this._nav && i === 0)) return; // in navigazione la partenza è il pallino della posizione
       const label = i === 0 ? "A" : i === n - 1 ? "B" : String(i);
       const color = i === 0 ? "#2e7d32" : i === n - 1 ? "#c62828" : "#607d8b";
       const m = L.marker([p.lat, p.lon], { icon: this._pinIcon(label, color), draggable: true, title: p.name }).addTo(this._markerLayer);
@@ -663,9 +726,293 @@ class NavigatorPanel extends HTMLElement {
     });
   }
 
+  // ----------------------------------------------------------------- navigazione con ricalcolo automatico
+
+  // fonti della posizione: GPS del browser (solo in HTTPS) o entità di Home Assistant aggiornate dall'app Companion
+  _navSources() {
+    const secure = window.isSecureContext && !!window.navigator.geolocation;
+    const out = [{ id: "gps", name: secure ? "📱 GPS di questo dispositivo" : "📱 GPS di questo dispositivo (serve HTTPS)", ok: secure }];
+    for (const [id, st] of Object.entries(this._hass?.states || {})) {
+      if (!id.startsWith("person.") && !id.startsWith("device_tracker.")) continue;
+      if (st.attributes.latitude == null || st.attributes.longitude == null) continue;
+      out.push({ id, name: `${id.startsWith("person.") ? "👤" : "📡"} ${st.attributes.friendly_name || id}`, ok: true });
+    }
+    return out;
+  }
+
+  _defaultNavSource(list) {
+    let saved = null;
+    try { saved = localStorage.getItem(`${STORE_KEY}-navsrc`); } catch (e) { /* storage non disponibile */ }
+    if (saved && list.some((s) => s.id === saved && s.ok)) return saved;
+    if (list[0]?.ok) return "gps";
+    const uid = this._hass?.user?.id;
+    const mine = list.find((s) => s.id.startsWith("person.") && this._hass.states[s.id].attributes.user_id === uid);
+    return (mine || list.find((s) => s.ok) || list[0])?.id;
+  }
+
+  _navSectionHtml() {
+    if (this._nav) {
+      const src = this._navSources().find((s) => s.id === this._nav.source);
+      return `<div class="sec"><h3>Navigazione attiva</h3>
+        <div class="row"><button class="primary" data-a="navstop" style="flex:1;background:#c62828;border-color:#c62828">■ Ferma navigazione</button></div>
+        <div class="muted" style="margin-top:6px">Posizione da: ${esc(src?.name || this._nav.source)}. Se esci dal percorso per qualche secondo,
+          Navigator ricalcola la strada da dove sei.</div></div>`;
+    }
+    const list = this._navSources();
+    const def = this._defaultNavSource(list);
+    const opts = list.map((s) => `<option value="${esc(s.id)}" ${s.id === def ? "selected" : ""} ${s.ok ? "" : "disabled"}>${esc(s.name)}</option>`).join("");
+    const hint = window.isSecureContext ? ""
+      : `<div class="muted" style="margin-top:6px">Home Assistant è aperto in http: il browser non concede il GPS. Usa la posizione che l'app
+         Companion invia a Home Assistant; per aggiornamenti ogni pochi secondi attiva nell'app la posizione ad alta precisione
+         (Impostazioni → App Companion → Gestisci sensori → Posizione in background → Modalità alta precisione).</div>`;
+    return `<div class="sec"><h3>Navigazione</h3>
+      <label class="muted" style="display:block;margin-bottom:4px">Segui la posizione di</label>
+      <select class="inp" id="navsrc">${opts}</select>
+      <div class="row" style="margin-top:8px"><button class="primary" data-a="navstart" style="flex:1">▶ Avvia navigazione</button></div>${hint}</div>`;
+  }
+
+  async _startNav(source) {
+    if (!this._result) return;
+    if (source === "gps" && !(window.isSecureContext && window.navigator.geolocation)) {
+      this._msg("Il GPS del browser richiede Home Assistant in HTTPS: scegli la posizione dell'app Companion");
+      return;
+    }
+    try { localStorage.setItem(`${STORE_KEY}-navsrc`, source); } catch (e) { /* storage non disponibile */ }
+    this._sel = 0;
+    this._nav = { source, follow: true, idx: 0, passed: 0, offSince: null, offCount: 0, rerouting: false, lastReroute: 0,
+      lastKey: null, fix: null, arrived: false };
+    this.$("ctltr").hidden = true;
+    this._drawRoute();
+    this._drawMarkers();
+    this._renderResults();
+    this._renderNav();
+    if (source === "gps") {
+      this._nav.watch = window.navigator.geolocation.watchPosition(
+        (pos) => this._onFix({ lat: pos.coords.latitude, lon: pos.coords.longitude, acc: pos.coords.accuracy || 0 }),
+        (err) => this._navPopup("warn", "📡", `GPS non disponibile: ${esc(err.message)}`, 4000),
+        { enableHighAccuracy: true, maximumAge: 2000, timeout: 30000 });
+      // schermo acceso durante la guida, dove il browser lo permette
+      try { this._nav.wake = await window.navigator.wakeLock?.request("screen"); } catch (e) { /* lo schermo può spegnersi */ }
+    } else {
+      this._entityFix();
+    }
+  }
+
+  _stopNav() {
+    const nav = this._nav;
+    if (!nav) return;
+    if (nav.watch != null) window.navigator.geolocation.clearWatch(nav.watch);
+    try { nav.wake?.release(); } catch (e) { /* già rilasciato */ }
+    clearTimeout(nav.popTimer);
+    this._nav = null;
+    this._meMarker?.remove();
+    this._accCircle?.remove();
+    this._meMarker = this._accCircle = null;
+    for (const id of ["navtop", "navbot", "navpop"]) this.$(id).hidden = true;
+    this.$("ctltr").hidden = false;
+    this._drawRoute();
+    this._drawMarkers();
+    this._renderResults();
+  }
+
+  // nuova posizione dell'entità seguita (arriva con ogni aggiornamento di hass)
+  _entityFix() {
+    const st = this._hass?.states?.[this._nav.source];
+    if (!st) return;
+    const { latitude: lat, longitude: lon, gps_accuracy: acc } = st.attributes;
+    if (lat == null || lon == null) return;
+    const key = `${lat},${lon},${st.last_updated}`;
+    if (key === this._nav.lastKey) return;
+    this._nav.lastKey = key;
+    this._onFix({ lat, lon, acc: acc || 0 });
+  }
+
+  // geometria del percorso: distanze progressive (m) e inizio di ogni tappa
+  _geom(rt) {
+    if (rt._cum) return rt;
+    const cum = [0];
+    for (let i = 1; i < rt.shape.length; i++) cum.push(cum[i - 1] + distM(rt.shape[i - 1], rt.shape[i]));
+    rt._cum = cum;
+    rt._legStart = [];
+    for (const m of rt.maneuvers) if (rt._legStart[m.leg] == null) rt._legStart[m.leg] = m.begin;
+    return rt;
+  }
+
+  // punto del percorso più vicino alla posizione: prima vicino all'ultimo, poi su tutto il percorso
+  _snap(rt, pos, from) {
+    const sh = rt.shape;
+    const best = { dist: Infinity, idx: 0, t: 0 };
+    const scan = (a, b) => {
+      for (let i = Math.max(0, a); i < Math.min(sh.length - 1, b); i++) {
+        const r = segDist(pos, sh[i], sh[i + 1]);
+        if (r.dist < best.dist) Object.assign(best, r, { idx: i });
+      }
+    };
+    scan(from - 30, from + 1500);
+    if (best.dist > 60) scan(0, sh.length);
+    if (sh.length === 1) best.dist = distM([pos.lat, pos.lon], sh[0]);
+    const c = rt._cum;
+    best.along = c[best.idx] + best.t * ((c[best.idx + 1] ?? c[best.idx]) - c[best.idx]);
+    return best;
+  }
+
+  _onFix(fix) {
+    const nav = this._nav;
+    if (!nav || !this._result) return;
+    const now = Date.now();
+    if (nav.fix && distM([nav.fix.lat, nav.fix.lon], [fix.lat, fix.lon]) > 3) {
+      nav.heading = bearing([nav.fix.lat, nav.fix.lon], [fix.lat, fix.lon]);
+    }
+    nav.fix = { ...fix, time: now };
+    this._drawMe();
+    if (nav.follow) this._map.setView([fix.lat, fix.lon], Math.max(this._map.getZoom(), 16), { animate: true });
+
+    const rt = this._geom(this._result.routes[this._sel]);
+    const snap = this._snap(rt, fix, nav.idx);
+    const slow = this._mode === "piedi" || this._mode === "bici";
+    // tolleranza: strada + imprecisione del GPS
+    const limit = (slow ? 30 : 45) + Math.min(fix.acc || 0, 80);
+    nav.snap = snap;
+
+    const total = rt._cum[rt._cum.length - 1];
+    const dest = this._points[this._points.length - 1];
+    const toDest = distM([fix.lat, fix.lon], [dest.lat, dest.lon]);
+    if (nav.arrived && toDest > 150) nav.arrived = false; // ripartito: si continua a guidare
+    if (!nav.arrived && (toDest < 35 || (snap.dist < limit && total - snap.along < 25))) {
+      nav.arrived = true;
+      this._renderNav();
+      this._navPopup("ok", "🏁", `Sei arrivato a ${esc(dest.name)}`, 8000);
+      return;
+    }
+    if (nav.arrived) { this._renderNav(); return; }
+
+    if (snap.dist > limit) {
+      // fuori percorso: si aspetta qualche secondo (e almeno due posizioni) prima di ricalcolare
+      if (nav.offSince == null) nav.offSince = now;
+      nav.offCount += 1;
+      if (!nav.rerouting && now - nav.offSince >= OFF_ROUTE_MS && nav.offCount >= 2 && now - nav.lastReroute > 12000) {
+        this._reroute(fix);
+      }
+    } else {
+      nav.offSince = null;
+      nav.offCount = 0;
+      nav.idx = snap.idx;
+      for (let leg = 1; leg < rt._legStart.length; leg++) if (snap.idx >= rt._legStart[leg]) nav.passed = Math.max(nav.passed, leg);
+    }
+    this._renderNav();
+  }
+
+  // nuovo percorso dalla posizione attuale verso le tappe non ancora raggiunte
+  async _reroute(fix) {
+    const nav = this._nav;
+    nav.rerouting = true;
+    nav.lastReroute = Date.now();
+    this._navPopup("warn", "↻", "Fuori percorso<br><b>Ricalcolo del percorso…</b>", 0);
+    this._renderNav();
+    const before = this._points;
+    this._points = [{ name: "📍 Posizione attuale", address: "", lat: fix.lat, lon: fix.lon }, ...this._points.slice(1 + nav.passed)];
+    try {
+      await this._compute(false, true);
+      if (!this._nav) return;
+      Object.assign(nav, { passed: 0, idx: 0, offSince: null, offCount: 0 });
+      // aggancia subito la posizione al nuovo percorso
+      const fresh = this._geom(this._result.routes[0]);
+      nav.snap = this._snap(fresh, nav.fix || fix, 0);
+      nav.idx = nav.snap.idx;
+      this._saveState();
+      this._renderPoints();
+      this._drawMarkers();
+      const s = this._result.routes[0].summary;
+      this._navPopup("ok", "✓", `Nuovo percorso<br><b>${fmtTime(s.time)} · ${fmtKm(s.length_km)}</b>`, 3500);
+    } catch (err) {
+      this._points = before;
+      if (this._nav) this._navPopup("warn", "⚠", `Ricalcolo non riuscito: ${esc(err.message || err)}<br>Riprovo tra poco.`, 4000);
+    } finally {
+      nav.rerouting = false;
+      if (this._nav) this._renderNav();
+    }
+  }
+
+  _drawMe() {
+    const f = this._nav.fix;
+    const ll = [f.lat, f.lon];
+    const h = this._nav.heading;
+    const icon = L.divIcon({ className: "", iconSize: [22, 22], iconAnchor: [11, 11],
+      html: `<div class="nav-me"><span style="${h != null ? `transform:rotate(${Math.round(h)}deg)` : ""}">${h != null ? "▲" : ""}</span></div>` });
+    if (!this._meMarker) {
+      this._accCircle = L.circle(ll, { radius: f.acc || 0, color: "#1a73e8", weight: 1, fillOpacity: 0.1, interactive: false }).addTo(this._map);
+      this._meMarker = L.marker(ll, { icon, interactive: false, zIndexOffset: 1000 }).addTo(this._map);
+    } else {
+      this._meMarker.setLatLng(ll).setIcon(icon);
+      this._accCircle.setLatLng(ll).setRadius(f.acc || 0);
+    }
+  }
+
+  _navPopup(kind, big, html, ms) {
+    const el = this.$("navpop");
+    clearTimeout(this._nav?.popTimer);
+    el.className = `navpop ${kind}`;
+    el.innerHTML = `<div class="big">${big}</div><div>${html}</div>`;
+    el.hidden = false;
+    if (ms && this._nav) this._nav.popTimer = setTimeout(() => { el.hidden = true; }, ms);
+  }
+
+  // manovra in corso: l'ultima iniziata prima del punto raggiunto
+  _curManeuver(rt) {
+    const ms = rt.maneuvers;
+    let k = 0;
+    while (k + 1 < ms.length && ms[k + 1].begin <= this._nav.idx) k++;
+    return k;
+  }
+
+  _renderNav() {
+    const nav = this._nav;
+    if (!nav) return;
+    const top = this.$("navtop");
+    const bot = this.$("navbot");
+    top.hidden = bot.hidden = false;
+    const rt = this._geom(this._result.routes[this._sel]);
+    const total = rt._cum[rt._cum.length - 1];
+    const ms = rt.maneuvers;
+    const k = this._curManeuver(rt);
+    const along = nav.snap?.along ?? 0;
+    if (!nav.fix) {
+      top.className = "navtop wait";
+      top.innerHTML = `<span class="ic"><span class="loading"></span></span><div class="t">In attesa della posizione…</div>`;
+    } else if (nav.arrived) {
+      top.className = "navtop";
+      top.innerHTML = `<span class="ic">🏁</span><div class="t">Sei arrivato a destinazione</div>`;
+    } else if (nav.offSince != null) {
+      top.className = "navtop wait";
+      top.innerHTML = `<span class="ic">↻</span><div class="t">${nav.rerouting ? "Ricalcolo del percorso…" : "Fuori dal percorso: se non torni sulla strada evidenziata ricalcolo tra pochi secondi"}</div>`;
+    } else {
+      const next = ms[k + 1] || ms[k];
+      const toNext = Math.max(0, rt._cum[next.begin] - along);
+      top.className = "navtop";
+      top.innerHTML = `<span class="ic">${maneuverIcon(next)}</span><div><div class="d">${fmtDist(toNext)}</div><div class="t">${esc(next.text)}</div></div>`;
+    }
+    // tempo e distanza rimanenti
+    let remTime = rt.summary.time;
+    let remM = total;
+    if (nav.fix && nav.snap && nav.offSince == null) {
+      remM = Math.max(0, total - along);
+      const cur = ms[k];
+      const len = rt._cum[cur.end] - rt._cum[cur.begin];
+      remTime = (len > 0 ? cur.time * Math.max(0, rt._cum[cur.end] - along) / len : 0) + ms.slice(k + 1).reduce((a, m) => a + m.time, 0);
+    }
+    bot.innerHTML = `<span class="rem">${fmtTime(remTime)}</span><span>${fmtKm(remM / 1000)} · arrivo ${arrival(remTime)}</span><span class="sp"></span>
+      ${nav.follow ? "" : '<button data-n="center">◎ Ricentra</button>'}<button class="stop" data-n="stop">■ Esci</button>`;
+    bot.querySelector('[data-n="center"]')?.addEventListener("click", () => {
+      nav.follow = true;
+      if (nav.fix) this._map.setView([nav.fix.lat, nav.fix.lon], Math.max(this._map.getZoom(), 16));
+      this._renderNav();
+    });
+    bot.querySelector('[data-n="stop"]').addEventListener("click", () => this._stopNav());
+  }
+
   // ----------------------------------------------------------------- calcolo del percorso
 
-  async _compute(fit = true) {
+  async _compute(fit = true, reroute = false) {
     if (!this._points.every((p) => p)) { this._msg("Inserisci partenza e destinazione"); return; }
     const my = ++this._reqId;
     const btn = this.$("go");
@@ -681,7 +1028,7 @@ class NavigatorPanel extends HTMLElement {
         avoid_highways: this._avoid.highways,
         avoid_ferries: this._avoid.ferries,
         exclude: this._excluded.flatMap((e) => e.points).slice(0, 40),
-        alternatives: true,
+        alternatives: !reroute && !this._nav,
       });
       if (my !== this._reqId) return;
       this._result = r;
@@ -691,6 +1038,7 @@ class NavigatorPanel extends HTMLElement {
       if (fit) this._fit();
     } catch (err) {
       if (my !== this._reqId) return;
+      if (reroute) throw err;
       this._result = null;
       this._error = err.message || String(err);
       this._drawRoute();
@@ -706,7 +1054,7 @@ class NavigatorPanel extends HTMLElement {
     if (!r) return;
     // alternative (sotto, grigie e cliccabili), poi il percorso scelto
     r.routes.forEach((rt, i) => {
-      if (i === this._sel) return;
+      if (i === this._sel || this._nav) return;
       const line = L.polyline(rt.shape, { color: "#78909c", weight: 6, opacity: 0.7 }).addTo(this._routeLayer);
       line.bindTooltip(`${fmtTime(rt.summary.time)} · ${fmtKm(rt.summary.length_km)}`, { sticky: true });
       line.on("click", (ev) => { L.DomEvent.stopPropagation(ev); this._select(i); });
@@ -797,6 +1145,7 @@ class NavigatorPanel extends HTMLElement {
       }
       html += `</div>`;
     }
+    if (r) html += this._navSectionHtml();
     // tratte escluse
     if (this._excluded.length) {
       html += `<div class="sec"><h3>Tratte tolte <button class="link" data-a="unexall">Ripristina tutte</button></h3><div class="box ex" style="margin-top:0">`;
@@ -871,6 +1220,10 @@ class NavigatorPanel extends HTMLElement {
         this._saveState();
         this._drawMarkers();
         this._autoCompute(false);
+      } else if (a === "navstart") {
+        this._startNav(box.querySelector("#navsrc")?.value || "gps");
+      } else if (a === "navstop") {
+        this._stopNav();
       } else if (a === "copy") {
         this._copySummary();
       }
