@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.0.8";
+const PANEL_VERSION = "1.0.9";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 const ICON = new URL("./icon.png", import.meta.url).href;
@@ -103,6 +103,50 @@ const CAR_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 80" wid
   <path d="M15 51 L15 68 M19.7 51 L19.7 68 M24.3 51 L24.3 68 M29 51 L29 68" stroke="#6c757e" stroke-width="1" stroke-linecap="round"/>
   <rect x="11" y="70.8" width="22" height="2.6" rx="1" fill="#1c355f"/>
 </svg>`;
+
+// moto vista dall'alto: ruote, manubrio con specchietti, serbatoio blu, sella grigia e motociclista col casco
+const MOTO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 80" width="18" height="47">
+  <rect x="12" y="1.5" width="6" height="17" rx="3" fill="#151515"/>
+  <rect x="11.5" y="60" width="7" height="18.5" rx="3.5" fill="#151515"/>
+  <path d="M9 14 Q15 8 21 14 L20 24 L10 24 Z" fill="#173a7a" stroke="#fff" stroke-width="1.2"/>
+  <rect x="12.5" y="9.5" width="5" height="2.4" rx="1.2" fill="#ffe28a"/>
+  <rect x="2" y="21" width="26" height="2.6" rx="1.3" fill="#222" stroke="#fff" stroke-width=".7"/>
+  <ellipse cx="3.5" cy="18.5" rx="2.6" ry="1.6" fill="#0a2150" stroke="#fff" stroke-width=".7"/>
+  <ellipse cx="26.5" cy="18.5" rx="2.6" ry="1.6" fill="#0a2150" stroke="#fff" stroke-width=".7"/>
+  <ellipse cx="15" cy="31" rx="7" ry="8" fill="#173a7a" stroke="#fff" stroke-width="1.2"/>
+  <rect x="10.5" y="45" width="9" height="14" rx="3.5" fill="#9aa3ad" stroke="#5a636c" stroke-width=".8"/>
+  <rect x="12" y="58.6" width="6" height="2" rx="1" fill="#e53935"/>
+  <path d="M7 41 L4.5 23.5 M23 41 L25.5 23.5" stroke="#0e2a5c" stroke-width="3.2" stroke-linecap="round"/>
+  <ellipse cx="15" cy="42" rx="10.5" ry="6" fill="#0e2a5c" stroke="#fff" stroke-width="1.2"/>
+  <circle cx="15" cy="38" r="6.2" fill="#0a2150" stroke="#fff" stroke-width="1.2"/>
+  <path d="M10.3 35.5 Q15 30.6 19.7 35.5 Q15 33.4 10.3 35.5 Z" fill="#5c7fb8"/>
+</svg>`;
+
+// bicicletta vista dall'alto: ruote sottili, telaio, manubrio e ciclista col caschetto
+const BICI_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 80" width="18" height="47">
+  <rect x="13.4" y="1" width="3.2" height="22" rx="1.6" fill="#151515"/>
+  <rect x="13.4" y="57" width="3.2" height="22" rx="1.6" fill="#151515"/>
+  <path d="M15 21 L15 60" stroke="#8a939c" stroke-width="2.2" stroke-linecap="round"/>
+  <rect x="4" y="18.5" width="22" height="2.2" rx="1.1" fill="#333" stroke="#fff" stroke-width=".6"/>
+  <ellipse cx="15" cy="52" rx="2.8" ry="4.2" fill="#222"/>
+  <path d="M7.5 40 L5.5 20.5 M22.5 40 L24.5 20.5" stroke="#173a7a" stroke-width="3" stroke-linecap="round"/>
+  <ellipse cx="15" cy="41" rx="10" ry="5.6" fill="#173a7a" stroke="#fff" stroke-width="1.2"/>
+  <ellipse cx="15" cy="37" rx="5" ry="6.6" fill="#0a2150" stroke="#fff" stroke-width="1.2"/>
+  <path d="M13 32.5 L13 41.5 M17 32.5 L17 41.5" stroke="#9aa3ad" stroke-width="1" stroke-linecap="round"/>
+</svg>`;
+
+// persona a piedi vista dall'alto: piedi nel passo, braccia, spalle, testa col cappellino rivolto in avanti
+const PIEDI_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="30" height="30">
+  <ellipse cx="14.5" cy="8.5" rx="2.6" ry="4.2" fill="#2a2a2a" stroke="#fff" stroke-width=".7"/>
+  <ellipse cx="25.5" cy="31.5" rx="2.6" ry="4.2" fill="#2a2a2a" stroke="#fff" stroke-width=".7"/>
+  <ellipse cx="5.5" cy="23" rx="2.8" ry="6" fill="#173a7a" stroke="#fff" stroke-width=".8" transform="rotate(12 5.5 23)"/>
+  <ellipse cx="34.5" cy="18" rx="2.8" ry="6" fill="#173a7a" stroke="#fff" stroke-width=".8" transform="rotate(12 34.5 18)"/>
+  <ellipse cx="20" cy="21" rx="13.5" ry="7" fill="#173a7a" stroke="#fff" stroke-width="1.3"/>
+  <circle cx="20" cy="20.5" r="6" fill="#4e342e" stroke="#fff" stroke-width="1.1"/>
+  <path d="M15.6 16.8 Q20 11 24.4 16.8 Q20 15.2 15.6 16.8 Z" fill="#0a2150" stroke="#fff" stroke-width=".6"/>
+</svg>`;
+
+const VEHICLE_SVG = { auto: CAR_SVG, moto: MOTO_SVG, bici: BICI_SVG, piedi: PIEDI_SVG };
 
 // fuori percorso per almeno questo tempo (e due posizioni) prima di ricalcolare
 const OFF_ROUTE_MS = 6000;
@@ -875,6 +919,7 @@ class NavigatorPanel extends HTMLElement {
     this._meMarker?.remove();
     this._accCircle?.remove();
     this._meMarker = this._accCircle = null;
+    this._carRot = null;
     for (const id of ["navtop", "navbot", "navpop"]) this.$(id).hidden = true;
     this.$("ctltr").hidden = false;
     this._applyView();
@@ -1006,10 +1051,11 @@ class NavigatorPanel extends HTMLElement {
   _drawMe() {
     const f = this._nav.fix;
     const ll = [f.lat, f.lon];
-    // l'auto ruota con la direzione di marcia; in guida la mappa ruota al contrario, così resta col muso in alto
+    // il veicolo (auto, moto, bici o persona, secondo il mezzo scelto) ruota con la direzione di marcia;
+    // in guida la mappa ruota al contrario, così resta col muso in alto
     const h = this._nav.dir ?? 0;
     if (!this._meMarker) {
-      const icon = L.divIcon({ className: "", iconSize: [47, 47], iconAnchor: [23.5, 23.5], html: `<div class="nav-car">${CAR_SVG}</div>` });
+      const icon = L.divIcon({ className: "", iconSize: [47, 47], iconAnchor: [23.5, 23.5], html: `<div class="nav-car">${VEHICLE_SVG[this._mode] || CAR_SVG}</div>` });
       this._accCircle = L.circle(ll, { radius: f.acc || 0, color: "#1a73e8", weight: 1, fillOpacity: 0.1, interactive: false }).addTo(this._map);
       this._meMarker = L.marker(ll, { icon, interactive: false, zIndexOffset: 1000 }).addTo(this._map);
       this._carRot = h;

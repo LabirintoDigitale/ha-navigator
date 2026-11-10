@@ -88,8 +88,8 @@ Dopo aver calcolato un percorso, nella sezione **Navigazione** scegli da dove pr
   Per aggiornamenti ogni pochi secondi attiva nell'app *Impostazioni → App Companion → Gestisci sensori → Posizione in background → Modalità alta precisione*.
 
 Con un percorso calcolato premi **▶ Parti** (sulla mappa o nella sezione *Navigazione*): la mappa passa a tutto schermo e
-**ruota con la direzione di marcia** (avanti è sempre in alto, la destra è la destra del veicolo). Il veicolo è un fuoristrada
-blu visto dall'alto, nel terzo basso dello schermo per vedere la strada davanti.
+**ruota con la direzione di marcia** (avanti è sempre in alto, la destra è la destra del veicolo). Il veicolo, visto dall'alto,
+cambia col mezzo scelto (fuoristrada, moto, bicicletta o persona a piedi) e sta nel terzo basso dello schermo per vedere la strada davanti.
 
 La **barra in basso** contiene tutto: tempo, km e orario di arrivo e, sotto, **−** e **+** (zoom), **◎** (centra sulla tua
 posizione), il **tipo di mappa** (stradale, topografica, scura, satellite, escursionistica) e **■ Esci**, che chiude la
