@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/images/logo.png" alt="Navigator" width="140"></p>
+<p align="center"><img src="docs/images/logo.png" alt="Navigator: rosa dei venti con il quadrante di 0 e 1" width="220"></p>
 
 # Navigator per Home Assistant
 
@@ -40,7 +40,7 @@ Cerca un indirizzo o un'attività, imposta partenza, tappe e destinazione e calc
 2. Installa **Navigator** e **riavvia Home Assistant**
 3. Impostazioni → Dispositivi e servizi → **Aggiungi integrazione** → **Navigator**
 
-Nella barra laterale compare **Navigator** 🧭.
+Nella barra laterale compare **Navigator** con l'icona della rosa dei venti.
 
 ### Manuale
 

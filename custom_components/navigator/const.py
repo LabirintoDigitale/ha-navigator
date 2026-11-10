@@ -5,7 +5,7 @@ VERSION = "1.0.0"
 
 PANEL_URL = "navigator"
 PANEL_TITLE = "Navigator"
-PANEL_ICON = "mdi:navigation-variant"
+PANEL_ICON = "mdi:compass-rose"
 PANEL_ELEMENT = "navigator-panel"
 STATIC_URL = "/navigator_static"
 

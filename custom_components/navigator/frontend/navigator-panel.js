@@ -7,6 +7,7 @@ import * as L from "./leaflet/leaflet-src.esm.js";
 const PANEL_VERSION = "1.0.0";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
+const ICON = new URL("./icon.png", import.meta.url).href;
 const STORE_KEY = "navigator-panel-state";
 
 const LAYERS = {
@@ -83,6 +84,8 @@ const STYLE = `
     border-bottom: var(--app-header-border-bottom, none); }
   .toolbar .title { font-size: 20px; margin-left: 8px; display: flex; align-items: baseline; gap: 10px; flex: 1; min-width: 0; }
   .toolbar .ver { font-size: 12px; opacity: .7; }
+  .toolbar .brand { display: inline-flex; align-items: center; gap: 8px; }
+  .toolbar .brand img { width: 30px; height: 30px; align-self: center; background: #fff; border-radius: 50%; padding: 1px; }
   .main { display: flex; height: calc(100% - var(--header-height, 56px)); }
   .side { width: 390px; flex: none; overflow-y: auto; border-right: 1px solid var(--divider-color);
     background: var(--card-background-color, #fff); }
@@ -245,7 +248,7 @@ class NavigatorPanel extends HTMLElement {
       <link rel="stylesheet" href="${LEAFLET_CSS}">
       <style>${STYLE}</style>
       <div class="toolbar"><ha-menu-button></ha-menu-button>
-        <div class="title"><span>🧭 Navigator</span><span class="ver">versione ${PANEL_VERSION}</span></div></div>
+        <div class="title"><span class="brand"><img src="${ICON}" alt=""> Navigator</span><span class="ver">versione ${PANEL_VERSION}</span></div></div>
       <div id="verwarn"></div>
       <div class="main">
         <div class="side">
