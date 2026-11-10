@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.0.9";
+const PANEL_VERSION = "1.0.10";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 const ICON = new URL("./icon.png", import.meta.url).href;
@@ -326,6 +326,19 @@ const STYLE = `
     box-shadow: 0 4px 18px rgba(0,0,0,.4); }
   .navpop.warn { background: rgba(230,81,0,.95); } .navpop.ok { background: rgba(11,110,58,.95); }
   .navpop .big { font-size: 30px; margin-bottom: 4px; }
+  /* l'aiuto sta al centro dello schermo intero (su telefono la mappa è solo metà pagina) */
+  .navpop.help { position: fixed; z-index: 2000; top: 50%; width: min(440px, 92vw); max-width: 92vw; text-align: left; font-size: 14px;
+    line-height: 1.4; max-height: 86vh; max-height: 86dvh; overflow-y: auto; background: rgba(33,33,33,.97); }
+  .navpop.help .big { text-align: center; }
+  .navpop.help h4 { margin: 0 0 6px; font-size: 17px; text-align: center; }
+  .navpop.help ol { margin: 8px 0; padding-left: 20px; } .navpop.help li { margin: 3px 0; }
+  .navpop.help .acts { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+  .navpop.help .acts a, .navpop.help .acts button { display: block; text-align: center; padding: 9px 10px; border-radius: 8px;
+    font: inherit; font-size: 14px; font-weight: 600; text-decoration: none; border: none; cursor: pointer;
+    background: #fff; color: #222; }
+  .navpop.help .acts .pri { background: var(--primary-color, #03a9f4); color: #fff; }
+  .navpop.help .acts .close { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,.5); }
+  .navpop.help .note { font-size: 12px; opacity: .8; margin-top: 6px; }
   /* modalità guida: mappa a tutto schermo che ruota con la direzione di marcia */
   .mapwrap { overflow: hidden; }
   .main.guida .side { display: none; }
@@ -828,7 +841,8 @@ class NavigatorPanel extends HTMLElement {
         if (fly) this._map.flyTo([this._me.lat, this._me.lon], 15, { duration: 0.8 });
         resolve(this._me);
       }, (err) => {
-        this._msg(`Posizione non disponibile: ${err.message}`);
+        if (err.code === 1) this._gpsHelp();
+        else this._msg(`Posizione non disponibile: ${err.message}`);
         resolve(null);
       }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });
     });
@@ -876,7 +890,8 @@ class NavigatorPanel extends HTMLElement {
     return `<div class="sec"><h3>Navigazione</h3>
       <label class="muted" style="display:block;margin-bottom:4px">Segui la posizione di</label>
       <select class="inp" id="navsrc">${opts}</select>
-      <div class="row" style="margin-top:8px"><button class="primary" data-a="navstart" style="flex:1">▶ Parti</button></div>${hint}</div>`;
+      <div class="row" style="margin-top:8px"><button class="primary" data-a="navstart" style="flex:1">▶ Parti</button></div>${hint}
+      <button class="link" data-a="gpshelp" style="margin-top:6px;padding-left:0">📡 Problemi con il GPS? Posizione negata?</button></div>`;
   }
 
   async _startNav(source) {
@@ -900,7 +915,10 @@ class NavigatorPanel extends HTMLElement {
       this._nav.watch = window.navigator.geolocation.watchPosition(
         (pos) => this._onFix({ lat: pos.coords.latitude, lon: pos.coords.longitude, acc: pos.coords.accuracy || 0,
           heading: pos.coords.heading, speed: pos.coords.speed }),
-        (err) => this._navPopup("warn", "📡", `GPS non disponibile: ${esc(err.message)}`, 4000),
+        (err) => {
+          if (err.code === 1) { this._stopNav(); this._gpsHelp(); return; } // permesso negato
+          this._navPopup("warn", "📡", `GPS non disponibile: ${esc(err.message)}`, 4000);
+        },
         { enableHighAccuracy: true, maximumAge: 2000, timeout: 30000 });
       // schermo acceso durante la guida, dove il browser lo permette
       try { this._nav.wake = await window.navigator.wakeLock?.request("screen"); } catch (e) { /* lo schermo può spegnersi */ }
@@ -1259,6 +1277,75 @@ class NavigatorPanel extends HTMLElement {
     if (this._nav?.fix && this._nav.follow) setTimeout(() => this._followView(), 300);
   }
 
+  // app Companion: Android espone window.externalApp, iPhone window.webkit.messageHandlers.externalBus
+  _companion() {
+    if (window.externalApp?.externalBus) return "android";
+    if (window.webkit?.messageHandlers?.externalBus) return "ios";
+    const ua = window.navigator.userAgent || "";
+    if (/Home ?Assistant/i.test(ua)) return /android/i.test(ua) ? "android" : "ios";
+    return null;
+  }
+
+  // apre le impostazioni dell'app Companion, con lo stesso messaggio che usa Home Assistant
+  _openCompanionSettings() {
+    const msg = { id: 90000 + Math.floor(Math.random() * 9999), type: "config_screen/show" };
+    try {
+      if (window.externalApp?.externalBus) { window.externalApp.externalBus(JSON.stringify(msg)); return true; }
+      if (window.webkit?.messageHandlers?.externalBus) { window.webkit.messageHandlers.externalBus.postMessage(msg); return true; }
+    } catch (e) { /* app senza questo comando */ }
+    return false;
+  }
+
+  // permesso della posizione negato: come riattivarlo, con scorciatoie dove possibile
+  async _gpsHelp(asked = false) {
+    const app = this._companion();
+    let state = "";
+    try { state = (await window.navigator.permissions?.query({ name: "geolocation" }))?.state || ""; } catch (e) { /* non supportato */ }
+    const secure = window.isSecureContext;
+    let steps;
+    let links = "";
+    if (app === "android") {
+      steps = `<li>Apri le <b>Impostazioni di Android</b> → <b>App</b> → <b>Home Assistant</b> → <b>Autorizzazioni</b> → <b>Posizione</b>.</li>
+        <li>Scegli <b>Consenti solo mentre l'app è in uso</b> (o <b>Consenti sempre</b>) e attiva <b>Usa posizione precisa</b>.</li>
+        <li>Chiudi del tutto l'app Home Assistant e riaprila.</li>`;
+      links = `<a class="pri" href="intent:package:io.homeassistant.companion.android#Intent;action=android.settings.APPLICATION_DETAILS_SETTINGS;end">⚙ Apri le impostazioni di Android per Home Assistant</a>`;
+    } else if (app === "ios") {
+      steps = `<li>Apri <b>Impostazioni</b> dell'iPhone → <b>Home Assistant</b> → <b>Posizione</b>.</li>
+        <li>Scegli <b>Mentre usi l'app</b> (o <b>Sempre</b>) e attiva <b>Posizione esatta</b>.</li>
+        <li>Chiudi del tutto l'app Home Assistant e riaprila.</li>`;
+      links = `<a class="pri" href="app-settings:">⚙ Apri le Impostazioni dell'iPhone</a>`;
+    } else {
+      steps = `<li>Clicca il <b>lucchetto</b> (o l'icona delle impostazioni del sito) a sinistra dell'indirizzo, in alto.</li>
+        <li>Alla voce <b>Posizione</b> scegli <b>Consenti</b>.</li>
+        <li>Ricarica la pagina.</li>`;
+    }
+    if (app) links += `<button data-h="app">📱 Impostazioni dell'app Companion</button>`;
+    const person = this._navSources().find((x) => x.id !== "gps" && x.ok);
+    if (person && this._result) links += `<button data-h="person">👤 Usa invece la posizione di ${esc(person.name.replace(/^\S+\s/, ""))}</button>`;
+    links += `<button class="close" data-h="close">Chiudi</button>`;
+    const title = state === "denied" || !asked ? "Posizione negata" : "Posizione del dispositivo";
+    const intro = !secure
+      ? "Home Assistant è aperto in <b>http</b>: in questo caso il browser non concede mai il GPS. Aprilo in HTTPS oppure usa la posizione di una persona di Home Assistant (aggiornata dall'app Companion)."
+      : state === "denied" || !asked
+        ? "Il permesso della posizione è stato rifiutato per Home Assistant, e finché non lo riattivi non viene più chiesto. Per riattivarlo:"
+        : `Stato attuale del permesso: <b>${{ granted: "consentito", prompt: "da chiedere", denied: "negato" }[state] || "sconosciuto"}</b>. Se è negato, per riattivarlo:`;
+    const el = this.$("navpop");
+    clearTimeout(this._nav?.popTimer);
+    el.className = "navpop help";
+    el.innerHTML = `<div class="big">📡</div><h4>${title}</h4><div>${intro}</div>${secure ? `<ol>${steps}</ol>` : ""}
+      <div class="acts">${links}</div>
+      ${app ? `<div class="note">Se un tasto non apre nulla, segui i passi a mano: alcune versioni dell'app non permettono di aprire le impostazioni da qui.</div>` : ""}`;
+    el.hidden = false;
+    el.querySelector('[data-h="close"]').addEventListener("click", () => { el.hidden = true; });
+    el.querySelector('[data-h="app"]')?.addEventListener("click", () => {
+      if (!this._openCompanionSettings()) this._msg("Questa versione dell'app non permette di aprire le impostazioni da qui");
+    });
+    el.querySelector('[data-h="person"]')?.addEventListener("click", () => {
+      el.hidden = true;
+      this._startNav(person.id);
+    });
+  }
+
   _navPopup(kind, big, html, ms) {
     const el = this.$("navpop");
     clearTimeout(this._nav?.popTimer);
@@ -1560,6 +1647,8 @@ class NavigatorPanel extends HTMLElement {
         this._autoCompute(false);
       } else if (a === "navstart") {
         this._startNav(box.querySelector("#navsrc")?.value || "gps");
+      } else if (a === "gpshelp") {
+        this._gpsHelp(true);
       } else if (a === "navstop") {
         this._stopNav();
       } else if (a === "copy") {

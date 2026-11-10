@@ -96,6 +96,11 @@ posizione), il **tipo di mappa** (stradale, topografica, scura, satellite, escur
 navigazione e torna alla vista normale. La mappa si può anche trascinare col mouse o con un dito e ingrandire con due dita:
 in quel caso smette di seguirti finché non premi **◎**.
 
+Se il GPS risponde **"posizione negata"** (per esempio nell'app Companion), Navigator apre una finestra con i passi per
+riattivare il permesso su Android, iPhone o nel browser, un tasto per aprire le impostazioni dell'app Companion (e, dove
+l'app lo permette, quelle di sistema) e un tasto per usare invece la posizione della tua persona di Home Assistant.
+La stessa finestra si apre dal link *Problemi con il GPS?* nella sezione *Navigazione*.
+
 Navigator considera "fuori percorso" una posizione a più di 45 m dalla strada (30 m a piedi o in bici, più l'imprecisione del GPS).
 Se resti fuori per almeno 6 secondi (e almeno due posizioni) ricalcola il percorso dalla posizione attuale; trascinando la mappa smette di seguirti finché non premi **Ricentra**.
 
