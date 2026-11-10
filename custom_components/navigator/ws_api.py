@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant, callback
 import homeassistant.helpers.config_validation as cv
 
 from .api import NavigatorError
+from .pois import PoiError
 from .const import DATA_WS_REGISTERED, DOMAIN, LANGUAGES, MAX_EXCLUDE, MAX_POINTS, MODES, VERSION
 
 POINT = vol.Schema(
@@ -28,7 +29,7 @@ POINT = vol.Schema(
 def async_setup(hass: HomeAssistant) -> None:
     if hass.data.get(DATA_WS_REGISTERED):
         return
-    for handler in (ws_info, ws_search, ws_reverse, ws_route, ws_place_save, ws_place_delete, ws_recent_clear):
+    for handler in (ws_info, ws_search, ws_reverse, ws_route, ws_place_save, ws_place_delete, ws_recent_clear, ws_nearby):
         websocket_api.async_register_command(hass, handler)
     hass.data[DATA_WS_REGISTERED] = True
 
@@ -43,7 +44,7 @@ def _data(hass: HomeAssistant):
 async def _run(connection, msg_id: int, coro) -> None:
     try:
         connection.send_result(msg_id, await coro)
-    except NavigatorError as err:
+    except (NavigatorError, PoiError) as err:
         connection.send_error(msg_id, "navigator_error", str(err))
 
 
@@ -172,5 +173,32 @@ async def ws_recent_clear(hass: HomeAssistant, connection: websocket_api.ActiveC
         data = _data(hass)
         data.places.clear_recent()
         return data.places.as_dict()
+
+    await _run(connection, msg["id"], go())
+
+
+LATLON = vol.All(vol.Length(min=2, max=2), [vol.Coerce(float)])
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "navigator/nearby",
+    vol.Required("category"): vol.In(["fuel", "cameras", "parking"]),
+    vol.Optional("line"): vol.All([LATLON], vol.Length(min=1, max=8000)),
+    vol.Optional("center"): POINT,
+    vol.Optional("radius", default=500): vol.All(vol.Coerce(float), vol.Range(min=10, max=5000)),
+})
+@websocket_api.async_response
+async def ws_nearby(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Distributori e autovelox lungo una linea (il percorso), parcheggi intorno a un punto."""
+    async def go():
+        pois = _data(hass).pois
+        cat = msg["category"]
+        if cat == "parking":
+            c = msg.get("center") or {"lat": msg["line"][-1][0], "lon": msg["line"][-1][1]}
+            return await pois.parking(c["lat"], c["lon"], msg["radius"])
+        line = msg.get("line") or [[msg["center"]["lat"], msg["center"]["lon"]]]
+        if cat == "fuel":
+            return await pois.fuel(line, msg["radius"])
+        return await pois.cameras(line, msg["radius"])
 
     await _run(connection, msg["id"], go())

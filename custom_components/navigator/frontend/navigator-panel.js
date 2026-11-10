@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.1.0";
+const PANEL_VERSION = "1.2.0";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 const ICON = new URL("./icon.png", import.meta.url).href;
@@ -150,20 +150,32 @@ const VEHICLE_SVG = { auto: CAR_SVG, moto: MOTO_SVG, bici: BICI_SVG, piedi: PIED
 
 // impostazioni salvate su questo dispositivo
 const SETTINGS_KEY = "navigator-panel-settings";
-const DEFAULT_SETTINGS = { voice: false, lang: "it", voiceSel: "f", out: "auto", autoZoom: true, beep: false };
+const DEFAULT_SETTINGS = { voice: false, lang: "it", voiceSel: "f", out: "auto", autoZoom: true, beep: false,
+  fuelBrands: [], camAlert: true };
+// marche dei distributori (come nell'anagrafica del MIMIT)
+const FUEL_BRANDS = ["Agip Eni", "Api-Ip", "Q8", "Esso", "Tamoil", "Shell", "Retitalia", "Beyfin", "Costantin", "Europam", "Pompe bianche"];
+const BRAND_COLORS = { "agip eni": "#f7c600", "eni": "#f7c600", "api-ip": "#0057a8", "ip": "#0057a8", "q8": "#0a3a7a", "esso": "#d71920",
+  "tamoil": "#f28c00", "shell": "#fbce07", "retitalia": "#00843d", "beyfin": "#1d71b8", "pompe bianche": "#9e9e9e" };
+const brandColor = (b) => BRAND_COLORS[(b || "").toLowerCase()] || "#607d8b";
+const NEAR_CATS = { fuel: ["⛽", "Distributori"], parking: ["🅿️", "Parcheggi"], cameras: ["📷", "Autovelox"] };
 const LANG_NAMES = { it: "Italiano", en: "English", de: "Deutsch", fr: "Français", es: "Español" };
 const LANG_BCP = { it: "it-IT", en: "en-US", de: "de-DE", fr: "fr-FR", es: "es-ES" };
 // frasi della voce nelle lingue delle indicazioni
 const PHRASES = {
   it: { in: (d) => `Tra ${d}`, m: "metri", km: "chilometri", reroute: "Ricalcolo del percorso", newroute: "Nuovo percorso calcolato",
+    camera: (d) => `Autovelox tra ${d}`, limit: (n) => `limite ${n}`,
     arrived: "Sei arrivato a destinazione", test: "Questa è la voce di Navigator. Tra 200 metri, svolta a destra." },
   en: { in: (d) => `In ${d}`, m: "meters", km: "kilometers", reroute: "Recalculating route", newroute: "New route calculated",
+    camera: (d) => `Speed camera in ${d}`, limit: (n) => `limit ${n}`,
     arrived: "You have arrived at your destination", test: "This is the Navigator voice. In 200 meters, turn right." },
   de: { in: (d) => `In ${d}`, m: "Metern", km: "Kilometern", reroute: "Route wird neu berechnet", newroute: "Neue Route berechnet",
+    camera: (d) => `Blitzer in ${d}`, limit: (n) => `Tempolimit ${n}`,
     arrived: "Sie haben Ihr Ziel erreicht", test: "Das ist die Stimme von Navigator. In 200 Metern rechts abbiegen." },
   fr: { in: (d) => `Dans ${d}`, m: "mètres", km: "kilomètres", reroute: "Recalcul de l'itinéraire", newroute: "Nouvel itinéraire calculé",
+    camera: (d) => `Radar dans ${d}`, limit: (n) => `limite ${n}`,
     arrived: "Vous êtes arrivé à destination", test: "Voici la voix de Navigator. Dans 200 mètres, tournez à droite." },
   es: { in: (d) => `En ${d}`, m: "metros", km: "kilómetros", reroute: "Recalculando la ruta", newroute: "Nueva ruta calculada",
+    camera: (d) => `Radar en ${d}`, limit: (n) => `límite ${n}`,
     arrived: "Has llegado a tu destino", test: "Esta es la voz de Navigator. En 200 metros, gira a la derecha." },
 };
 
@@ -434,6 +446,24 @@ const STYLE = `
   /* velocità e limite nella barra della guida */
   .navbot .spd { font-weight: 600; padding: 2px 8px; border-radius: 10px; background: var(--secondary-background-color, #eee); white-space: nowrap; }
   .navbot .spd.over { background: #c62828; color: #fff; }
+  .navbot .cam { font-weight: 600; padding: 2px 8px; border-radius: 10px; background: #263238; color: #fff; white-space: nowrap; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+  .chip { font-size: 13px; padding: 5px 10px; border-radius: 16px; border: 1px solid var(--divider-color); cursor: pointer;
+    background: var(--card-background-color, #fff); color: var(--primary-text-color); }
+  .chip.on { background: var(--primary-color); color: var(--text-primary-color, #fff); border-color: var(--primary-color); }
+  .tabs { display: flex; gap: 4px; padding: 8px 16px 0; }
+  .tabs button { flex: 1; border-radius: 8px 8px 0 0; border-bottom: none; font-size: 14px; }
+  .tabs button.on { background: var(--primary-color); color: var(--text-primary-color, #fff); border-color: var(--primary-color); }
+  .plist { list-style: none; margin: 0; padding: 0; }
+  .plist li { display: flex; gap: 10px; align-items: center; padding: 9px 16px; border-bottom: 1px solid var(--divider-color); }
+  .plist .bd { min-width: 44px; max-width: 70px; text-align: center; font: 700 11px sans-serif; color: #fff; padding: 4px 5px; border-radius: 6px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: none; }
+  .plist .tx { flex: 1; min-width: 0; font-size: 14px; } .plist .tx small { display: block; color: var(--secondary-text-color); font-size: 12px; }
+  .plist .dd { font-size: 13px; font-weight: 600; white-space: nowrap; text-align: right; }
+  .plist .dd small { display: block; font-weight: 400; color: var(--secondary-text-color); font-size: 11px; }
+  .plist button { font-size: 12px; padding: 6px 8px; white-space: nowrap; }
+  .pmark { width: 26px; height: 26px; border-radius: 50%; border: 2px solid #fff; display: flex; align-items: center; justify-content: center;
+    font-size: 14px; box-shadow: 0 1px 4px rgba(0,0,0,.45); }
   .navbot .lim { width: 30px; height: 30px; border-radius: 50%; border: 4px solid #d32f2f; background: #fff; color: #111;
     display: inline-flex; align-items: center; justify-content: center; font: 700 13px sans-serif; flex: none; box-sizing: border-box; }
 `;
@@ -518,6 +548,7 @@ class NavigatorPanel extends HTMLElement {
         <div class="title"><span class="brand"><img src="${ICON}" alt=""> Navigator</span><span class="ver">versione ${PANEL_VERSION}</span></div>
         <button class="tbtn" id="settingsbtn" title="Impostazioni">⚙</button></div>
       <div class="setwrap" id="setwrap" hidden></div>
+      <div class="setwrap" id="nearwrap" hidden></div>
       <div id="verwarn"></div>
       <div class="main" id="mainbox">
         <div class="side">
@@ -577,6 +608,7 @@ class NavigatorPanel extends HTMLElement {
     this._setLayer(this._layer);
     this._routeLayer = L.layerGroup().addTo(this._map);
     this._markerLayer = L.layerGroup().addTo(this._map);
+    this._poiLayer = L.layerGroup().addTo(this._map);
     this._map.on("click", (e) => this._mapClick(e.latlng));
     this._map.on("dragstart", () => this._userMoved());
     this._bindGuidaGestures();
@@ -1042,6 +1074,7 @@ class NavigatorPanel extends HTMLElement {
     this._accCircle?.remove();
     this._meMarker = this._accCircle = null;
     this._carRot = null;
+    this._closeNearby();
     for (const id of ["navtop", "navbot", "navpop"]) this.$(id).hidden = true;
     this.$("ctltr").hidden = false;
     this._applyView();
@@ -1147,6 +1180,7 @@ class NavigatorPanel extends HTMLElement {
       if (!nav.rerouting) this._voiceGuide(rt, snap.along);
     }
     this._speedCheck(rt, snap.dist <= limit ? snap.idx : null);
+    if (snap.dist <= limit) this._cameraCheck(rt, snap.along);
     this._renderNav();
   }
 
@@ -1552,6 +1586,243 @@ class NavigatorPanel extends HTMLElement {
     });
   }
 
+  // ----------------------------------------------------------------- luoghi nelle vicinanze
+
+  // linea del percorso da cercare: in navigazione il tratto davanti (max km), altrimenti tutto il percorso
+  _routeLine(maxKm) {
+    const rt = this._geom(this._result.routes[this._sel]);
+    const from = this._nav ? Math.max(0, this._nav.idx) : 0;
+    const start = this._nav?.snap?.along ?? 0;
+    const out = [];
+    for (let i = from; i < rt.shape.length; i++) {
+      if (maxKm && rt._cum[i] - start > maxKm * 1000) break;
+      out.push([Math.round(rt.shape[i][0] * 1e5) / 1e5, Math.round(rt.shape[i][1] * 1e5) / 1e5]);
+    }
+    const step = Math.ceil(out.length / 7500);
+    return step > 1 ? out.filter((_, k) => k % step === 0 || k === out.length - 1) : out;
+  }
+
+  // posizione di un luogo lungo il percorso (m dall'inizio) e distanza dalla strada
+  _alongRoute(rt, it) {
+    const sn = this._snap(rt, { lat: it.lat, lon: it.lon }, this._nav?.idx || 0);
+    return { along: sn.along, idx: sn.idx };
+  }
+
+  async _fetchNearby(cat) {
+    const rt = this._geom(this._result.routes[this._sel]);
+    const msg = { type: "navigator/nearby", category: cat };
+    if (cat === "parking") {
+      const near = this._nearWhere === "me" && this._nav?.fix ? this._nav.fix : this._points[this._points.length - 1];
+      Object.assign(msg, { center: { lat: near.lat, lon: near.lon }, radius: 700 });
+    } else {
+      Object.assign(msg, { line: this._routeLine(this._nav ? (cat === "fuel" ? 40 : 0) : 0), radius: cat === "fuel" ? 500 : 35 });
+    }
+    const r = await this._hass.callWS(msg);
+    if (cat !== "parking") {
+      const here = this._nav?.snap?.along ?? 0;
+      r.items = r.items.map((it) => ({ ...it, ...this._alongRoute(rt, it) }))
+        .filter((it) => !this._nav || it.along >= here - 30)
+        .map((it) => ({ ...it, to: it.along - here }))
+        .sort((a, b) => a.along - b.along);
+    }
+    return r;
+  }
+
+  _closeNearby() {
+    const w = this.$("nearwrap");
+    if (w) w.hidden = true;
+    this._poiLayer?.clearLayers();
+  }
+
+  async _openNearby(cat) {
+    if (!this._result) return;
+    this._nearCat = cat;
+    const wrap = this.$("nearwrap");
+    const tabs = Object.entries(NEAR_CATS).map(([k, [ic, n]]) => `<button data-c="${k}" class="${k === cat ? "on" : ""}">${ic} ${n}</button>`).join("");
+    wrap.innerHTML = `<div class="setdlg" role="dialog" aria-label="Nelle vicinanze">
+      <div class="hd"><h2>🔎 Nelle vicinanze</h2><button class="icon" data-x="close" title="Chiudi">✕</button></div>
+      <div class="tabs">${tabs}</div><div id="nearbody"><div class="grp"><span class="loading"></span> Cerco…</div></div></div>`;
+    wrap.hidden = false;
+    wrap.onclick = (e) => { if (e.target === wrap) this._closeNearby(); };
+    wrap.querySelector('[data-x="close"]').addEventListener("click", () => this._closeNearby());
+    wrap.querySelectorAll("[data-c]").forEach((b) => b.addEventListener("click", () => this._openNearby(b.dataset.c)));
+    let res;
+    const slow = setTimeout(() => {
+      const b = wrap.querySelector("#nearbody .grp");
+      if (b && this._nearCat === cat && b.querySelector(".loading")) {
+        b.innerHTML = `<span class="loading"></span> Cerco… ${cat === "fuel" ? "la prima volta scarico l'elenco dei distributori"
+          : "i server di OpenStreetMap a volte sono lenti, attendi qualche secondo"}`;
+      }
+    }, 4000);
+    try {
+      res = await this._fetchNearby(cat);
+    } catch (err) {
+      clearTimeout(slow);
+      if (this._nearCat !== cat) return;
+      wrap.querySelector("#nearbody").innerHTML = `<div class="grp"><div class="box err" style="margin:0">${esc(err.message || err)}</div></div>`;
+      return;
+    }
+    clearTimeout(slow);
+    if (this._nearCat !== cat || wrap.hidden) return;
+    this._nearRes = res;
+    this._renderNearby();
+  }
+
+  _renderNearby() {
+    const cat = this._nearCat;
+    const res = this._nearRes;
+    const body = this.$("nearbody");
+    const s = this._settings;
+    let items = res.items;
+    let filt = "";
+    if (cat === "fuel") {
+      const present = [...new Set(items.map((i) => i.brand).filter(Boolean))].sort();
+      const mode = this._fuelFilter || (s.fuelBrands.length ? "pref" : "all");
+      if (mode === "pref") items = items.filter((i) => s.fuelBrands.includes(i.brand));
+      else if (mode !== "all") items = items.filter((i) => i.brand === mode);
+      filt = `<div class="chips" style="padding:8px 16px 0">
+        <span class="chip ${mode === "all" ? "on" : ""}" data-f="all">Tutte</span>
+        ${s.fuelBrands.length ? `<span class="chip ${mode === "pref" ? "on" : ""}" data-f="pref">★ Preferite</span>` : ""}
+        ${present.map((b) => `<span class="chip ${mode === b ? "on" : ""}" data-f="${esc(b)}">${esc(b)}</span>`).join("")}</div>`;
+    } else if (cat === "parking") {
+      const where = this._nearWhere || "dest";
+      filt = `<div class="chips" style="padding:8px 16px 0">
+        <span class="chip ${where === "dest" ? "on" : ""}" data-w="dest">All'arrivo</span>
+        ${this._nav?.fix ? `<span class="chip ${where === "me" ? "on" : ""}" data-w="me">Vicino a me</span>` : ""}</div>`;
+    }
+    const nav = !!this._nav;
+    const rows = items.slice(0, 60).map((it, k) => {
+      let bd;
+      let tx;
+      let dd;
+      let act;
+      if (cat === "fuel") {
+        bd = `<span class="bd" style="background:${brandColor(it.brand)}">${esc(it.brand || "?")}</span>`;
+        tx = `${esc(it.name || it.brand)}<small>${esc([it.addr, it.town].filter(Boolean).join(", "))}${it.motorway ? " · autostrada" : ""}</small>`;
+        dd = `${nav ? `tra ${fmtDist(it.to)}` : fmtDist(it.along)}<small>${it.off} m dalla strada</small>`;
+        act = `<button data-go="${k}">➕ Tappa</button>`;
+      } else if (cat === "parking") {
+        bd = `<span class="bd" style="background:#1565c0">P</span>`;
+        const info = [it.covered ? "coperto" : "", it.fee === "yes" ? "a pagamento" : it.fee === "no" ? "gratuito" : "",
+          it.capacity ? `${it.capacity} posti` : "", it.hours].filter(Boolean).join(" · ");
+        tx = `${esc(it.name || ({ underground: "Parcheggio sotterraneo", "multi-storey": "Parcheggio multipiano", street_side: "Parcheggio lungo strada", lane: "Parcheggio lungo strada" }[it.kind] || "Parcheggio"))}<small>${esc(info)}</small>`;
+        dd = `${fmtDist(it.off)}<small>${this._nearWhere === "me" ? "da te" : "dall'arrivo"}</small>`;
+        act = `<button data-go="${k}">🅿️ Vai qui</button>`;
+      } else {
+        bd = `<span class="bd" style="background:#263238">${it.maxspeed ? it.maxspeed : "📷"}</span>`;
+        tx = `Autovelox fisso${it.maxspeed ? ` · limite ${it.maxspeed} km/h` : ""}<small>${esc(it.name || "")}</small>`;
+        dd = nav ? `tra ${fmtDist(it.to)}` : fmtDist(it.along);
+        act = "";
+      }
+      return `<li data-k="${k}">${bd}<div class="tx">${tx}</div><div class="dd">${dd}</div>${act}</li>`;
+    }).join("");
+    const empty = { fuel: "Nessun distributore entro 500 m dal percorso", parking: "Nessun parcheggio pubblico trovato entro 700 m",
+      cameras: "Nessun autovelox fisso sul percorso" }[cat];
+    body.innerHTML = `${filt}<ul class="plist">${rows || `<li><div class="tx muted">${empty}${cat === "fuel" && items.length !== res.items.length ? " con questo filtro" : ""}</div></li>`}</ul>
+      <div class="grp note">Fonte: ${esc(res.source)}${res.updated ? ` · aggiornato ${new Date(res.updated * 1000).toLocaleDateString("it-IT")}` : ""}${cat === "cameras" ? " · solo autovelox fissi mappati" : ""}</div>`;
+    body.querySelectorAll("[data-f]").forEach((c) => c.addEventListener("click", () => { this._fuelFilter = c.dataset.f; this._renderNearby(); }));
+    body.querySelectorAll("[data-w]").forEach((c) => c.addEventListener("click", () => { this._nearWhere = c.dataset.w; this._openNearby("parking"); }));
+    const shown = items.slice(0, 60);
+    body.querySelectorAll("li[data-k]").forEach((li) => li.addEventListener("click", (e) => {
+      if (e.target.closest("button")) return;
+      const it = shown[+li.dataset.k];
+      if (this._nav) this._userMoved();
+      this._map.setView([it.lat, it.lon], Math.max(this._map.getZoom(), 16));
+      this.$("nearwrap").hidden = true; // i segnaposto restano sulla mappa
+    }));
+    body.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => this._nearGo(cat, shown[+b.dataset.go])));
+    // segnaposto sulla mappa
+    this._poiLayer.clearLayers();
+    for (const it of shown) {
+      const ic = cat === "fuel" ? "⛽" : cat === "parking" ? "🅿️" : "📷";
+      const col = cat === "fuel" ? brandColor(it.brand) : cat === "parking" ? "#1565c0" : "#263238";
+      L.marker([it.lat, it.lon], { icon: L.divIcon({ className: "", html: `<div class="pmark" style="background:${col}">${ic}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] }),
+        title: it.name || it.brand || "" }).addTo(this._poiLayer);
+    }
+  }
+
+  // ⛽ diventa una tappa prima dell'arrivo, 🅿️ diventa l'arrivo
+  _nearGo(cat, it) {
+    const pt = cat === "fuel"
+      ? { name: `⛽ ${it.brand ? `${it.brand} ` : ""}${it.town || it.name || ""}`.trim(), address: [it.addr, it.town].filter(Boolean).join(", "), lat: it.lat, lon: it.lon }
+      : { name: `🅿️ ${it.name || "Parcheggio"}`, address: "", lat: it.lat, lon: it.lon };
+    this._closeNearby();
+    if (this._nav) {
+      const nav = this._nav;
+      const here = nav.fix ? { name: "📍 Posizione attuale", address: "", lat: nav.fix.lat, lon: nav.fix.lon } : this._points[0];
+      const rest = this._points.slice(1 + nav.passed);
+      this._points = cat === "fuel" ? [here, pt, ...rest] : [here, ...rest.slice(0, -1), pt];
+      nav.passed = 0;
+      this._afterNavPointsChange(cat === "fuel" ? "Tappa aggiunta" : "Nuovo arrivo");
+    } else {
+      if (cat === "fuel") this._points.splice(this._points.length - 1, 0, pt);
+      else this._points[this._points.length - 1] = pt;
+      this._afterPointsChange();
+    }
+  }
+
+  async _afterNavPointsChange(label) {
+    const nav = this._nav;
+    this._navPopup("ok", "↻", `${label}<br><b>Calcolo il percorso…</b>`, 0);
+    try {
+      await this._compute(false, true);
+      if (!this._nav) return;
+      Object.assign(nav, { idx: 0, offSince: null, offCount: 0 });
+      if (nav.fix) { nav.snap = this._snap(this._geom(this._result.routes[0]), nav.fix, 0); nav.idx = nav.snap.idx; }
+      this._saveState();
+      this._renderPoints();
+      this._drawMarkers();
+      const sm = this._result.routes[0].summary;
+      this._navPopup("ok", "✓", `${label}<br><b>${fmtTime(sm.time)} · ${fmtKm(sm.length_km)}</b>`, 3500);
+    } catch (err) {
+      this._navPopup("warn", "⚠", `Percorso non calcolato: ${esc(err.message || err)}`, 5000);
+    }
+    this._renderNav();
+  }
+
+  // autovelox fissi sul percorso: scaricati una volta per ogni percorso, poi avviso quando ti avvicini
+  _cameraCheck(rt, along) {
+    const nav = this._nav;
+    nav.cam = null;
+    if (!this._settings.camAlert || !(this._mode === "auto" || this._mode === "moto")) return;
+    if (rt._cams === undefined) {
+      rt._cams = null; // richiesta in corso
+      const line = rt.shape.map((p) => [Math.round(p[0] * 1e5) / 1e5, Math.round(p[1] * 1e5) / 1e5]);
+      const step = Math.ceil(line.length / 7500);
+      this._hass.callWS({ type: "navigator/nearby", category: "cameras", radius: 35,
+        line: step > 1 ? line.filter((_, k) => k % step === 0 || k === line.length - 1) : line })
+        .then((r) => {
+          rt._cams = r.items.map((it) => {
+            const a = this._alongRoute(rt, it);
+            const i = Math.min(a.idx, rt.shape.length - 2);
+            const dir = parseFloat(it.direction);
+            // autovelox orientato al contrario rispetto alla marcia: controlla l'altra carreggiata
+            if (!Number.isNaN(dir) && i >= 0) {
+              const diff = Math.abs(((bearing(rt.shape[i], rt.shape[i + 1]) - dir + 540) % 360) - 180);
+              if (diff > 100) return null;
+            }
+            return { ...it, along: a.along };
+          }).filter(Boolean).sort((x, y) => x.along - y.along);
+        })
+        .catch(() => { rt._cams = []; setTimeout(() => { if (rt._cams?.length === 0) rt._cams = undefined; }, 900000); });
+      return;
+    }
+    if (!rt._cams) return;
+    const next = rt._cams.find((c) => c.along > along - 10);
+    if (!next) return;
+    const to = next.along - along;
+    const warn = (nav.speed || 0) > 25 ? 1000 : 600;
+    if (to > warn) return;
+    nav.cam = { to, maxspeed: next.maxspeed };
+    nav.camsDone = nav.camsDone || new Set();
+    if (!nav.camsDone.has(next.id) && to > 40) {
+      nav.camsDone.add(next.id);
+      const P = PHRASES[this._settings.lang];
+      if (this._settings.voice) this._speak(`${P.camera(spokenDist(to, this._settings.lang))}${next.maxspeed ? `, ${P.limit(next.maxspeed)}` : ""}`, true);
+      if (this._settings.beep) { this._beep(); setTimeout(() => this._beep(), 600); }
+    }
+  }
+
   // ----------------------------------------------------------------- impostazioni, voce e beep
 
   _saveSettings() {
@@ -1675,8 +1946,13 @@ class NavigatorPanel extends HTMLElement {
         ${sw("autoZoom", "Zoom automatico in base alla velocità", "In guida: più vicino in città, più largo in autostrada. Dopo + o − resta il tuo zoom per 20 secondi")}
       </div>
       <div class="grp"><h3>Velocità</h3>
+        ${sw("camAlert", "Avviso autovelox fissi", "Cartello nella barra della guida e, con le indicazioni vocali o il beep attivi, avviso a 600 metri (da 1 km in autostrada)")}
         ${sw("beep", "Beep quando superi il limite", "Limiti da OpenStreetMap, per auto e moto; tolleranza di 3 km/h (5% sopra i 60)")}
         <div class="row" style="margin-top:6px"><button data-s="testbeep">▶ Prova il beep</button></div>
+      </div>
+      <div class="grp"><h3>Distributori: marche preferite</h3>
+        <div class="note">Nell'elenco dei distributori il filtro "Preferite" mostra solo queste. Nessuna scelta = tutte.</div>
+        <div class="chips">${FUEL_BRANDS.map((b) => `<span class="chip ${s.fuelBrands.includes(b) ? "on" : ""}" data-brand="${esc(b)}">${esc(b)}</span>`).join("")}</div>
       </div>
       <div class="grp note">Le impostazioni valgono per questo dispositivo.</div>
     </div>`;
@@ -1702,6 +1978,12 @@ class NavigatorPanel extends HTMLElement {
       this._speak(PHRASES[s.lang].test, true, true);
     });
     wrap.querySelector('[data-s="testbeep"]').addEventListener("click", () => this._beep());
+    wrap.querySelectorAll("[data-brand]").forEach((el) => el.addEventListener("click", () => {
+      const b = el.dataset.brand;
+      s.fuelBrands = s.fuelBrands.includes(b) ? s.fuelBrands.filter((x) => x !== b) : [...s.fuelBrands, b];
+      this._saveSettings();
+      el.classList.toggle("on");
+    }));
   }
 
   _navPopup(kind, big, html, ms) {
@@ -1760,7 +2042,8 @@ class NavigatorPanel extends HTMLElement {
     const kmh = nav.speed != null && nav.fix ? Math.round(nav.speed * 3.6) : null;
     bot.querySelector(".info").innerHTML = `<span class="rem">${fmtTime(remTime)}</span><span>${fmtKm(remM / 1000)} · arrivo ${arrival(remTime)}</span>
       ${kmh != null ? `<span class="spd ${nav.over ? "over" : ""}" title="Velocità">${kmh} km/h</span>` : ""}
-      ${nav.limit ? `<span class="lim" title="Limite di velocità">${nav.limit}</span>` : ""}`;
+      ${nav.limit ? `<span class="lim" title="Limite di velocità">${nav.limit}</span>` : ""}
+      ${nav.cam ? `<span class="cam" title="Autovelox fisso">📷 ${fmtDist(nav.cam.to)}${nav.cam.maxspeed ? ` · ${nav.cam.maxspeed}` : ""}</span>` : ""}`;
     const c = bot.querySelector('[data-n="center"]');
     c.classList.toggle("attn", !nav.follow);
     c.title = nav.follow ? "La mappa segue la tua posizione" : "Torna sulla tua posizione";
@@ -1775,6 +2058,7 @@ class NavigatorPanel extends HTMLElement {
         <button data-n="out" title="Riduci">−</button>
         <button data-n="in" title="Ingrandisci">+</button>
         <button data-n="center" title="Centra sulla tua posizione">◎</button>
+        <button data-n="near" title="Distributori, parcheggi e autovelox">🔎</button>
         <select data-n="layer" title="Tipo di mappa">${opts}</select>
         <button class="stop" data-n="stop" title="Esci dalla navigazione">■ Esci</button>
       </div>`;
@@ -1792,6 +2076,7 @@ class NavigatorPanel extends HTMLElement {
       this.$("gattr").innerHTML = LAYERS[this._layer][3];
       this._saveState();
     });
+    bot.querySelector('[data-n="near"]').addEventListener("click", () => this._openNearby(this._nearCat || "fuel"));
     bot.querySelector('[data-n="stop"]').addEventListener("click", () => this._stopNav());
   }
 
@@ -1932,7 +2217,13 @@ class NavigatorPanel extends HTMLElement {
       html += `</div>`;
     }
     this._updateModeBtn();
-    if (r) html += this._navSectionHtml();
+    if (r) {
+      html += this._navSectionHtml();
+      html += `<div class="sec"><h3>Nelle vicinanze</h3><div class="row">
+        <button data-a="near-fuel">⛽ Distributori sul percorso</button>
+        <button data-a="near-parking">🅿️ Parcheggi all'arrivo</button>
+        <button data-a="near-cameras">📷 Autovelox sul percorso</button></div></div>`;
+    }
     // tratte escluse
     if (this._excluded.length) {
       html += `<div class="sec"><h3>Tratte tolte <button class="link" data-a="unexall">Ripristina tutte</button></h3><div class="box ex" style="margin-top:0">`;
@@ -2009,6 +2300,8 @@ class NavigatorPanel extends HTMLElement {
         this._autoCompute(false);
       } else if (a === "navstart") {
         this._startNav(box.querySelector("#navsrc")?.value || "gps");
+      } else if (a.startsWith("near-")) {
+        this._openNearby(a.slice(5));
       } else if (a === "gpshelp") {
         this._gpsHelp(true);
       } else if (a === "navstop") {

@@ -57,6 +57,8 @@ Tutte le richieste partono da Home Assistant (nessuna chiave, nessun account):
 | Percorsi (riserva) | [OSRM](https://project-osrm.org/) su `routing.openstreetmap.de` (FOSSGIS) | usato solo se Valhalla non risponde; senza opzioni "evita" |
 | Ricerca | [Photon](https://photon.komoot.io) (komoot) | suggerimenti mentre scrivi |
 | Ricerca e indirizzi (riserva) | [Nominatim](https://nominatim.org) di OpenStreetMap | max 1 richiesta al secondo |
+| Distributori (Italia) | [Anagrafica impianti attivi del MIMIT](https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv) | una volta al giorno, con la marca |
+| Autovelox fissi, parcheggi | OpenStreetMap tramite [Overpass](https://overpass-api.de) | autovelox una volta alla settimana, parcheggi su richiesta |
 | Mappe | Esri (stradale, topografica, scura, satellite), OpenTopoMap | caricate dal browser; i server di OpenStreetMap bloccano le richieste da un Home Assistant in rete locale |
 
 Sono servizi gratuiti offerti dalla comunità con limiti d'uso "ragionevole": Navigator è pensato per l'uso personale.
@@ -97,6 +99,26 @@ La **barra in basso** contiene tutto: tempo, km e orario di arrivo e, sotto, **�
 posizione), il **tipo di mappa** (stradale, topografica, scura, satellite, escursionistica) e **■ Esci**, che chiude la
 navigazione e torna alla vista normale. La mappa si può anche trascinare col mouse o con un dito e ingrandire con due dita:
 in quel caso smette di seguirti finché non premi **◎**.
+
+### Nelle vicinanze: distributori, parcheggi, autovelox
+
+Con un percorso calcolato, la sezione **Nelle vicinanze** del pannello (e in guida il tasto **🔎** nella barra) apre l'elenco:
+
+- **⛽ Distributori** lungo il percorso (in guida: i prossimi 40 km), entro 500 m dalla strada, in ordine di distanza, con la
+  **marca** (Agip Eni, Api-Ip, Q8, Esso, Tamoil, Shell, pompe bianche…) e il filtro **★ Preferite** (marche scelte in ⚙).
+  **➕ Tappa** aggiunge il distributore al percorso e lo ricalcola. In Italia l'elenco viene dall'**anagrafica ufficiale degli
+  impianti attivi del MIMIT** (dati aperti Osservaprezzi), scaricata una volta al giorno; altrove da OpenStreetMap.
+- **🅿️ Parcheggi** pubblici entro 700 m dall'arrivo (o, in guida, vicino a te), con coperto / a pagamento / posti quando noti.
+  **🅿️ Vai qui** imposta il parcheggio come arrivo. Fonte: OpenStreetMap (Overpass); se i server non rispondono, i parcheggi con
+  un nome trovati con Photon.
+- **📷 Autovelox fissi** sul percorso, da OpenStreetMap (tutta Italia, aggiornati una volta alla settimana). In guida compare
+  il cartello "📷 distanza · limite" a 600 m (1 km sopra i 90 km/h) e, se attivi, l'avviso a voce e un doppio beep; quelli
+  orientati verso l'altra carreggiata vengono ignorati.
+
+> Gli autovelox **mobili** non ci sono: non esiste una banca dati libera e aggiornata (le app che li mostrano usano dati
+> propri o a pagamento).
+
+I dati scaricati restano in `config/navigator_cache/`.
 
 ### Impostazioni (⚙ in alto a destra)
 

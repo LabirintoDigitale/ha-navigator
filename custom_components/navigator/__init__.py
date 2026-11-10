@@ -30,12 +30,14 @@ from .const import (
     VERSION,
 )
 from .places import Places
+from .pois import Pois
 
 
 @dataclass
 class NavigatorData:
     maps: MapServices
     places: Places
+    pois: Pois
 
 
 type NavigatorConfigEntry = ConfigEntry[NavigatorData]
@@ -53,7 +55,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: NavigatorConfigEntry) ->
     )
     places = Places(hass)
     await places.async_load()
-    entry.runtime_data = NavigatorData(maps, places)
+    pois = Pois(async_get_clientsession(hass), Path(hass.config.path("navigator_cache")), hass.config.country,
+                hass.async_add_executor_job, opts[CONF_PHOTON_URL])
+    entry.runtime_data = NavigatorData(maps, places, pois)
     hass.data[DOMAIN] = entry
 
     # "servizio" nella scheda dell'integrazione: mostra la versione installata
