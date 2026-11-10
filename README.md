@@ -89,7 +89,7 @@ Dopo aver calcolato un percorso, nella sezione **Navigazione** scegli da dove pr
 
 Durante la navigazione l'icona sulla mappa passa fra due modalità (con un percorso calcolato, la stessa icona avvia la guida):
 
-- **🧭 Guida**: mappa a tutto schermo che **ruota con la direzione di marcia** (avanti è sempre in alto, la destra è la destra del veicolo), con la tua posizione nel terzo basso per vedere la strada davanti; zoom con **+** e **−**.
+- **🧭 Guida**: mappa a tutto schermo che **ruota con la direzione di marcia** (avanti è sempre in alto, la destra è la destra del veicolo), con la tua posizione nel terzo basso per vedere la strada davanti. Puoi trascinare la mappa col mouse o con un dito e ingrandire con due dita (o con **+**, **−** e la rotellina): la mappa smette di seguirti finché non premi **◎ Ricentra**.
 - **🗺 Mappa**: vista normale con il pannello, nord in alto e mappa libera da spostare; la navigazione e il ricalcolo continuano.
 
 Navigator considera "fuori percorso" una posizione a più di 45 m dalla strada (30 m a piedi o in bici, più l'imprecisione del GPS).

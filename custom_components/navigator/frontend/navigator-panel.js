@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.0.5";
+const PANEL_VERSION = "1.0.6";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 const ICON = new URL("./icon.png", import.meta.url).href;
@@ -254,6 +254,9 @@ const STYLE = `
   .main.guida .mapwrap { flex: 1; height: auto; }
   .main.guida .leaflet-control-container { display: none; }
   #map.rot { transition: transform .8s ease-out; }
+  #map.rot.moving { transition: none; }
+  .main.guida #map { touch-action: none; cursor: grab; }
+  .main.guida #map.moving { cursor: grabbing; }
   .ctl button.mode { width: auto; height: 42px; padding: 0 12px; font-size: 14px; font-weight: 600; white-space: nowrap; }
   .ctl button.mode.go { background: #0b6e3a; color: #fff; }
   .gattr { position: absolute; z-index: 1000; bottom: 2px; right: 6px; font-size: 10px; color: #333; padding: 0 4px;
@@ -406,7 +409,8 @@ class NavigatorPanel extends HTMLElement {
     this._routeLayer = L.layerGroup().addTo(this._map);
     this._markerLayer = L.layerGroup().addTo(this._map);
     this._map.on("click", (e) => this._mapClick(e.latlng));
-    this._map.on("dragstart", () => { if (this._nav && this._nav.follow) { this._nav.follow = false; this._renderNav(); } });
+    this._map.on("dragstart", () => this._userMoved());
+    this._bindGuidaGestures();
     this._ro = new ResizeObserver(() => this._relayout());
     this._ro.observe($("mapwrap"));
     setTimeout(() => this._map.invalidateSize(), 300);
@@ -1031,12 +1035,17 @@ class NavigatorPanel extends HTMLElement {
       m.dragging.disable();
       m.doubleClickZoom.disable();
       m.options.scrollWheelZoom = "center"; // lo zoom resta sul centro: con la mappa ruotata il punto del mouse non torna
-      m.options.touchZoom = "center";
+      m.touchZoom.disable();
+      m.options.zoomSnap = 0.25;
     } else {
       m.dragging.enable();
       m.doubleClickZoom.enable();
       m.options.scrollWheelZoom = true;
-      m.options.touchZoom = true;
+      m.touchZoom.enable();
+      if (m.options.zoomSnap !== 1) {
+        m.options.zoomSnap = 1;
+        m.setZoom(Math.round(m.getZoom()), { animate: false });
+      }
     }
     this.$("zin").hidden = this.$("zout").hidden = !g;
     this.$("fit").hidden = g;
@@ -1092,6 +1101,7 @@ class NavigatorPanel extends HTMLElement {
     const f = nav.fix;
     // al primo aggancio almeno zoom 16, poi resta quello scelto con + e −
     const z = nav.zoomed ? this._map.getZoom() : Math.max(this._map.getZoom(), 16);
+    if (!nav.zoomed) animate = false; // il primo aggancio è immediato: con l'animazione lo zoom letto dopo sarebbe quello vecchio
     nav.zoomed = true;
     let ll = L.latLng(f.lat, f.lon);
     if (this._isGuida() && nav.dir != null) {
@@ -1100,6 +1110,71 @@ class NavigatorPanel extends HTMLElement {
       ll = this._map.unproject(this._map.project(ll, z).add(L.point(Math.sin(rad) * d, -Math.cos(rad) * d)), z);
     }
     this._map.setView(ll, z, { animate });
+  }
+
+  // l'utente ha spostato la mappa: smette di seguire la posizione finché non preme Ricentra
+  _userMoved() {
+    if (this._nav && this._nav.follow) {
+      this._nav.follow = false;
+      this._renderNav();
+    }
+  }
+
+  // trascinamento (mouse o un dito) e zoom con due dita sulla mappa ruotata della guida
+  _bindGuidaGestures() {
+    const el = this.$("map");
+    const pts = new Map();
+    let prev = null;
+    let moved = false;
+    let pinch0 = null; // distanza e zoom all'inizio del pinch: lo zoom si calcola da lì, non a piccoli passi
+    const state = () => {
+      const a = [...pts.values()];
+      const c = a.length >= 2 ? { x: (a[0].x + a[1].x) / 2, y: (a[0].y + a[1].y) / 2 } : { x: a[0].x, y: a[0].y };
+      const d = a.length >= 2 ? Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) : 0;
+      return { c, d, n: a.length, zoom: this._map.getZoom() };
+    };
+    el.addEventListener("pointerdown", (e) => {
+      if (!this._isGuida() || e.button > 0) return;
+      try { el.setPointerCapture(e.pointerId); } catch (err) { /* puntatore simulato */ }
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      prev = state();
+      if (pts.size === 1) moved = false;
+      pinch0 = pts.size >= 2 ? { d: prev.d, zoom: prev.zoom } : null;
+    });
+    el.addEventListener("pointermove", (e) => {
+      if (!this._isGuida() || !pts.has(e.pointerId)) return;
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const now = state();
+      if (now.n !== prev.n) { prev = now; pinch0 = now.n >= 2 ? { d: now.d, zoom: now.zoom } : null; return; }
+      const dx = now.c.x - prev.c.x;
+      const dy = now.c.y - prev.c.y;
+      const pinch = now.n >= 2 && pinch0 && pinch0.d > 0;
+      if (!moved) {
+        if (Math.hypot(dx, dy) < 4 && !(pinch && Math.abs(now.d - pinch0.d) > 4)) return;
+        moved = true;
+        el.classList.add("moving");
+        this._userMoved();
+      }
+      if (pinch) {
+        const m = this._map;
+        const z = Math.max(m.getMinZoom(), Math.min(m.getMaxZoom(), pinch0.zoom + Math.log2(now.d / pinch0.d)));
+        m.setZoom(z, { animate: false });
+        now.zoom = m.getZoom();
+      }
+      // dallo schermo alla mappa: la mappa è ruotata di -rot, il movimento del dito va ruotato di +rot
+      const r = ((this._rot || 0) * Math.PI) / 180;
+      const mx = dx * Math.cos(r) - dy * Math.sin(r);
+      const my = dx * Math.sin(r) + dy * Math.cos(r);
+      if (mx || my) this._map.panBy([-mx, -my], { animate: false });
+      prev = now;
+    });
+    const end = (e) => {
+      if (!pts.delete(e.pointerId)) return;
+      if (pts.size) { prev = state(); pinch0 = pts.size >= 2 ? { d: prev.d, zoom: prev.zoom } : null; }
+      else { el.classList.remove("moving"); pinch0 = null; }
+    };
+    el.addEventListener("pointerup", end);
+    el.addEventListener("pointercancel", end);
   }
 
   _afterZoom() {
