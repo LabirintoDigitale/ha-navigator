@@ -9,6 +9,7 @@ from homeassistant.components import frontend, panel_custom
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from . import services, ws_api
@@ -54,6 +55,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: NavigatorConfigEntry) ->
     await places.async_load()
     entry.runtime_data = NavigatorData(maps, places)
     hass.data[DOMAIN] = entry
+
+    # "servizio" nella scheda dell'integrazione: mostra la versione installata
+    dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, "navigator")},
+        name="Navigator",
+        manufacturer="LabirintoDigitale",
+        model="Mappe e itinerari (OpenStreetMap)",
+        sw_version=VERSION,
+        entry_type=dr.DeviceEntryType.SERVICE,
+        configuration_url="https://github.com/LabirintoDigitale/ha-navigator",
+    )
 
     if not hass.data.get(DATA_STATIC_REGISTERED):
         await hass.http.async_register_static_paths(

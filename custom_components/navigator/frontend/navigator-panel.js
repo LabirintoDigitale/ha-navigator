@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.0.1";
+const PANEL_VERSION = "1.0.2";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 const ICON = new URL("./icon.png", import.meta.url).href;
@@ -89,10 +89,14 @@ const STYLE = `
   /* altezza presa dalla finestra: dentro Home Assistant il 100% del pannello può risultare nullo e la mappa sparire */
   .main { flex: 1; min-height: 0; display: flex; }
   #verwarn { flex: none; }
+  .footver { margin-top: 10px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; }
+  .footver img { width: 18px; height: 18px; background: #fff; border-radius: 50%; }
+  .footver a { color: var(--primary-color); }
   .side { width: 390px; flex: none; overflow-y: auto; border-right: 1px solid var(--divider-color);
     background: var(--card-background-color, #fff); }
   .mapwrap { flex: 1; position: relative; min-width: 0; min-height: 300px; }
-  #map { position: absolute; inset: 0; background: #ddd; }
+  /* !important: se la mappa nasce prima che il pannello sia in pagina Leaflet scrive position: relative e l'altezza va a 0 */
+  #map { position: absolute !important; inset: 0; background: #ddd; }
   @media (max-width: 800px) {
     :host { display: block; overflow-y: auto; }
     .main { flex-direction: column-reverse; }
@@ -207,7 +211,16 @@ class NavigatorPanel extends HTMLElement {
     const first = !this._hass;
     this._hass = hass;
     if (this._menuBtn) this._menuBtn.hass = hass;
-    if (first) this._init();
+    // Home Assistant passa hass prima di inserire il pannello nella pagina: la mappa va creata solo quando è visibile
+    if (first && this.isConnected) this._init();
+  }
+
+  connectedCallback() {
+    if (this._hass && !this._started) this._init();
+    else if (this._map) {
+      this._ro?.observe(this.$("map"));
+      setTimeout(() => this._map.invalidateSize(), 50);
+    }
   }
 
   set narrow(v) {
@@ -245,6 +258,8 @@ class NavigatorPanel extends HTMLElement {
   // ----------------------------------------------------------------- costruzione
 
   async _init() {
+    if (this._started) return;
+    this._started = true;
     const root = this.shadowRoot;
     root.innerHTML = `
       <link rel="stylesheet" href="${LEAFLET_CSS}">
@@ -275,7 +290,9 @@ class NavigatorPanel extends HTMLElement {
           <div id="results"></div>
           <div class="sec" id="favsec"></div>
           <div class="sec muted" style="font-size:12px">Percorsi: Valhalla (FOSSGIS) · OSRM — Ricerca: Photon (komoot) · Nominatim — Mappe © OpenStreetMap e collaboratori.
-            Servizi gratuiti con limiti d'uso: le richieste passano da Home Assistant.</div>
+            Servizi gratuiti con limiti d'uso: le richieste passano da Home Assistant.
+            <div class="footver"><img src="${ICON}" alt=""> Navigator versione ${PANEL_VERSION} ·
+              <a href="https://github.com/LabirintoDigitale/ha-navigator" target="_blank" rel="noopener">LabirintoDigitale/ha-navigator</a></div></div>
         </div>
         <div class="mapwrap">
           <div id="map"></div>
