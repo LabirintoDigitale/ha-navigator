@@ -1,7 +1,7 @@
 """Costanti dell'integrazione Navigator."""
 
 DOMAIN = "navigator"
-VERSION = "1.0.11"
+VERSION = "1.1.0"
 
 PANEL_URL = "navigator"
 PANEL_TITLE = "Navigator"
@@ -40,6 +40,9 @@ MODES = {
     "bici": ("bicycle", "bike"),
     "piedi": ("pedestrian", "foot"),
 }
+
+# lingue delle indicazioni (Valhalla) e della voce
+LANGUAGES = {"it": "it-IT", "en": "en-US", "de": "de-DE", "fr": "fr-FR", "es": "es-ES"}
 
 MAX_POINTS = 12
 MAX_EXCLUDE = 40

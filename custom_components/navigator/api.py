@@ -14,7 +14,7 @@ from typing import Any
 
 import aiohttp
 
-from .const import MAX_EXCLUDE, MODES, USER_AGENT
+from .const import LANGUAGES, MAX_EXCLUDE, MODES, USER_AGENT
 
 TIMEOUT = aiohttp.ClientTimeout(total=30)
 
@@ -221,6 +221,7 @@ class MapServices:
         avoid_ferries: bool = False,
         exclude: list[dict] | None = None,
         alternatives: bool = True,
+        language: str = "it",
     ) -> dict:
         """Calcola il percorso fra i punti (partenza, tappe, arrivo).
 
@@ -235,7 +236,8 @@ class MapServices:
         warnings: list[str] = []
         try:
             auto_excluded: list[dict] = []
-            result = await self._valhalla(points, mode, avoid_tolls, avoid_highways, avoid_ferries, exclude, alternatives)
+            lang = LANGUAGES.get(language, "it-IT")
+            result = await self._valhalla(points, mode, avoid_tolls, avoid_highways, avoid_ferries, exclude, alternatives, lang)
             if avoid_tolls and MODES[mode][0] in ("auto", "motorcycle"):
                 for _ in range(4):
                     main = result["routes"][0]
@@ -244,7 +246,7 @@ class MapServices:
                     extra = [p for seg in main["toll_segments"] for p in seg["exclude"]]
                     try:
                         retry = await self._valhalla(points, mode, avoid_tolls, avoid_highways, avoid_ferries,
-                                                     exclude + auto_excluded + extra, alternatives)
+                                                     exclude + auto_excluded + extra, alternatives, lang)
                     except NavigatorError:
                         break
                     auto_excluded += extra
@@ -254,6 +256,8 @@ class MapServices:
                     warnings.append("Non è stato possibile evitare tutte le tratte a pagamento: "
                                     "probabilmente non esiste una strada alternativa.")
             result["auto_excluded"] = auto_excluded
+            if MODES[mode][0] in ("auto", "motorcycle"):
+                await self._speed_limits(result["routes"][0], MODES[mode][0])
         except NavigatorError as err:
             if getattr(err, "no_route", False):
                 raise
@@ -266,9 +270,43 @@ class MapServices:
             warnings.append(f"Server Valhalla non disponibile ({err}): percorso calcolato con OSRM, "
                             "senza le opzioni per evitare pedaggi, autostrade o traghetti.")
         result["warnings"] = warnings + result.get("warnings", [])
+        for r in result["routes"]:
+            r.pop("_legs_enc", None)
+            r.setdefault("speed_limits", [])
         return result
 
-    async def _valhalla(self, points, mode, avoid_tolls, avoid_highways, avoid_ferries, exclude, alternatives) -> dict:
+    async def _speed_limits(self, route: dict, costing: str) -> None:
+        """Limiti di velocità lungo il percorso: [[inizio, fine, km/h], ...] sugli indici della forma."""
+        limits: list[list[int]] = []
+        try:
+            for offset, enc in route.get("_legs_enc", []):
+                body = {
+                    "encoded_polyline": enc,
+                    "costing": costing,
+                    "shape_match": "edge_walk",
+                    "filters": {"attributes": ["edge.speed_limit", "edge.begin_shape_index", "edge.end_shape_index"],
+                                "action": "include"},
+                }
+                async with self._session.post(f"{self.valhalla}/trace_attributes", json=body, headers=self._headers,
+                                              timeout=TIMEOUT) as resp:
+                    if resp.status >= 400:
+                        return
+                    data = await resp.json(content_type=None)
+                for e in data.get("edges", []):
+                    lim = e.get("speed_limit")
+                    if not isinstance(lim, (int, float)) or lim <= 0 or lim > 200:
+                        continue
+                    a, b = offset + e.get("begin_shape_index", 0), offset + e.get("end_shape_index", 0)
+                    if limits and limits[-1][2] == lim and limits[-1][1] >= a:
+                        limits[-1][1] = b  # tratti consecutivi con lo stesso limite
+                    else:
+                        limits.append([a, b, int(lim)])
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+            return  # senza limiti la navigazione funziona lo stesso
+        route["speed_limits"] = limits
+
+    async def _valhalla(self, points, mode, avoid_tolls, avoid_highways, avoid_ferries, exclude, alternatives,
+                        language: str = "it-IT") -> dict:
         costing = MODES[mode][0]
         options: dict[str, Any] = {"use_ferry": 0.0 if avoid_ferries else 0.5}
         if costing in ("auto", "motorcycle"):
@@ -278,7 +316,7 @@ class MapServices:
             "locations": [{"lat": p["lat"], "lon": p["lon"], "type": "break"} for p in points],
             "costing": costing,
             "costing_options": {costing: options},
-            "directions_options": {"units": "kilometers", "language": "it-IT"},
+            "directions_options": {"units": "kilometers", "language": language},
         }
         if exclude:
             body["exclude_locations"] = [{"lat": p["lat"], "lon": p["lon"]} for p in exclude]
@@ -312,9 +350,11 @@ class MapServices:
         shape: list[list[float]] = []
         maneuvers: list[dict] = []
         legs = []
+        legs_enc = []
         for leg_no, leg in enumerate(trip.get("legs", [])):
             pts = decode_polyline(leg.get("shape", ""), 6)
             offset = len(shape)
+            legs_enc.append((offset, leg.get("shape", "")))
             shape.extend(pts)
             legs.append({"time": leg["summary"]["time"], "length_km": leg["summary"]["length"]})
             for m in leg.get("maneuvers", []):
@@ -326,6 +366,7 @@ class MapServices:
                 maneuvers.append({
                     "text": m.get("instruction", ""),
                     "verbal": m.get("verbal_pre_transition_instruction", ""),
+                    "alert": m.get("verbal_transition_alert_instruction") or m.get("verbal_succinct_transition_instruction", ""),
                     "type": m.get("type", 0),
                     "time": m.get("time", 0),
                     "length_km": m.get("length", 0),
@@ -352,6 +393,7 @@ class MapServices:
             "maneuvers": maneuvers,
             "toll_segments": toll_segments,
             "toll_km": round(sum(s["length_km"] for s in toll_segments), 1),
+            "_legs_enc": legs_enc,
         }
 
     async def _osrm(self, points, mode, alternatives) -> dict:

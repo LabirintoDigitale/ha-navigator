@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.0.11";
+const PANEL_VERSION = "1.1.0";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 const ICON = new URL("./icon.png", import.meta.url).href;
@@ -147,6 +147,49 @@ const PIEDI_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" w
 </svg>`;
 
 const VEHICLE_SVG = { auto: CAR_SVG, moto: MOTO_SVG, bici: BICI_SVG, piedi: PIEDI_SVG };
+
+// impostazioni salvate su questo dispositivo
+const SETTINGS_KEY = "navigator-panel-settings";
+const DEFAULT_SETTINGS = { voice: false, lang: "it", voiceSel: "f", out: "auto", autoZoom: true, beep: false };
+const LANG_NAMES = { it: "Italiano", en: "English", de: "Deutsch", fr: "Français", es: "Español" };
+const LANG_BCP = { it: "it-IT", en: "en-US", de: "de-DE", fr: "fr-FR", es: "es-ES" };
+// frasi della voce nelle lingue delle indicazioni
+const PHRASES = {
+  it: { in: (d) => `Tra ${d}`, m: "metri", km: "chilometri", reroute: "Ricalcolo del percorso", newroute: "Nuovo percorso calcolato",
+    arrived: "Sei arrivato a destinazione", test: "Questa è la voce di Navigator. Tra 200 metri, svolta a destra." },
+  en: { in: (d) => `In ${d}`, m: "meters", km: "kilometers", reroute: "Recalculating route", newroute: "New route calculated",
+    arrived: "You have arrived at your destination", test: "This is the Navigator voice. In 200 meters, turn right." },
+  de: { in: (d) => `In ${d}`, m: "Metern", km: "Kilometern", reroute: "Route wird neu berechnet", newroute: "Neue Route berechnet",
+    arrived: "Sie haben Ihr Ziel erreicht", test: "Das ist die Stimme von Navigator. In 200 Metern rechts abbiegen." },
+  fr: { in: (d) => `Dans ${d}`, m: "mètres", km: "kilomètres", reroute: "Recalcul de l'itinéraire", newroute: "Nouvel itinéraire calculé",
+    arrived: "Vous êtes arrivé à destination", test: "Voici la voix de Navigator. Dans 200 mètres, tournez à droite." },
+  es: { in: (d) => `En ${d}`, m: "metros", km: "kilómetros", reroute: "Recalculando la ruta", newroute: "Nueva ruta calculada",
+    arrived: "Has llegado a tu destino", test: "Esta es la voz de Navigator. En 200 metros, gira a la derecha." },
+};
+
+function spokenDist(m, lang) {
+  const P = PHRASES[lang] || PHRASES.it;
+  if (m < 1000) return `${m < 300 ? Math.max(50, Math.round(m / 50) * 50) : Math.round(m / 100) * 100} ${P.m}`;
+  return `${(Math.round(m / 100) / 10).toLocaleString(LANG_BCP[lang], { maximumFractionDigits: 1 })} ${P.km}`;
+}
+
+// le voci del browser non dicono se sono maschili o femminili: si riconoscono dal nome
+const FEMALE = /female|donna|woman|frau|femme|mujer|alice|elsa|isabella|federica|paola|carla|giorgia|chiara|emma|anna|samantha|victoria|karen|moira|tessa|susan|zira|hazel|katja|hedda|amelie|julie|hortense|denise|helena|laura|monica|paulina|sabina|elvira|sofia|francesca|serena|aria|jenny|sonia|libby|clara|marie|petra|helene|ines|lucia|paloma|ximena|dalia|seraphina|eloise|vivienne|giulia|valeria|martina/i;
+const MALE = /\bmale\b|\buomo\b|\bman\b|\bmann\b|homme|hombre|luca|cosimo|diego|giuseppe|benigno|calogero|rinaldo|giorgio|daniel|alex|fred|\btom\b|david|mark|\bguy\b|george|stefan|conrad|killian|henri|paul|jorge|pablo|alvaro|juan|ryan|eric|andrew|brian|christopher|roger|thomas|florian|remy|claude|gerardo|raul|alessio|marcello|ezio|lorenzo|matteo/i;
+function voiceGender(name) {
+  if (FEMALE.test(name) && !MALE.test(name)) return "f";
+  if (MALE.test(name) && !FEMALE.test(name)) return "m";
+  return "";
+}
+
+// zoom in guida secondo la velocità (km/h): più largo quando si va veloci
+function zoomForSpeed(kmh) {
+  if (kmh < 25) return 17.5;
+  if (kmh < 45) return 17;
+  if (kmh < 70) return 16.25;
+  if (kmh < 100) return 15.5;
+  return 14.75;
+}
 
 // fuori percorso per almeno questo tempo (e due posizioni) prima di ricalcolare
 const OFF_ROUTE_MS = 6000;
@@ -363,6 +406,36 @@ const STYLE = `
     box-shadow: 0 0 0 7px rgba(26,115,232,.25), 0 1px 4px rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center; }
   .nav-me span { color: #fff; font: 700 11px sans-serif; display: block; }
   [hidden] { display: none !important; }
+  /* tasto impostazioni nella barra in alto e finestra delle impostazioni */
+  .tbtn { background: none; border: none; color: inherit; font-size: 22px; width: 44px; height: 44px; padding: 0; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; }
+  .tbtn:hover { background: rgba(255,255,255,.15); }
+  .setwrap { position: fixed; inset: 0; z-index: 3000; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; }
+  .setdlg { width: min(480px, 94vw); max-height: 90vh; max-height: 90dvh; overflow-y: auto; background: var(--card-background-color, #fff);
+    color: var(--primary-text-color); border-radius: 14px; box-shadow: 0 8px 30px rgba(0,0,0,.35); }
+  .setdlg .hd { display: flex; align-items: center; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--divider-color);
+    position: sticky; top: 0; background: inherit; z-index: 1; }
+  .setdlg .hd h2 { margin: 0; font-size: 19px; font-weight: 500; flex: 1; }
+  .setdlg .grp { padding: 12px 16px; border-bottom: 1px solid var(--divider-color); }
+  .setdlg .grp:last-child { border-bottom: none; }
+  .setdlg h3 { margin: 0 0 8px; font-size: 13px; font-weight: 500; text-transform: uppercase; letter-spacing: .04em; color: var(--secondary-text-color); }
+  .setdlg .line { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+  .setdlg .line > span:first-child { flex: 1; font-size: 14px; }
+  .setdlg select { font: inherit; font-size: 14px; padding: 7px; border-radius: 8px; border: 1px solid var(--divider-color);
+    background: var(--secondary-background-color, #f5f5f5); color: var(--primary-text-color); max-width: 60%; }
+  .setdlg .note { font-size: 12px; color: var(--secondary-text-color); margin: 4px 0 6px; }
+  .sw { position: relative; width: 42px; height: 24px; flex: none; }
+  .sw input { opacity: 0; width: 0; height: 0; }
+  .sw i { position: absolute; inset: 0; border-radius: 12px; background: #9e9e9e; transition: background .2s; cursor: pointer; }
+  .sw i::after { content: ""; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px; border-radius: 50%; background: #fff; transition: left .2s; }
+  .sw input:checked + i { background: var(--primary-color); }
+  .sw input:checked + i::after { left: 21px; }
+  .sw input:disabled + i { opacity: .5; }
+  /* velocità e limite nella barra della guida */
+  .navbot .spd { font-weight: 600; padding: 2px 8px; border-radius: 10px; background: var(--secondary-background-color, #eee); white-space: nowrap; }
+  .navbot .spd.over { background: #c62828; color: #fff; }
+  .navbot .lim { width: 30px; height: 30px; border-radius: 50%; border: 4px solid #d32f2f; background: #fff; color: #111;
+    display: inline-flex; align-items: center; justify-content: center; font: 700 13px sans-serif; flex: none; box-sizing: border-box; }
 `;
 
 class NavigatorPanel extends HTMLElement {
@@ -379,6 +452,8 @@ class NavigatorPanel extends HTMLElement {
     this._info = null;
     this._reqId = 0;
     this._loadState();
+    this._settings = { ...DEFAULT_SETTINGS };
+    try { Object.assign(this._settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}")); } catch (e) { /* storage non disponibile */ }
   }
 
   set hass(hass) {
@@ -440,7 +515,9 @@ class NavigatorPanel extends HTMLElement {
       <link rel="stylesheet" href="${LEAFLET_CSS}">
       <style>${STYLE}</style>
       <div class="toolbar"><ha-menu-button></ha-menu-button>
-        <div class="title"><span class="brand"><img src="${ICON}" alt=""> Navigator</span><span class="ver">versione ${PANEL_VERSION}</span></div></div>
+        <div class="title"><span class="brand"><img src="${ICON}" alt=""> Navigator</span><span class="ver">versione ${PANEL_VERSION}</span></div>
+        <button class="tbtn" id="settingsbtn" title="Impostazioni">⚙</button></div>
+      <div class="setwrap" id="setwrap" hidden></div>
       <div id="verwarn"></div>
       <div class="main" id="mainbox">
         <div class="side">
@@ -515,6 +592,8 @@ class NavigatorPanel extends HTMLElement {
       this._renderNav();
     });
     $("modebtn").addEventListener("click", () => this._toggleView());
+    $("settingsbtn").addEventListener("click", () => this._openSettings());
+    try { window.speechSynthesis?.addEventListener?.("voiceschanged", () => { if (!this.$("setwrap").hidden) this._openSettings(); }); } catch (e) { /* nessuna voce */ }
     $("fit").addEventListener("click", () => this._fit());
     $("go").addEventListener("click", () => this._compute());
     $("addstop").addEventListener("click", () => { this._points.splice(this._points.length - 1, 0, null); this._renderPoints(true); });
@@ -929,6 +1008,7 @@ class NavigatorPanel extends HTMLElement {
     this._nav = { source, follow: true, idx: 0, passed: 0, offSince: null, offCount: 0, rerouting: false, lastReroute: 0,
       lastKey: null, fix: null, arrived: false, view: "guida", dir: null };
     this.$("ctltr").hidden = true;
+    this._unlockAudio();
     this._drawRoute();
     this._drawMarkers();
     this._renderResults();
@@ -979,7 +1059,10 @@ class NavigatorPanel extends HTMLElement {
     const key = `${lat},${lon},${st.last_updated}`;
     if (key === this._nav.lastKey) return;
     this._nav.lastKey = key;
-    this._onFix({ lat, lon, acc: acc || 0 });
+    // la persona non ha velocità e direzione: si leggono dal dispositivo che le fornisce la posizione
+    const tr = this._hass.states[st.attributes.source] || st;
+    const num = (v) => (typeof v === "number" && v >= 0 ? v : null);
+    this._onFix({ lat, lon, acc: acc || 0, speed: num(tr.attributes.speed), heading: num(tr.attributes.course) });
   }
 
   // geometria del percorso: distanze progressive (m) e inizio di ogni tappa
@@ -1015,9 +1098,14 @@ class NavigatorPanel extends HTMLElement {
     const nav = this._nav;
     if (!nav || !this._result) return;
     const now = Date.now();
-    if (nav.fix && distM([nav.fix.lat, nav.fix.lon], [fix.lat, fix.lon]) > 3) {
-      nav.heading = bearing([nav.fix.lat, nav.fix.lon], [fix.lat, fix.lon]);
+    const prev = nav.fix;
+    if (prev && distM([prev.lat, prev.lon], [fix.lat, fix.lon]) > 3) {
+      nav.heading = bearing([prev.lat, prev.lon], [fix.lat, fix.lon]);
     }
+    // velocità (m/s): quella del GPS o dell'app, altrimenti dallo spostamento fra due posizioni
+    let speed = typeof fix.speed === "number" && !Number.isNaN(fix.speed) && fix.speed >= 0 ? fix.speed : null;
+    if (speed == null && prev && now - prev.time > 800) speed = distM([prev.lat, prev.lon], [fix.lat, fix.lon]) / ((now - prev.time) / 1000);
+    if (speed != null) nav.speed = nav.speed == null ? speed : nav.speed * 0.4 + speed * 0.6;
     nav.fix = { ...fix, time: now };
 
     const rt = this._geom(this._result.routes[this._sel]);
@@ -1039,6 +1127,7 @@ class NavigatorPanel extends HTMLElement {
       nav.arrived = true;
       this._renderNav();
       this._navPopup("ok", "🏁", `Sei arrivato a ${esc(dest.name)}`, 8000);
+      this._speak(PHRASES[this._settings.lang].arrived, true);
       return;
     }
     if (nav.arrived) { this._renderNav(); return; }
@@ -1055,8 +1144,60 @@ class NavigatorPanel extends HTMLElement {
       nav.offCount = 0;
       nav.idx = snap.idx;
       for (let leg = 1; leg < rt._legStart.length; leg++) if (snap.idx >= rt._legStart[leg]) nav.passed = Math.max(nav.passed, leg);
+      if (!nav.rerouting) this._voiceGuide(rt, snap.along);
     }
+    this._speedCheck(rt, snap.dist <= limit ? snap.idx : null);
     this._renderNav();
+  }
+
+  // indicazioni vocali: un avviso in anticipo ("Tra 300 metri, …") e uno al momento della manovra
+  _voiceGuide(rt, along) {
+    const nav = this._nav;
+    if (!this._settings.voice) return;
+    if (nav.spokenRoute !== rt) { nav.spokenRoute = rt; nav.spoken = new Set(); }
+    const ms = rt.maneuvers;
+    const lang = this._settings.lang;
+    if (!nav.spoken.has("start") && ms[0]) {
+      nav.spoken.add("start");
+      if (!nav.startSpoken) this._speak(ms[0].verbal || ms[0].text); // al primo avvio, non dopo un ricalcolo
+      nav.startSpoken = true;
+    }
+    const k = this._curManeuver(rt);
+    const next = ms[k + 1];
+    if (!next) return;
+    const to = rt._cum[next.begin] - along;
+    const v = nav.speed || 0;
+    const far = v > 22 ? 1500 : v > 14 ? 700 : 300;
+    const near = Math.max(30, v * 5);
+    const key = String(k + 1);
+    const low = (t) => (lang === "de" ? t : t.charAt(0).toLowerCase() + t.slice(1));
+    if (to <= near) {
+      if (!nav.spoken.has(key + "n")) {
+        nav.spoken.add(key + "n");
+        nav.spoken.add(key + "f");
+        this._speak(next.verbal || next.text);
+      }
+    } else if (to <= far && to > near + 80 && !nav.spoken.has(key + "f")) {
+      nav.spoken.add(key + "f");
+      this._speak(`${PHRASES[lang].in(spokenDist(to, lang))}, ${low(next.alert || next.verbal || next.text)}`);
+    }
+  }
+
+  // limite di velocità del tratto e beep quando lo superi
+  _speedCheck(rt, idx) {
+    const nav = this._nav;
+    nav.limit = null;
+    if (idx != null) {
+      for (const [a, b, l] of rt.speed_limits || []) {
+        if (idx >= a && idx < b) { nav.limit = l; break; }
+      }
+    }
+    const kmh = nav.speed != null ? nav.speed * 3.6 : null;
+    nav.over = nav.limit != null && kmh != null && kmh > nav.limit + Math.max(3, nav.limit * 0.05);
+    if (nav.over && this._settings.beep && Date.now() - (nav.lastBeep || 0) > 5000) {
+      nav.lastBeep = Date.now();
+      this._beep();
+    }
   }
 
   // nuovo percorso dalla posizione attuale verso le tappe non ancora raggiunte
@@ -1065,6 +1206,7 @@ class NavigatorPanel extends HTMLElement {
     nav.rerouting = true;
     nav.lastReroute = Date.now();
     this._navPopup("warn", "↻", "Fuori percorso<br><b>Ricalcolo del percorso…</b>", 0);
+    this._speak(PHRASES[this._settings.lang].reroute, true);
     this._renderNav();
     const before = this._points;
     this._points = [{ name: "📍 Posizione attuale", address: "", lat: fix.lat, lon: fix.lon }, ...this._points.slice(1 + nav.passed)];
@@ -1220,7 +1362,12 @@ class NavigatorPanel extends HTMLElement {
     const nav = this._nav;
     const f = nav.fix;
     // al primo aggancio almeno zoom 16, poi resta quello scelto con + e −
-    const z = nav.zoomed ? this._map.getZoom() : Math.max(this._map.getZoom(), 16);
+    let z = nav.zoomed ? this._map.getZoom() : Math.max(this._map.getZoom(), 16);
+    // zoom secondo la velocità, salvo per 20 secondi dopo uno zoom fatto a mano
+    if (this._settings.autoZoom && this._isGuida() && nav.speed != null && Date.now() > (nav.manualZoomUntil || 0)) {
+      const target = zoomForSpeed(nav.speed * 3.6);
+      if (Math.abs(target - z) >= 0.5) z = target;
+    }
     if (!nav.zoomed) animate = false; // il primo aggancio è immediato: con l'animazione lo zoom letto dopo sarebbe quello vecchio
     nav.zoomed = true;
     let ll = L.latLng(f.lat, f.lon);
@@ -1279,6 +1426,7 @@ class NavigatorPanel extends HTMLElement {
         const m = this._map;
         const z = Math.max(m.getMinZoom(), Math.min(m.getMaxZoom(), pinch0.zoom + Math.log2(now.d / pinch0.d)));
         m.setZoom(z, { animate: false });
+        if (this._nav) this._nav.manualZoomUntil = Date.now() + 20000;
         now.zoom = m.getZoom();
       }
       // dallo schermo alla mappa: la mappa è ruotata di -rot, il movimento del dito va ruotato di +rot
@@ -1298,6 +1446,7 @@ class NavigatorPanel extends HTMLElement {
   }
 
   _afterZoom() {
+    if (this._nav) this._nav.manualZoomUntil = Date.now() + 20000;
     if (this._nav?.fix && this._nav.follow) setTimeout(() => this._followView(), 300);
   }
 
@@ -1403,6 +1552,158 @@ class NavigatorPanel extends HTMLElement {
     });
   }
 
+  // ----------------------------------------------------------------- impostazioni, voce e beep
+
+  _saveSettings() {
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(this._settings)); } catch (e) { /* storage non disponibile */ }
+  }
+
+  // servizi notify dell'app Companion (mobile_app_…): prima quello del telefono della propria persona
+  _notifyServices() {
+    const list = Object.keys(this._hass?.services?.notify || {}).filter((n) => n.startsWith("mobile_app_"));
+    const me = this._myPerson();
+    const src = me && this._hass.states[me.id]?.attributes.source;
+    const mine = src && `mobile_app_${src.split(".")[1]}`;
+    return list.sort((a, b) => (b === mine) - (a === mine));
+  }
+
+  // dove si sente la voce: browser (computer, iPhone) o app Companion (Android, la cui pagina non sa parlare)
+  _voiceOut() {
+    const sel = this._settings.out;
+    const browserOk = !!window.speechSynthesis && this._companion() !== "android";
+    if (sel.startsWith("notify.")) return { kind: "notify", service: sel.slice(7) };
+    if (sel === "browser") return { kind: browserOk ? "browser" : "none" };
+    if (browserOk) return { kind: "browser" };
+    const svc = this._notifyServices()[0];
+    return svc ? { kind: "notify", service: svc } : { kind: "none" };
+  }
+
+  _voices() {
+    try { return (window.speechSynthesis?.getVoices() || []).filter((v) => (v.lang || "").toLowerCase().startsWith(this._settings.lang)); } catch (e) { return []; }
+  }
+
+  _pickVoice() {
+    const vs = this._voices();
+    const sel = this._settings.voiceSel;
+    if (sel !== "f" && sel !== "m") {
+      const v = vs.find((x) => x.voiceURI === sel);
+      if (v) return v;
+    }
+    const g = sel === "m" ? "m" : "f";
+    const same = vs.filter((v) => voiceGender(v.name) === g);
+    return same.find((v) => v.localService) || same[0] || vs.find((v) => !voiceGender(v.name)) || vs[0] || null;
+  }
+
+  _speak(text, urgent = false, force = false) {
+    if ((!this._settings.voice && !force) || !text) return;
+    const out = this._voiceOut();
+    if (out.kind === "notify") {
+      this._hass.callService("notify", out.service, { message: "TTS", data: { tts_text: text } }).catch(() => { /* telefono non raggiungibile */ });
+    } else if (out.kind === "browser") {
+      try {
+        const u = new SpeechSynthesisUtterance(text);
+        const v = this._pickVoice();
+        if (v) u.voice = v;
+        u.lang = LANG_BCP[this._settings.lang];
+        if (urgent) window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(u);
+      } catch (e) { /* sintesi vocale non disponibile */ }
+    }
+  }
+
+  // il browser fa suonare l'audio solo dopo un tocco: si prepara quando premi Parti
+  _unlockAudio() {
+    try {
+      const C = window.AudioContext || window.webkitAudioContext;
+      if (C && !this._ac) this._ac = new C();
+      this._ac?.resume?.();
+      if (this._settings.voice && this._voiceOut().kind === "browser") window.speechSynthesis.speak(new SpeechSynthesisUtterance(""));
+    } catch (e) { /* audio non disponibile */ }
+  }
+
+  _beep() {
+    try {
+      this._unlockAudio();
+      const ac = this._ac;
+      if (!ac) return;
+      const t = ac.currentTime;
+      for (const dt of [0, 0.22]) {
+        const o = ac.createOscillator();
+        const g = ac.createGain();
+        o.type = "sine";
+        o.frequency.value = 880;
+        g.gain.setValueAtTime(0.0001, t + dt);
+        g.gain.exponentialRampToValueAtTime(0.5, t + dt + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dt + 0.17);
+        o.connect(g).connect(ac.destination);
+        o.start(t + dt);
+        o.stop(t + dt + 0.2);
+      }
+    } catch (e) { /* audio non disponibile */ }
+  }
+
+  _openSettings() {
+    const s = this._settings;
+    const wrap = this.$("setwrap");
+    const sw = (key, label, note = "") => `<label class="line"><span>${label}${note ? `<div class="note">${note}</div>` : ""}</span>
+      <span class="sw"><input type="checkbox" data-s="${key}" ${s[key] ? "checked" : ""}><i></i></span></label>`;
+    const langs = Object.entries(LANG_NAMES).map(([k, n]) => `<option value="${k}" ${k === s.lang ? "selected" : ""}>${n}</option>`).join("");
+    const voices = this._voices();
+    const vopts = [`<option value="f" ${s.voiceSel === "f" ? "selected" : ""}>Donna</option>`,
+      `<option value="m" ${s.voiceSel === "m" ? "selected" : ""}>Uomo</option>`,
+      ...voices.map((v) => `<option value="${esc(v.voiceURI)}" ${s.voiceSel === v.voiceURI ? "selected" : ""}>${esc(v.name)}</option>`)].join("");
+    const browserOk = !!window.speechSynthesis && this._companion() !== "android";
+    const outs = [`<option value="auto" ${s.out === "auto" ? "selected" : ""}>Automatico</option>`,
+      `<option value="browser" ${s.out === "browser" ? "selected" : ""} ${browserOk ? "" : "disabled"}>Questo dispositivo (browser)${browserOk ? "" : " – non disponibile"}</option>`,
+      ...this._notifyServices().map((n) => `<option value="notify.${n}" ${s.out === `notify.${n}` ? "selected" : ""}>App Companion: ${esc(n.slice(11).replace(/_/g, " "))}</option>`)].join("");
+    const out = this._voiceOut();
+    const outNote = out.kind === "notify"
+      ? "La voce la legge il telefono con l'app Companion: lingua e voce (donna o uomo) sono quelle della sintesi vocale di Android (Impostazioni → Sistema → Lingue → Output sintesi vocale). Scrivi le indicazioni nella stessa lingua."
+      : out.kind === "browser" ? (voices.length ? "" : "Il browser non ha voci per questa lingua: verrà usata quella predefinita.")
+      : "Nessuna voce disponibile qui: nell'app Android serve il servizio notify dell'app Companion.";
+    wrap.innerHTML = `<div class="setdlg" role="dialog" aria-label="Impostazioni">
+      <div class="hd"><h2>⚙ Impostazioni</h2><button class="icon" data-s="close" title="Chiudi">✕</button></div>
+      <div class="grp"><h3>Indicazioni vocali</h3>
+        ${sw("voice", "Indicazioni vocali", "Avvisi in anticipo e al momento della manovra, ricalcolo e arrivo")}
+        <label class="line"><span>Lingua delle indicazioni e della voce</span><select data-s="lang">${langs}</select></label>
+        <label class="line"><span>Voce</span><select data-s="voiceSel" ${out.kind === "browser" ? "" : "disabled"}>${vopts}</select></label>
+        <label class="line"><span>Riproduci su</span><select data-s="out">${outs}</select></label>
+        ${outNote ? `<div class="note">${outNote}</div>` : ""}
+        <div class="row" style="margin-top:6px"><button data-s="testvoice">▶ Prova la voce</button></div>
+      </div>
+      <div class="grp"><h3>Mappa</h3>
+        ${sw("autoZoom", "Zoom automatico in base alla velocità", "In guida: più vicino in città, più largo in autostrada. Dopo + o − resta il tuo zoom per 20 secondi")}
+      </div>
+      <div class="grp"><h3>Velocità</h3>
+        ${sw("beep", "Beep quando superi il limite", "Limiti da OpenStreetMap, per auto e moto; tolleranza di 3 km/h (5% sopra i 60)")}
+        <div class="row" style="margin-top:6px"><button data-s="testbeep">▶ Prova il beep</button></div>
+      </div>
+      <div class="grp note">Le impostazioni valgono per questo dispositivo.</div>
+    </div>`;
+    wrap.hidden = false;
+    wrap.onclick = (e) => { if (e.target === wrap) wrap.hidden = true; };
+    wrap.querySelector('[data-s="close"]').addEventListener("click", () => { wrap.hidden = true; });
+    wrap.querySelectorAll("input[data-s]").forEach((el) => el.addEventListener("change", () => {
+      s[el.dataset.s] = el.checked;
+      this._saveSettings();
+      if (el.dataset.s === "voice" && el.checked) this._unlockAudio();
+    }));
+    wrap.querySelectorAll("select[data-s]").forEach((el) => el.addEventListener("change", () => {
+      const k = el.dataset.s;
+      s[k] = el.value;
+      if (k === "lang") s.voiceSel = s.voiceSel === "m" ? "m" : "f"; // le voci cambiano con la lingua
+      this._saveSettings();
+      if (k === "lang" && this._result && !this._nav) this._compute(false); // indicazioni nella nuova lingua
+      this._openSettings();
+    }));
+    wrap.querySelector('[data-s="testvoice"]').addEventListener("click", () => {
+      this._unlockAudio();
+      if (this._voiceOut().kind === "none") { this._msg("Nessuna voce disponibile su questo dispositivo"); return; }
+      this._speak(PHRASES[s.lang].test, true, true);
+    });
+    wrap.querySelector('[data-s="testbeep"]').addEventListener("click", () => this._beep());
+  }
+
   _navPopup(kind, big, html, ms) {
     const el = this.$("navpop");
     clearTimeout(this._nav?.popTimer);
@@ -1456,7 +1757,10 @@ class NavigatorPanel extends HTMLElement {
       remTime = (len > 0 ? cur.time * Math.max(0, rt._cum[cur.end] - along) / len : 0) + ms.slice(k + 1).reduce((a, m) => a + m.time, 0);
     }
     if (!bot.querySelector(".info")) this._buildNavBar();
-    bot.querySelector(".info").innerHTML = `<span class="rem">${fmtTime(remTime)}</span><span>${fmtKm(remM / 1000)} · arrivo ${arrival(remTime)}</span>`;
+    const kmh = nav.speed != null && nav.fix ? Math.round(nav.speed * 3.6) : null;
+    bot.querySelector(".info").innerHTML = `<span class="rem">${fmtTime(remTime)}</span><span>${fmtKm(remM / 1000)} · arrivo ${arrival(remTime)}</span>
+      ${kmh != null ? `<span class="spd ${nav.over ? "over" : ""}" title="Velocità">${kmh} km/h</span>` : ""}
+      ${nav.limit ? `<span class="lim" title="Limite di velocità">${nav.limit}</span>` : ""}`;
     const c = bot.querySelector('[data-n="center"]');
     c.classList.toggle("attn", !nav.follow);
     c.title = nav.follow ? "La mappa segue la tua posizione" : "Torna sulla tua posizione";
@@ -1510,6 +1814,7 @@ class NavigatorPanel extends HTMLElement {
         avoid_ferries: this._avoid.ferries,
         exclude: this._excluded.flatMap((e) => e.points).slice(0, 40),
         alternatives: !reroute && !this._nav,
+        language: this._settings.lang,
       });
       if (my !== this._reqId) return;
       this._result = r;

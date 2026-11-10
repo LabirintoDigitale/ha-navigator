@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant, callback
 import homeassistant.helpers.config_validation as cv
 
 from .api import NavigatorError
-from .const import DATA_WS_REGISTERED, DOMAIN, MAX_EXCLUDE, MAX_POINTS, MODES, VERSION
+from .const import DATA_WS_REGISTERED, DOMAIN, LANGUAGES, MAX_EXCLUDE, MAX_POINTS, MODES, VERSION
 
 POINT = vol.Schema(
     {
@@ -116,6 +116,7 @@ async def ws_reverse(hass: HomeAssistant, connection: websocket_api.ActiveConnec
     vol.Optional("avoid_ferries", default=False): bool,
     vol.Optional("exclude", default=[]): vol.All([POINT], vol.Length(max=MAX_EXCLUDE)),
     vol.Optional("alternatives", default=True): bool,
+    vol.Optional("language", default="it"): vol.In(list(LANGUAGES)),
 })
 @websocket_api.async_response
 async def ws_route(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
@@ -123,7 +124,7 @@ async def ws_route(hass: HomeAssistant, connection: websocket_api.ActiveConnecti
         data = _data(hass)
         result = await data.maps.route(
             msg["points"], msg["mode"], msg["avoid_tolls"], msg["avoid_highways"], msg["avoid_ferries"],
-            msg["exclude"], msg["alternatives"],
+            msg["exclude"], msg["alternatives"], msg["language"],
         )
         dest = msg["points"][-1]
         if dest.get("name"):
