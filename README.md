@@ -143,8 +143,9 @@ Il tasto **3D** (sulla mappa e nella barra della guida) inclina la mappa e mostr
 versanti, e gli **edifici in 3D** da vicino (con l'altezza dove è mappata in OpenStreetMap). Sopra il rilievo resta la mappa scelta
 (stradale, satellite, topografica…), con percorso, tappe, distributori e veicolo. In guida la vista è inclinata, gira nella direzione
 di marcia e ti segue; con due dita si può girare e inclinare, trascinando smette di seguirti fino a **Ricentra**.
-I tasti **▲ / ▼** in alto a destra cambiano la prospettiva a passi di 15°: da 0° (mappa vista dall'alto) fino a 85°, quasi come
-una telecamera sul cruscotto; l'inclinazione scelta resta anche per le volte successive. Premuto di nuovo,
+I tasti **▲ / ▼** in alto a destra cambiano la prospettiva a passi di 15°: da 0° (mappa vista dall'alto) fino a 80°, quasi come
+una telecamera sul cruscotto; l'inclinazione scelta resta anche per le volte successive. Se una collina finirebbe davanti
+alla telecamera, Navigator la allontana quanto basta (la vista resta sopra il terreno); **◎** rimette lo zoom automatico. Premuto di nuovo,
 **3D** torna alla mappa piatta; la scelta resta per le volte successive.
 
 - Usa la grafica del telefono (WebGL) e scarica anche le quote del terreno: consuma più batteria e dati della mappa piatta.
