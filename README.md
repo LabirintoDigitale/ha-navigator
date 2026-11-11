@@ -58,6 +58,7 @@ Tutte le richieste partono da Home Assistant (nessuna chiave, nessun account):
 | Ricerca | [Photon](https://photon.komoot.io) (komoot) | suggerimenti mentre scrivi |
 | Ricerca e indirizzi (riserva) | [Nominatim](https://nominatim.org) di OpenStreetMap | max 1 richiesta al secondo |
 | Distributori (Italia) | [Anagrafica impianti attivi del MIMIT](https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv) | una volta al giorno, con la marca |
+| Carburanti e prezzi (Italia) | [Prezzi alle 8 del MIMIT](https://www.mimit.gov.it/images/exportCSV/prezzo_alle_8.csv) | due volte al giorno |
 | Autovelox fissi, parcheggi | OpenStreetMap tramite [Overpass](https://overpass-api.de) | autovelox una volta alla settimana, parcheggi su richiesta |
 | Mappe | Esri (stradale, topografica, scura, satellite), OpenTopoMap | caricate dal browser; i server di OpenStreetMap bloccano le richieste da un Home Assistant in rete locale |
 
@@ -108,6 +109,12 @@ Con un percorso calcolato, la sezione **Nelle vicinanze** del pannello (e in gui
   **marca** (Agip Eni, Api-Ip, Q8, Esso, Tamoil, Shell, pompe bianche…) e il filtro **★ Preferite** (marche scelte in ⚙).
   **➕ Tappa** aggiunge il distributore al percorso e lo ricalcola. In Italia l'elenco viene dall'**anagrafica ufficiale degli
   impianti attivi del MIMIT** (dati aperti Osservaprezzi), scaricata una volta al giorno; altrove da OpenStreetMap.
+  Per ogni distributore ci sono i **carburanti venduti con il prezzo** (self, o servito se c'è solo quello), dal file
+  *prezzo alle 8* del MIMIT scaricato due volte al giorno: i prezzi comunicati più di 7 giorni prima sono segnati in arancione.
+  Il filtro per **carburante** (Benzina, Gasolio, Benzina speciale, **100 ottani**, Gasolio speciale, GPL, Metano, GNL) mostra solo
+  gli impianti che lo vendono e permette di ordinarli per **prezzo più basso**; il carburante preferito si sceglie in ⚙.
+  I nomi dei prodotti sono quelli commerciali comunicati dai gestori: "100 ottani" comprende quelli con *100* nel nome.
+  Fuori dall'Italia i carburanti vengono dai tag di OpenStreetMap, senza prezzi.
 - **🅿️ Parcheggi** pubblici entro 700 m dall'arrivo (o, in guida, vicino a te), con coperto / a pagamento / posti quando noti.
   **🅿️ Vai qui** imposta il parcheggio come arrivo. Fonte: OpenStreetMap (Overpass); se i server non rispondono, i parcheggi con
   un nome trovati con Photon.

@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.2.1";
+const PANEL_VERSION = "1.3.0";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 const ICON = new URL("./icon.png", import.meta.url).href;
@@ -151,12 +151,19 @@ const VEHICLE_SVG = { auto: CAR_SVG, moto: MOTO_SVG, bici: BICI_SVG, piedi: PIED
 // impostazioni salvate su questo dispositivo
 const SETTINGS_KEY = "navigator-panel-settings";
 const DEFAULT_SETTINGS = { voice: false, lang: "it", voiceSel: "f", out: "auto", autoZoom: true, beep: false,
-  fuelBrands: [], camAlert: true };
+  fuelBrands: [], fuelKind: "", camAlert: true };
 // marche dei distributori (come nell'anagrafica del MIMIT)
 const FUEL_BRANDS = ["Agip Eni", "Api-Ip", "Q8", "Esso", "Tamoil", "Shell", "Retitalia", "Beyfin", "Costantin", "Europam", "Pompe bianche"];
 const BRAND_COLORS = { "agip eni": "#f7c600", "eni": "#f7c600", "api-ip": "#0057a8", "ip": "#0057a8", "q8": "#0a3a7a", "esso": "#d71920",
   "tamoil": "#f28c00", "shell": "#fbce07", "retitalia": "#00843d", "beyfin": "#1d71b8", "pompe bianche": "#9e9e9e" };
 const brandColor = (b) => BRAND_COLORS[(b || "").toLowerCase()] || "#607d8b";
+// tipi di carburante (come li raggruppa il backend dai nomi commerciali comunicati al MIMIT)
+const FUEL_KINDS = [["benzina", "Benzina"], ["gasolio", "Gasolio"], ["benzina_plus", "Benzina speciale"], ["benzina100", "100 ottani"],
+  ["gasolio_plus", "Gasolio speciale"], ["gpl", "GPL"], ["metano", "Metano"], ["gnl", "GNL"]];
+// "Benzina speciale" comprende anche le 100 ottani
+const fuelMatch = (f, kind) => f.k === kind || (kind === "benzina_plus" && f.k === "benzina100");
+const fuelPrice = (f) => f.s ?? f.v ?? null;
+const fmtPrice = (p) => p.toLocaleString("it-IT", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 const NEAR_CATS = { fuel: ["⛽", "Distributori"], parking: ["🅿️", "Parcheggi"], cameras: ["📷", "Autovelox"] };
 const LANG_NAMES = { it: "Italiano", en: "English", de: "Deutsch", fr: "Français", es: "Español" };
 const LANG_BCP = { it: "it-IT", en: "en-US", de: "de-DE", fr: "fr-FR", es: "es-ES" };
@@ -1686,10 +1693,25 @@ class NavigatorPanel extends HTMLElement {
       const mode = this._fuelFilter || (s.fuelBrands.length ? "pref" : "all");
       if (mode === "pref") items = items.filter((i) => s.fuelBrands.includes(i.brand));
       else if (mode !== "all") items = items.filter((i) => i.brand === mode);
+      // carburante: scelta del momento o preferenza nelle impostazioni; solo i tipi presenti nei risultati
+      const kinds = FUEL_KINDS.filter(([k]) => res.items.some((i) => (i.fuels || []).some((f) => fuelMatch(f, k))));
+      let kind = this._fuelKind ?? s.fuelKind ?? "";
+      if (kind && !kinds.some(([k]) => k === kind)) kind = "";
+      if (kind) items = items.filter((i) => (i.fuels || []).some((f) => fuelMatch(f, kind)));
+      const best = (i) => Math.min(...(i.fuels || []).filter((f) => fuelMatch(f, kind) && fuelPrice(f) != null).map(fuelPrice));
+      const byPrice = kind && this._fuelSort === "price";
+      if (byPrice) items = [...items].sort((a, b) => best(a) - best(b));
+      this._fuelShowKind = kind;
       filt = `<div class="chips" style="padding:8px 16px 0">
         <span class="chip ${mode === "all" ? "on" : ""}" data-f="all">Tutte</span>
         ${s.fuelBrands.length ? `<span class="chip ${mode === "pref" ? "on" : ""}" data-f="pref">★ Preferite</span>` : ""}
-        ${present.map((b) => `<span class="chip ${mode === b ? "on" : ""}" data-f="${esc(b)}">${esc(b)}</span>`).join("")}</div>`;
+        ${present.map((b) => `<span class="chip ${mode === b ? "on" : ""}" data-f="${esc(b)}">${esc(b)}</span>`).join("")}</div>
+        ${kinds.length ? `<div class="chips" style="padding:6px 16px 0">
+        <span class="chip ${kind ? "" : "on"}" data-fk="">Tutti i carburanti</span>
+        ${kinds.map(([k, n]) => `<span class="chip ${kind === k ? "on" : ""}" data-fk="${k}">${esc(n)}</span>`).join("")}</div>` : ""}
+        ${kind ? `<div class="chips" style="padding:6px 16px 0">
+        <span class="chip ${byPrice ? "" : "on"}" data-o="along">Lungo il percorso</span>
+        <span class="chip ${byPrice ? "on" : ""}" data-o="price">€ Prezzo più basso</span></div>` : ""}`;
     } else if (cat === "parking") {
       const where = this._nearWhere || "dest";
       filt = `<div class="chips" style="padding:8px 16px 0">
@@ -1704,7 +1726,7 @@ class NavigatorPanel extends HTMLElement {
       let act;
       if (cat === "fuel") {
         bd = `<span class="bd" style="background:${brandColor(it.brand)}">${esc(it.brand || "?")}</span>`;
-        tx = `${esc(it.name || it.brand)}<small>${esc([it.addr, it.town].filter(Boolean).join(", "))}${it.motorway ? " · autostrada" : ""}</small>`;
+        tx = `${esc(it.name || it.brand)}<small>${esc([it.addr, it.town].filter(Boolean).join(", "))}${it.motorway ? " · autostrada" : ""}</small>${this._fuelLine(it)}`;
         dd = `${nav ? `tra ${fmtDist(it.to)}` : fmtDist(it.along)}<small>${it.off} m dalla strada</small>`;
         act = `<button data-go="${k}">➕ Tappa</button>`;
       } else if (cat === "parking") {
@@ -1725,8 +1747,10 @@ class NavigatorPanel extends HTMLElement {
     const empty = { fuel: "Nessun distributore entro 500 m dal percorso", parking: "Nessun parcheggio pubblico trovato entro 700 m",
       cameras: "Nessun autovelox fisso sul percorso" }[cat];
     body.innerHTML = `${filt}<ul class="plist">${rows || `<li><div class="tx muted">${empty}${cat === "fuel" && items.length !== res.items.length ? " con questo filtro" : ""}</div></li>`}</ul>
-      <div class="grp note">Fonte: ${esc(res.source)}${res.updated ? ` · aggiornato ${new Date(res.updated * 1000).toLocaleDateString("it-IT")}` : ""}${cat === "cameras" ? " · solo autovelox fissi mappati" : ""}</div>`;
+      <div class="grp note">Fonte: ${esc(res.source)}${res.updated ? ` · aggiornato ${new Date(res.updated * 1000).toLocaleDateString("it-IT")}` : ""}${cat === "fuel" && res.prices ? ` · prezzi scaricati ${new Date(res.prices * 1000).toLocaleString("it-IT", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" })}; prezzo self, o servito se c'è solo quello` : ""}${cat === "cameras" ? " · solo autovelox fissi mappati" : ""}</div>`;
     body.querySelectorAll("[data-f]").forEach((c) => c.addEventListener("click", () => { this._fuelFilter = c.dataset.f; this._renderNearby(); }));
+    body.querySelectorAll("[data-fk]").forEach((c) => c.addEventListener("click", () => { this._fuelKind = c.dataset.fk; this._renderNearby(); }));
+    body.querySelectorAll("[data-o]").forEach((c) => c.addEventListener("click", () => { this._fuelSort = c.dataset.o; this._renderNearby(); }));
     body.querySelectorAll("[data-w]").forEach((c) => c.addEventListener("click", () => { this._nearWhere = c.dataset.w; this._openNearby("parking"); }));
     const shown = items.slice(0, 60);
     body.querySelectorAll("li[data-k]").forEach((li) => li.addEventListener("click", (e) => {
@@ -1745,6 +1769,22 @@ class NavigatorPanel extends HTMLElement {
       L.marker([it.lat, it.lon], { icon: L.divIcon({ className: "", html: `<div class="pmark" style="background:${col}">${ic}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] }),
         title: it.name || it.brand || "" }).addTo(this._poiLayer);
     }
+  }
+
+  // carburanti venduti dall'impianto, con il prezzo; in evidenza quello scelto nel filtro
+  _fuelLine(it) {
+    const fuels = (it.fuels || []).filter((f) => f.k !== "altro" || fuelPrice(f) != null);
+    if (!fuels.length) return `<small class="muted">Carburanti non comunicati</small>`;
+    const kind = this._fuelShowKind;
+    const parts = fuels.map((f) => {
+      const p = fuelPrice(f);
+      const txt = `${esc(f.n)}${p != null ? ` ${fmtPrice(p)}${f.s == null ? " serv." : ""}` : ""}`;
+      return kind && fuelMatch(f, kind) ? `<b>${txt}</b>` : txt;
+    });
+    const t = Math.max(...fuels.map((f) => f.t || 0));
+    const old = t && Date.now() / 1000 - t > 7 * 86400
+      ? ` · <span style="color:#e65100">prezzi del ${new Date(t * 1000).toLocaleDateString("it-IT")}</span>` : "";
+    return `<small>⛽ ${parts.join(" · ")}${old}</small>`;
   }
 
   // ⛽ diventa una tappa prima dell'arrivo, 🅿️ diventa l'arrivo
@@ -1960,6 +2000,12 @@ class NavigatorPanel extends HTMLElement {
         <div class="note">Nell'elenco dei distributori il filtro "Preferite" mostra solo queste. Nessuna scelta = tutte.</div>
         <div class="chips">${FUEL_BRANDS.map((b) => `<span class="chip ${s.fuelBrands.includes(b) ? "on" : ""}" data-brand="${esc(b)}">${esc(b)}</span>`).join("")}</div>
       </div>
+      <div class="grp"><h3>Distributori: il tuo carburante</h3>
+        <div class="note">L'elenco dei distributori mostra solo quelli che lo vendono, con il prezzo in evidenza. "100 ottani" si basa sul nome
+          del prodotto comunicato dal gestore; "Benzina speciale" comprende le benzine premium e le 100 ottani.</div>
+        <div class="chips"><span class="chip ${s.fuelKind ? "" : "on"}" data-fkind="">Tutti</span>
+          ${FUEL_KINDS.map(([k, n]) => `<span class="chip ${s.fuelKind === k ? "on" : ""}" data-fkind="${k}">${esc(n)}</span>`).join("")}</div>
+      </div>
       <div class="grp note">Le impostazioni valgono per questo dispositivo.</div>
     </div>`;
     wrap.hidden = false;
@@ -1989,6 +2035,12 @@ class NavigatorPanel extends HTMLElement {
       s.fuelBrands = s.fuelBrands.includes(b) ? s.fuelBrands.filter((x) => x !== b) : [...s.fuelBrands, b];
       this._saveSettings();
       el.classList.toggle("on");
+    }));
+    wrap.querySelectorAll("[data-fkind]").forEach((el) => el.addEventListener("click", () => {
+      s.fuelKind = el.dataset.fkind;
+      this._fuelKind = undefined; // nell'elenco vale di nuovo la preferenza
+      this._saveSettings();
+      wrap.querySelectorAll("[data-fkind]").forEach((x) => x.classList.toggle("on", x === el));
     }));
   }
 

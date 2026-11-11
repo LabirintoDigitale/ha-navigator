@@ -1,7 +1,8 @@
 """Luoghi nelle vicinanze: distributori, autovelox fissi e parcheggi.
 
 - Distributori in Italia: anagrafica ufficiale degli impianti attivi del MIMIT (dati aperti Osservaprezzi), con la marca;
-  scaricata una volta al giorno e cercata in locale. Fuori dall'Italia: OpenStreetMap tramite Overpass.
+  scaricata una volta al giorno e cercata in locale. Carburanti venduti e prezzi dal file "prezzo alle 8" del MIMIT,
+  scaricato due volte al giorno. Fuori dall'Italia: OpenStreetMap tramite Overpass (carburanti dai tag fuel:*, senza prezzi).
 - Autovelox fissi: OpenStreetMap (highway=speed_camera) dell'intero paese, scaricati una volta alla settimana.
 - Parcheggi: OpenStreetMap tramite Overpass, su richiesta, con una cache di mezz'ora.
 
@@ -14,9 +15,12 @@ import asyncio
 import json
 import logging
 import math
+import re
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import aiohttp
 
@@ -25,6 +29,7 @@ from .const import USER_AGENT
 _LOGGER = logging.getLogger(__name__)
 
 MIMIT_URL = "https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv"
+PRICES_URL = "https://www.mimit.gov.it/images/exportCSV/prezzo_alle_8.csv"
 OVERPASS_URLS = [
     "https://overpass-api.de/api/interpreter",
     "https://overpass.private.coffee/api/interpreter",
@@ -32,6 +37,7 @@ OVERPASS_URLS = [
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 ]
 FUEL_MAX_AGE = 24 * 3600
+PRICES_MAX_AGE = 12 * 3600
 CAMERAS_MAX_AGE = 7 * 24 * 3600
 RETRY_AFTER = 900  # dopo un errore si riprova fra 15 minuti
 
@@ -118,7 +124,9 @@ class Pois:
         self._cams: list[dict] | None = None
         self._cams_time = 0.0
         self._fail: dict[str, float] = {}
-        self._locks = {k: asyncio.Lock() for k in ("fuel", "cams", "overpass")}
+        self._prices: dict[str, list] | None = None
+        self._prices_time = 0.0
+        self._locks = {k: asyncio.Lock() for k in ("fuel", "prices", "cams", "overpass")}
         self._cache: dict[str, tuple[float, list]] = {}
 
     # ------------------------------------------------------------------ file di cache
@@ -217,11 +225,45 @@ class Pois:
                     raise PoiError("Elenco dei distributori non disponibile ora (sito del MIMIT non raggiungibile)") from err
             return self._fuel
 
+    async def _load_prices(self) -> dict[str, list]:
+        """Carburanti e prezzi per impianto; se il file non arriva si tengono gli ultimi scaricati (o nessuno)."""
+        async with self._locks["prices"]:
+            now = time.time()
+            if self._prices is not None and now - self._prices_time < PRICES_MAX_AGE:
+                return self._prices
+            if self._prices is None:
+                saved = await self._exec(self._read, "prezzi.json")
+                if saved and saved.get("items"):
+                    self._prices, self._prices_time = saved["items"], saved.get("time", 0)
+                    if now - self._prices_time < PRICES_MAX_AGE:
+                        return self._prices
+            if now - self._fail.get("prices", 0) < RETRY_AFTER:
+                return self._prices or {}
+            try:
+                async with self._session.get(PRICES_URL, headers={"User-Agent": USER_AGENT},
+                                             timeout=aiohttp.ClientTimeout(total=120)) as resp:
+                    resp.raise_for_status()
+                    raw = await resp.read()
+                items = await self._exec(_parse_prices, raw)
+                if len(items) < 1000:
+                    raise ValueError("file dei prezzi incompleto")
+                self._prices, self._prices_time = items, now
+                await self._exec(self._write, "prezzi.json", {"time": now, "items": items})
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as err:
+                self._fail["prices"] = now
+                _LOGGER.warning("Prezzi dei carburanti MIMIT non scaricati: %s", err)
+            return self._prices or {}
+
     async def fuel(self, line: list[list[float]], radius: float) -> dict:
         if self.country == "IT":
             items = await self._load_fuel()
             near = await self._exec(_near_line, items, line, radius)
-            return {"items": near, "source": "MIMIT (anagrafica impianti attivi)", "updated": int(self._fuel_time)}
+            prices = await self._load_prices()
+            for it in near:
+                it["fuels"] = prices.get(it["id"], [])
+            src = "MIMIT (anagrafica impianti attivi" + (", carburanti e prezzi comunicati dai gestori)" if prices else ")")
+            return {"items": near, "source": src, "updated": int(self._fuel_time),
+                    "prices": int(self._prices_time) if prices else None}
         # fuori dall'Italia: OpenStreetMap
         boxes = _bbox_chunks(line, radius)
         q = "[out:json][timeout:40];(" + "".join(
@@ -235,7 +277,7 @@ class Pois:
             t = it.pop("tags")
             items.append({**it, "brand": t.get("brand") or t.get("operator") or "", "name": t.get("name") or "",
                           "addr": " ".join(x for x in (t.get("addr:street"), t.get("addr:housenumber")) if x),
-                          "town": t.get("addr:city") or "", "motorway": False})
+                          "town": t.get("addr:city") or "", "motorway": False, "fuels": _osm_fuels(t)})
         return {"items": await self._exec(_near_line, items, line, radius), "source": "OpenStreetMap", "updated": int(time.time())}
 
     # ------------------------------------------------------------------ autovelox fissi
@@ -363,3 +405,79 @@ def _parse_mimit(raw: bytes) -> list[dict]:
     for it in items:
         groups.setdefault((round(it["lat"], 4), round(it["lon"], 4)), set()).add(it["town"])
     return [it for it in items if len(groups[(round(it["lat"], 4), round(it["lon"], 4))]) == 1]
+
+
+# ---------------------------------------------------------------------- carburanti
+
+# tipi di carburante (per il filtro): i nomi nel file del MIMIT sono quelli commerciali scelti dai gestori
+_OCT100 = re.compile(r"(?<!\d)100(?!\d)")
+
+
+def fuel_kind(name: str) -> str:
+    """benzina, benzina_plus, benzina100, gasolio, gasolio_plus, gpl, metano, gnl o altro."""
+    n = " ".join(name.lower().split())
+    if "gpl" in n or "lpg" in n:
+        return "gpl"
+    if "gnl" in n or "lng" in n:
+        return "gnl"
+    if "metano" in n or "gnc" in n or "cng" in n:
+        return "metano"
+    if "adblue" in n or "ad blue" in n:
+        return "altro"
+    if "gasolio" in n or "diesel" in n or "hvo" in n:
+        return "gasolio" if n == "gasolio" else "gasolio_plus"
+    if _OCT100.search(n):
+        return "benzina100"
+    if n in ("benzina", "super", "verde"):
+        return "benzina"
+    if any(k in n for k in ("benzina", "super", "perform", "power", "ottan", "plus", "premium", "speciale", "racing")):
+        return "benzina_plus"
+    return "altro"
+
+
+def _parse_prices(raw: bytes) -> dict[str, list]:
+    """Prezzi alle 8: idImpianto|descCarburante|prezzo|isSelf|dtComu (prima riga: data dell'estrazione).
+
+    Per impianto: [{"n": nome, "k": tipo, "s": prezzo self, "v": prezzo servito, "t": data della comunicazione}].
+    """
+    text = raw.decode("utf-8", errors="replace")
+    tz = ZoneInfo("Europe/Rome")
+    out: dict[str, dict[str, dict]] = {}
+    for line in text.splitlines():
+        sep = "|" if "|" in line else ";"
+        f = [x.strip() for x in line.split(sep)]
+        if len(f) < 4 or not f[0].isdigit():
+            continue  # intestazioni e righe rovinate
+        try:
+            price = float(f[2].replace(",", "."))
+        except ValueError:
+            continue
+        if not 0.2 < price < 5:
+            continue  # prezzi sbagliati (es. 0,001 o 1789 al posto di 1,789)
+        name = " ".join(f[1].split())
+        if not name:
+            continue
+        ts = 0
+        if len(f) > 4 and f[4]:
+            for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%Y-%m-%d %H:%M:%S"):
+                try:
+                    ts = int(datetime.strptime(f[4], fmt).replace(tzinfo=tz).timestamp())
+                    break
+                except ValueError:
+                    continue
+        fuel = out.setdefault(f[0], {}).setdefault(name.lower(), {"n": name, "k": fuel_kind(name), "s": None, "v": None, "t": 0})
+        fuel["s" if f[3] in ("1", "true", "True") else "v"] = round(price, 3)
+        fuel["t"] = max(fuel["t"], ts)
+    order = ["benzina", "gasolio", "benzina_plus", "benzina100", "gasolio_plus", "gpl", "metano", "gnl", "altro"]
+    return {k: sorted(v.values(), key=lambda x: (order.index(x["k"]), x["n"])) for k, v in out.items()}
+
+
+_OSM_FUELS = [("fuel:octane_95", "Benzina 95", "benzina"), ("fuel:e10", "Benzina E10", "benzina"),
+              ("fuel:octane_98", "Benzina 98", "benzina_plus"), ("fuel:octane_100", "Benzina 100 ottani", "benzina100"),
+              ("fuel:diesel", "Gasolio", "gasolio"), ("fuel:GTL_diesel", "Gasolio GTL", "gasolio_plus"),
+              ("fuel:HVO100", "Gasolio HVO", "gasolio_plus"), ("fuel:lpg", "GPL", "gpl"), ("fuel:cng", "Metano", "metano"),
+              ("fuel:lng", "GNL", "gnl")]
+
+
+def _osm_fuels(tags: dict) -> list[dict]:
+    return [{"n": n, "k": k, "s": None, "v": None, "t": 0} for tag, n, k in _OSM_FUELS if tags.get(tag) == "yes"]
