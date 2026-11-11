@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.5.0";
+const PANEL_VERSION = "1.5.1";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1914,9 +1914,18 @@ class NavigatorPanel extends HTMLElement {
     // (solo misura, nessun movimento se è tutto a posto: così "idle" non si ripete all'infinito)
     g.on("idle", () => {
       if (!this._3d || this._g3 !== g) return;
+      // in guida l'inclinazione è stata ridotta (da MapLibre, con le quote ancora in arrivo): si riallinea, al massimo ogni 3 s
+      const nav = this._nav;
+      if (nav?.fix && nav.follow && this._isGuida() && Math.abs(g.getPitch() - this._pitch3d()) > 2
+        && Date.now() - (this._g3realign || 0) > 3000) {
+        this._g3realign = Date.now();
+        this._g3key = null;
+        this._sync3d();
+        return;
+      }
       try {
-        const cl = this._camClearance();
-        if (cl == null || cl >= 5) return; // solo se la telecamera è davvero quasi dentro il terreno
+        const cl = this._camClearance(g.transform, 5);
+        if (cl == null || cl >= 0) return; // solo se la telecamera è davvero quasi dentro il terreno
         const cam = this._clearCamera({ center: g.getCenter(), zoom: g.getZoom(), bearing: g.getBearing(), pitch: g.getPitch(), padding: g.getPadding() });
         if (cam.zoom < g.getZoom() - 0.05) g.easeTo({ ...cam, duration: 500 });
       } catch (e) { this._recover3d(e); }
@@ -2024,55 +2033,72 @@ class NavigatorPanel extends HTMLElement {
   // Margine piccolo apposta: con uno più largo la vista restava troppo alta e lo zoom con le dita veniva annullato.
   _clearCamera(opts, min = 15) {
     const g = this._g3;
-    const tr = g?.transform;
-    if (!g || !g.getTerrain() || typeof tr?.getCameraAltitude !== "function") return opts;
-    const save = { center: g.getCenter(), zoom: g.getZoom(), bearing: g.getBearing(), pitch: g.getPitch(), padding: g.getPadding() };
+    const ml = window.maplibregl;
+    // la prova si fa su una copia della telecamera: spostare la vista vera interromperebbe l'animazione in corso
+    // (zoom e inclinazione restavano a metà strada, e Ricentra sembrava non avvicinare)
+    if (!g || !ml || !g.getTerrain() || typeof g.transform?.clone !== "function") return opts;
     let z = opts.zoom;
     try {
+      const center = ml.LngLat.convert(opts.center);
+      let elev = null;
+      try { elev = g.queryTerrainElevation(center); } catch (e) { /* quota del centro non pronta */ }
       for (let k = 0; k < 20; k++) {
-        g.jumpTo({ ...opts, zoom: z });
-        const cl = this._camClearance();
-        if (cl == null || cl >= min) break;
+        const tr = g.transform.clone();
+        if (opts.padding) tr.setPadding(opts.padding);
+        if (opts.bearing != null) tr.setBearing(opts.bearing);
+        if (opts.pitch != null) tr.setPitch(opts.pitch);
+        tr.setZoom(z);
+        tr.setCenter(center);
+        if (elev != null && Number.isFinite(elev)) tr.setElevation(elev);
+        const cl = this._camClearance(tr, min);
+        if (cl == null || cl >= 0) break;
         z -= 0.25;
       }
     } catch (e) {
       z = opts.zoom; // controllo non riuscito: si va dove richiesto
-    } finally {
-      try { g.jumpTo(save); } catch (e) { /* resta dov'è */ }
     }
     return { ...opts, zoom: z };
   }
 
-  // metri fra la telecamera e il punto più alto del terreno che ha davanti, fino al centro della vista (null senza rilievo).
-  // Il terreno subito sotto e dietro la telecamera non si vede e non crea problemi: si parte da un quarto della distanza.
-  _camClearance() {
+  // margine (metri) fra la telecamera e il terreno, già tolto il minimo richiesto: negativo = troppo bassa.
+  // Due controlli: il terreno sotto la telecamera (altrimenti MapLibre abbassa da solo l'inclinazione) e quello che
+  // ha davanti, sullo schermo, fino al centro della vista (altrimenti una collina la attraversa: mappa a strisce).
+  // MapLibre, interrogato su un punto senza quote pronte, a volte va in errore: quel punto si salta.
+  _camClearance(tr = this._g3?.transform, min = 15) {
     const g = this._g3;
-    const tr = g?.transform;
-    if (!g || !g.getTerrain() || typeof tr?.getCameraAltitude !== "function") return null;
+    if (!g || !tr || !g.getTerrain() || typeof tr.getCameraAltitude !== "function") return null;
     let cam;
     let c;
     let alt;
     try {
       cam = tr.getCameraLngLat();
-      c = g.getCenter();
+      c = tr.center;
       alt = tr.getCameraAltitude();
     } catch (e) { return null; }
+    const q = (ll) => {
+      try {
+        const e = g.queryTerrainElevation(ll);
+        return e != null && Number.isFinite(e) ? e : null;
+      } catch (e) { return null; }
+    };
+    let worst = null;
+    const under = q([cam.lng, cam.lat]);
+    if (under != null) worst = alt - under - 3;
     const cv = g.getCanvas();
     const w = cv.clientWidth;
     const h = cv.clientHeight;
-    let ground = null;
     for (let t = 0.25; t <= 1.001; t += 0.075) {
       const ll = [cam.lng + (c.lng - cam.lng) * t, cam.lat + (c.lat - cam.lat) * t];
-      // solo i punti sullo schermo: lì le quote sono caricate. MapLibre, interrogato su un punto senza quote pronte,
-      // a volte va in errore ("Out of range source coordinates for DEM data"): quel punto si salta
       try {
-        const px = g.project(ll);
+        const px = tr.locationToScreenPoint(window.maplibregl.LngLat.convert(ll));
         if (!(px.x >= 0 && px.x <= w && px.y >= 0 && px.y <= h)) continue;
-        const e = g.queryTerrainElevation(ll);
-        if (e != null && Number.isFinite(e) && (ground == null || e > ground)) ground = e;
-      } catch (e) { /* quota non disponibile in quel punto */ }
+      } catch (e) { continue; }
+      const e = q(ll);
+      if (e == null) continue;
+      const m = alt - e - min;
+      if (worst == null || m < worst) worst = m;
     }
-    return ground == null ? null : alt - ground;
+    return worst;
   }
 
   // telecamera 3D: in guida segue la posizione (nel terzo basso, girata nella direzione di marcia), altrimenti ricopia Leaflet
