@@ -160,3 +160,7 @@ Mappa interattiva: [Leaflet](https://leafletjs.com) (BSD-2-Clause), incluso in `
 ## Licenza
 
 MIT
+
+---
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/W4M829BGBC)
