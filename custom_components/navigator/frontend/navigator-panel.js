@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.4.2";
+const PANEL_VERSION = "1.4.3";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1667,7 +1667,7 @@ class NavigatorPanel extends HTMLElement {
     g.on("idle", () => {
       if (!this._3d) return;
       const cl = this._camClearance();
-      if (cl == null || cl >= 40) return;
+      if (cl == null || cl >= 5) return; // solo se la telecamera è davvero quasi dentro il terreno
       const cam = this._clearCamera({ center: g.getCenter(), zoom: g.getZoom(), bearing: g.getBearing(), pitch: g.getPitch(), padding: g.getPadding() });
       if (cam.zoom < g.getZoom() - 0.05) g.easeTo({ ...cam, duration: 500 });
     });
@@ -1758,8 +1758,9 @@ class NavigatorPanel extends HTMLElement {
 
   // la telecamera non deve finire sotto il terreno: inclinata sta dietro e più in basso del punto guardato, e le colline
   // vicine (accentuate dal rilievo) la coprono, con la mappa "stirata" e il nero sotto. Si prova la posizione e, se serve,
-  // ci si allontana (zoom indietro a piccoli passi) finché la telecamera resta almeno 50 m sopra il terreno fino al centro.
-  _clearCamera(opts) {
+  // ci si allontana (zoom indietro a piccoli passi) finché la telecamera resta almeno 15 m sopra il terreno che ha davanti.
+  // Margine piccolo apposta: con uno più largo la vista restava troppo alta e lo zoom con le dita veniva annullato.
+  _clearCamera(opts, min = 15) {
     const g = this._g3;
     const tr = g?.transform;
     if (!g || !g.getTerrain() || typeof tr?.getCameraAltitude !== "function") return opts;
@@ -1769,7 +1770,7 @@ class NavigatorPanel extends HTMLElement {
       for (let k = 0; k < 20; k++) {
         g.jumpTo({ ...opts, zoom: z });
         const cl = this._camClearance();
-        if (cl == null || cl >= 50) break;
+        if (cl == null || cl >= min) break;
         z -= 0.25;
       }
     } finally {
@@ -1778,7 +1779,8 @@ class NavigatorPanel extends HTMLElement {
     return { ...opts, zoom: z };
   }
 
-  // metri fra la telecamera e il punto più alto del terreno da lei fino al centro della vista (null senza rilievo)
+  // metri fra la telecamera e il punto più alto del terreno che ha davanti, fino al centro della vista (null senza rilievo).
+  // Il terreno subito sotto e dietro la telecamera non si vede e non crea problemi: si parte da un quarto della distanza.
   _camClearance() {
     const g = this._g3;
     const tr = g?.transform;
@@ -1786,7 +1788,7 @@ class NavigatorPanel extends HTMLElement {
     const cam = tr.getCameraLngLat();
     const c = g.getCenter();
     let ground = null;
-    for (let t = 0.05; t <= 1.001; t += 0.1) {
+    for (let t = 0.25; t <= 1.001; t += 0.075) {
       const e = g.queryTerrainElevation([cam.lng + (c.lng - cam.lng) * t, cam.lat + (c.lat - cam.lat) * t]);
       if (e != null && (ground == null || e > ground)) ground = e;
     }
