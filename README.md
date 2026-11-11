@@ -149,7 +149,7 @@ Se resti fuori per almeno 6 secondi (e almeno due posizioni) ricalcola il percor
 ## Note
 
 - Il tasto **⛶** (sulla mappa e nella barra della guida) mette Navigator a **schermo intero**, anche in orizzontale: solo la mappa,
-  senza la barra laterale e l'intestazione di Home Assistant (e, dove il browser lo permette, senza le barre del telefono). **🗗** torna normale.
+  senza la barra laterale e l'intestazione di Home Assistant (e, dove il browser lo permette, senza le barre del telefono). premuto di nuovo torna normale.
   A schermo intero e durante la guida lo **schermo resta acceso**: Navigator usa il blocco dello standby del browser o, dove manca
   (es. app Companion), un piccolo video muto in loop.
 - *La mia posizione* usa il GPS del dispositivo: il browser la concede solo se Home Assistant è aperto in **HTTPS** (o dall'app Companion).

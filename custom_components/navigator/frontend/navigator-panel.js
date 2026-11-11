@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.3.3";
+const PANEL_VERSION = "1.3.4";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 const ICON = new URL("./icon.png", import.meta.url).href;
@@ -167,6 +167,9 @@ const fmtPrice = (p) => p.toLocaleString("it-IT", { minimumFractionDigits: 3, ma
 // video nero di 2 secondi, muto e in loop: dove il browser non ha il blocco dello standby (es. app Companion)
 // un video in riproduzione tiene acceso lo schermo
 const NOSLEEP_MP4 = "data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAMrbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAB9AAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAlV0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAB9AAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAABAAAAAQAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAfQAAAAAAABAAAAAAHNbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAABAAAAAgABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABeG1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAThzdGJsAAAAuHN0c2QAAAAAAAAAAQAAAKhhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAABAAEABIAAAASAAAAAAAAAABFUxhdmM2MC4zMS4xMDIgbGlieDI2NAAAAAAAAAAAAAAAGP//AAAALmF2Y0MBQsAK/+EAFmdCwArZHsBEAAADAAQAAAMACDxImSABAAVoy4PLIAAAABBwYXNwAAAAAQAAAAEAAAAUYnRydAAAAAAAAApAAAAKQAAAABhzdHRzAAAAAAAAAAEAAAACAABAAAAAABRzdHNzAAAAAAAAAAEAAAABAAAAHHN0c2MAAAAAAAAAAQAAAAEAAAACAAAAAQAAABxzdHN6AAAAAAAAAAAAAAACAAAChgAAAAoAAAAUc3RjbwAAAAAAAAABAAADWwAAAGJ1ZHRhAAAAWm1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAG1kaXJhcHBsAAAAAAAAAAAAAAAALWlsc3QAAAAlqXRvbwAAAB1kYXRhAAAAAQAAAABMYXZmNjAuMTYuMTAwAAAACGZyZWUAAAKYbWRhdAAAAnAGBf//bNxF6b3m2Ui3lizYINkj7u94MjY0IC0gY29yZSAxNjQgcjMxMDggMzFlMTlmOSAtIEguMjY0L01QRUctNCBBVkMgY29kZWMgLSBDb3B5bGVmdCAyMDAzLTIwMjMgLSBodHRwOi8vd3d3LnZpZGVvbGFuLm9yZy94MjY0Lmh0bWwgLSBvcHRpb25zOiBjYWJhYz0wIHJlZj0zIGRlYmxvY2s9MTowOjAgYW5hbHlzZT0weDE6MHgxMTEgbWU9aGV4IHN1Ym1lPTcgcHN5PTEgcHN5X3JkPTEuMDA6MC4wMCBtaXhlZF9yZWY9MSBtZV9yYW5nZT0xNiBjaHJvbWFfbWU9MSB0cmVsbGlzPTEgOHg4ZGN0PTAgY3FtPTAgZGVhZHpvbmU9MjEsMTEgZmFzdF9wc2tpcD0xIGNocm9tYV9xcF9vZmZzZXQ9LTIgdGhyZWFkcz0xIGxvb2thaGVhZF90aHJlYWRzPTEgc2xpY2VkX3RocmVhZHM9MCBucj0wIGRlY2ltYXRlPTEgaW50ZXJsYWNlZD0wIGJsdXJheV9jb21wYXQ9MCBjb25zdHJhaW5lZF9pbnRyYT0wIGJmcmFtZXM9MCB3ZWlnaHRwPTAga2V5aW50PTI1MCBrZXlpbnRfbWluPTEgc2NlbmVjdXQ9NDAgaW50cmFfcmVmcmVzaD0wIHJjX2xvb2thaGVhZD00MCByYz1jcmYgbWJ0cmVlPTEgY3JmPTIzLjAgcWNvbXA9MC42MCBxcG1pbj0wIHFwbWF4PTY5IHFwc3RlcD00IGlwX3JhdGlvPTEuNDAgYXE9MToxLjAwAIAAAAAOZYiEBb///w9FAAFPf4AAAAAGQZo4CvqA";
+// icone dello schermo intero (i simboli ⛶ e 🗗 mancano nei caratteri di molti telefoni)
+const FS_ON = `<svg class="fsico" viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>`;
+const FS_OFF = `<svg class="fsico" viewBox="0 0 24 24"><path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5"/></svg>`;
 const NEAR_CATS = { fuel: ["⛽", "Distributori"], parking: ["🅿️", "Parcheggi"], cameras: ["📷", "Autovelox"] };
 const LANG_NAMES = { it: "Italiano", en: "English", de: "Deutsch", fr: "Français", es: "Español" };
 const LANG_BCP = { it: "it-IT", en: "en-US", de: "de-DE", fr: "fr-FR", es: "es-ES" };
@@ -408,9 +411,6 @@ const STYLE = `
   .mapwrap { overflow: hidden; }
   .main.guida .side { display: none; }
   /* schermo intero: solo la mappa, sopra la barra laterale e l'intestazione di Home Assistant */
-  :host(.full) { position: fixed; inset: 0; z-index: 2000; width: 100vw; height: 100vh; height: 100dvh; }
-  :host(.full) .toolbar, :host(.full) #verwarn, :host(.full) .main .side { display: none; }
-  :host(.full) .main .mapwrap { flex: 1; height: auto; }
   .nosleep { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
   .main.guida .mapwrap { flex: 1; height: auto; }
   .main.guida .leaflet-control-container { display: none; }
@@ -494,6 +494,13 @@ const STYLE = `
     font-size: 14px; box-shadow: 0 1px 4px rgba(0,0,0,.45); }
   .navbot .lim { width: 30px; height: 30px; border-radius: 50%; border: 4px solid #d32f2f; background: #fff; color: #111;
     display: inline-flex; align-items: center; justify-content: center; font: 700 13px sans-serif; flex: none; box-sizing: border-box; }
+  /* schermo intero: solo la mappa, sopra la barra laterale e l'intestazione di Home Assistant.
+     Alla fine, così vale anche sul telefono in verticale; niente altezze in vh, che nel WebView a schermo intero sono sbagliate */
+  :host(.full) { position: fixed; inset: 0; z-index: 2000; width: auto; height: auto; display: flex; flex-direction: column; overflow: hidden; }
+  :host(.full) .toolbar, :host(.full) #verwarn, :host(.full) .main .side { display: none; }
+  :host(.full) .main { flex: 1 1 auto; min-height: 0; height: auto; display: flex; }
+  :host(.full) .main .mapwrap, :host(.full) .main.guida .mapwrap { flex: 1 1 auto; height: auto; min-height: 0; }
+  .fsico { width: 18px; height: 18px; display: block; margin: auto; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 `;
 
 class NavigatorPanel extends HTMLElement {
@@ -616,7 +623,7 @@ class NavigatorPanel extends HTMLElement {
             <button id="modebtn" class="mode go" hidden>▶ Parti</button>
             <button id="locate" title="La mia posizione">◎</button>
             <button id="fit" title="Mostra tutto il percorso">⤢</button>
-            <button id="fullbtn" title="Schermo intero">⛶</button>
+            <button id="fullbtn" title="Schermo intero">${FS_ON}</button>
           </div>
         </div>
       </div>`;
@@ -1414,7 +1421,7 @@ class NavigatorPanel extends HTMLElement {
   _syncFullBtns() {
     for (const b of [this.$("fullbtn"), this.$("navbot")?.querySelector('[data-n="full"]')]) {
       if (!b) continue;
-      b.textContent = this._full ? "🗗" : "⛶";
+      b.innerHTML = this._full ? FS_OFF : FS_ON;
       b.title = this._full ? "Esci dallo schermo intero" : "Schermo intero";
       b.classList.toggle("attn", !!this._full);
     }
@@ -2203,7 +2210,7 @@ class NavigatorPanel extends HTMLElement {
         <button data-n="in" title="Ingrandisci">+</button>
         <button data-n="center" title="Centra sulla tua posizione">◎</button>
         <button data-n="near" title="Distributori, parcheggi e autovelox">🔎</button>
-        <button data-n="full" title="Schermo intero">⛶</button>
+        <button data-n="full" title="Schermo intero">${FS_ON}</button>
         <select data-n="layer" title="Tipo di mappa">${opts}</select>
         <button class="stop" data-n="stop" title="Esci dalla navigazione">■ Esci</button>
       </div>`;
