@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.2.0";
+const PANEL_VERSION = "1.2.1";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 const ICON = new URL("./icon.png", import.meta.url).href;
@@ -940,14 +940,20 @@ class NavigatorPanel extends HTMLElement {
 
   _locate(fly) {
     return new Promise((resolve) => {
-      if (this._companion() === "android") {
+      const android = this._companion() === "android";
+      // app Android: se il GPS della pagina non risponde si ripiega sulla propria persona
+      const fromPerson = () => {
         const me = this._myPerson();
         const st = me && this._hass.states[me.id];
-        if (!st) { this._gpsHelp(true); resolve(null); return; }
+        if (!st) return false;
         this._me = { lat: st.attributes.latitude, lon: st.attributes.longitude };
         this._drawMarkers();
         if (fly) this._map.flyTo([this._me.lat, this._me.lon], 15, { duration: 0.8 });
         resolve(this._me);
+        return true;
+      };
+      if (android && !(window.isSecureContext && window.navigator.geolocation)) {
+        if (!fromPerson()) { this._gpsHelp(true); resolve(null); }
         return;
       }
       if (!window.navigator.geolocation) { this._msg("Questo browser non fornisce la posizione"); resolve(null); return; }
@@ -962,6 +968,7 @@ class NavigatorPanel extends HTMLElement {
         if (fly) this._map.flyTo([this._me.lat, this._me.lon], 15, { duration: 0.8 });
         resolve(this._me);
       }, (err) => {
+        if (android && fromPerson()) return;
         if (err.code === 1) this._gpsHelp();
         else this._msg(`Posizione non disponibile: ${err.message}`);
         resolve(null);
@@ -974,10 +981,7 @@ class NavigatorPanel extends HTMLElement {
   // fonti della posizione: GPS del browser (solo in HTTPS) o entità di Home Assistant aggiornate dall'app Companion
   _navSources() {
     const secure = window.isSecureContext && !!window.navigator.geolocation;
-    const android = this._companion() === "android";
-    const gpsName = android ? "📱 GPS di questo dispositivo (non disponibile nell'app Android)"
-      : secure ? "📱 GPS di questo dispositivo" : "📱 GPS di questo dispositivo (serve HTTPS)";
-    const out = [{ id: "gps", name: gpsName, ok: secure && !android }];
+    const out = [{ id: "gps", name: secure ? "📱 GPS di questo dispositivo" : "📱 GPS di questo dispositivo (serve HTTPS)", ok: secure }];
     for (const [id, st] of Object.entries(this._hass?.states || {})) {
       if (!id.startsWith("person.") && !id.startsWith("device_tracker.")) continue;
       if (st.attributes.latitude == null || st.attributes.longitude == null) continue;
@@ -996,6 +1000,8 @@ class NavigatorPanel extends HTMLElement {
     let saved = null;
     try { saved = localStorage.getItem(`${STORE_KEY}-navsrc`); } catch (e) { /* storage non disponibile */ }
     if (saved && list.some((s) => s.id === saved && s.ok)) return saved;
+    // nell'app Android il GPS si può scegliere, ma di norma si parte dalla propria persona, che funziona sempre
+    if (this._companion() === "android") { const me = this._myPerson(list); if (me) return me.id; }
     if (list[0]?.ok) return "gps";
     const uid = this._hass?.user?.id;
     const mine = list.find((s) => s.id.startsWith("person.") && this._hass.states[s.id].attributes.user_id === uid);
@@ -1014,7 +1020,8 @@ class NavigatorPanel extends HTMLElement {
     const def = this._defaultNavSource(list);
     const opts = list.map((s) => `<option value="${esc(s.id)}" ${s.id === def ? "selected" : ""} ${s.ok ? "" : "disabled"}>${esc(s.name)}</option>`).join("");
     const hint = this._companion() === "android"
-      ? `<div class="muted" style="margin-top:6px">Nell'app Android il GPS arriva tramite la tua persona: per seguirti bene in auto attiva
+      ? `<div class="muted" style="margin-top:6px">Nell'app Android puoi provare il GPS del dispositivo; se l'app non lo passa alla pagina
+         scegli la tua persona. Per seguirti bene in auto con la persona attiva
          nell'app la posizione ad alta precisione (Impostazioni → App Companion → Gestisci sensori → Posizione in background →
          Modalità alta precisione).</div>`
       : window.isSecureContext ? ""
@@ -1030,7 +1037,6 @@ class NavigatorPanel extends HTMLElement {
 
   async _startNav(source) {
     if (!this._result) return;
-    if (source === "gps" && this._companion() === "android") { this._androidHelp(); return; }
     if (source === "gps" && !(window.isSecureContext && window.navigator.geolocation)) {
       this._msg("Il GPS del browser richiede Home Assistant in HTTPS: scegli la posizione dell'app Companion");
       return;
@@ -1552,7 +1558,7 @@ class NavigatorPanel extends HTMLElement {
     });
   }
 
-  // app Companion Android: la sua WebView non passa mai il GPS alle pagine, anche con tutte le autorizzazioni concesse.
+  // app Companion Android: spesso la sua WebView non passa il GPS alle pagine, anche con tutte le autorizzazioni concesse.
   // La posizione arriva a Home Assistant dal sensore dell'app, nella propria persona.
   _androidHelp() {
     const person = this._myPerson();
@@ -1560,8 +1566,8 @@ class NavigatorPanel extends HTMLElement {
     clearTimeout(this._nav?.popTimer);
     el.className = "navpop help";
     el.innerHTML = `<div class="big">📡</div><h4>GPS nell'app Android</h4>
-      <div>Non è un problema di autorizzazioni: l'app Companion per Android <b>non passa il GPS alle pagine</b> che mostra, anche
-        con tutte le autorizzazioni concesse. La posizione arriva però a Home Assistant dal sensore dell'app: Navigator usa quella,
+      <div>Il GPS di questa pagina non risponde: su molti telefoni l'app Companion per Android <b>non passa il GPS alle pagine</b> che
+        mostra, anche con tutte le autorizzazioni concesse. La posizione arriva però a Home Assistant dal sensore dell'app: Navigator usa quella,
         tramite la tua <b>persona</b>.</div>
       <ol>
         <li>Nella sezione <i>Navigazione</i> scegli la tua persona${person ? ` (<b>${esc(person.name.replace(/^\S+\s/, ""))}</b>)` : ""}.</li>

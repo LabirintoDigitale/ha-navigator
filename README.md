@@ -86,8 +86,8 @@ Risposta: `duration_min`, `distance_km`, `has_toll`, `toll_km`, `has_highway`, `
 Dopo aver calcolato un percorso, nella sezione **Navigazione** scegli da dove prendere la posizione e premi **Avvia navigazione**:
 
 - **GPS di questo dispositivo**: il più preciso, ma il browser lo concede solo se Home Assistant è aperto in **HTTPS**.
-  Non funziona nell'**app Companion per Android**, che non passa il GPS alle pagine anche con tutte le autorizzazioni concesse:
-  lì Navigator usa automaticamente la tua persona.
+  Si può scegliere anche nell'**app Companion per Android**, che però spesso non passa il GPS alle pagine anche con tutte le autorizzazioni
+  concesse: lì Navigator parte di norma dalla tua persona e, se il GPS non risponde, propone di usarla.
 - **Una persona o un dispositivo di Home Assistant** (`person.…`, `device_tracker.…`): la posizione inviata dall'**app Companion**, funziona anche in http.
   Per aggiornamenti ogni pochi secondi attiva nell'app *Impostazioni → App Companion → Gestisci sensori → Posizione in background → Modalità alta precisione*.
 
