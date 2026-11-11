@@ -4,9 +4,12 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.3.4";
+const PANEL_VERSION = "1.4.0";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
+// vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
+const MAPLIBRE_JS = new URL("./maplibre/maplibre-gl.js", import.meta.url).href;
+const MAPLIBRE_CSS = new URL("./maplibre/maplibre-gl.css", import.meta.url).href;
 const ICON = new URL("./icon.png", import.meta.url).href;
 const STORE_KEY = "navigator-panel-state";
 
@@ -27,6 +30,30 @@ const LAYERS = {
   otm: ["Escursionistica (OpenTopoMap)", "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", 17,
     `${OSM_C}, SRTM | &copy; <a href="https://opentopomap.org" target="_blank" rel="noopener">OpenTopoMap</a>`],
 };
+
+// vista 3D, fonti gratuite e senza chiave:
+// - quote del terreno: dati aperti Mapzen/Tilezen in formato Terrarium, ospitati su Amazon (AWS Open Data)
+// - edifici: mappe vettoriali OpenFreeMap (dati OpenStreetMap, schema OpenMapTiles) con l'altezza degli edifici
+const DEM_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
+const DEM_ATTR = 'Rilievo <a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md" target="_blank" rel="noopener">Mapzen/Tilezen</a>';
+const OFM_URL = "https://tiles.openfreemap.org/planet";
+const OFM_ATTR = 'Edifici <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> &copy; OpenMapTiles';
+const TERRAIN_EX = [["1", "Reale"], ["1.5", "Accentuato"], ["2", "Molto accentuato"]];
+
+let maplibreLoading = null;
+function loadMaplibre() {
+  if (window.maplibregl) return Promise.resolve(window.maplibregl);
+  if (!maplibreLoading) {
+    maplibreLoading = new Promise((ok, ko) => {
+      const sc = document.createElement("script");
+      sc.src = MAPLIBRE_JS;
+      sc.onload = () => (window.maplibregl ? ok(window.maplibregl) : ko(new Error("libreria 3D non caricata")));
+      sc.onerror = () => { maplibreLoading = null; ko(new Error("libreria 3D non caricata")); };
+      document.head.appendChild(sc);
+    });
+  }
+  return maplibreLoading;
+}
 
 const MODES = [
   ["auto", "🚗", "Auto"],
@@ -151,7 +178,7 @@ const VEHICLE_SVG = { auto: CAR_SVG, moto: MOTO_SVG, bici: BICI_SVG, piedi: PIED
 // impostazioni salvate su questo dispositivo
 const SETTINGS_KEY = "navigator-panel-settings";
 const DEFAULT_SETTINGS = { voice: false, lang: "it", voiceSel: "f", out: "auto", autoZoom: true, beep: false,
-  fuelBrands: [], fuelKind: "", camAlert: true };
+  fuelBrands: [], fuelKind: "", camAlert: true, view3d: false, b3d: true, terrainEx: "1.5" };
 // marche dei distributori (come nell'anagrafica del MIMIT)
 const FUEL_BRANDS = ["Agip Eni", "Api-Ip", "Q8", "Esso", "Tamoil", "Shell", "Retitalia", "Beyfin", "Costantin", "Europam", "Pompe bianche"];
 const BRAND_COLORS = { "agip eni": "#f7c600", "eni": "#f7c600", "api-ip": "#0057a8", "ip": "#0057a8", "q8": "#0a3a7a", "esso": "#d71920",
@@ -501,6 +528,13 @@ const STYLE = `
   :host(.full) .main { flex: 1 1 auto; min-height: 0; height: auto; display: flex; }
   :host(.full) .main .mapwrap, :host(.full) .main.guida .mapwrap { flex: 1 1 auto; height: auto; min-height: 0; }
   .fsico { width: 18px; height: 18px; display: block; margin: auto; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+  /* vista 3D: la mappa MapLibre copre quella di Leaflet, che resta sotto (nascosta) e guida tutto il resto */
+  #map3d { position: absolute; inset: 0; z-index: 450; }
+  #map3d[hidden] { display: none; }
+  #map.under3d { visibility: hidden; }
+  #map3d .maplibregl-ctrl-attrib { font-size: 10px; }
+  .main.guida #map3d .maplibregl-ctrl-bottom-right { bottom: 96px; }
+  button.b3d { font-weight: 700; font-size: 13px; }
 `;
 
 class NavigatorPanel extends HTMLElement {
@@ -614,6 +648,7 @@ class NavigatorPanel extends HTMLElement {
         </div>
         <div class="mapwrap" id="mapwrap">
           <div id="map"></div>
+          <div id="map3d" hidden></div>
           <div class="ctl tr" id="ctltr"><select id="layer"></select></div>
           <div class="navtop" id="navtop" hidden></div>
           <div class="navbot" id="navbot" hidden></div>
@@ -623,6 +658,7 @@ class NavigatorPanel extends HTMLElement {
             <button id="modebtn" class="mode go" hidden>▶ Parti</button>
             <button id="locate" title="La mia posizione">◎</button>
             <button id="fit" title="Mostra tutto il percorso">⤢</button>
+            <button id="b3dbtn" class="b3d" title="Vista 3D con rilievo ed edifici">3D</button>
             <button id="fullbtn" title="Schermo intero">${FS_ON}</button>
           </div>
         </div>
@@ -654,6 +690,9 @@ class NavigatorPanel extends HTMLElement {
 
     // schermo intero e schermo sempre acceso
     $("fullbtn").addEventListener("click", () => this._toggleFull());
+    $("b3dbtn").addEventListener("click", () => this._toggle3d());
+    this._map.on("moveend zoomend", () => this._sync3d());
+    if (this._settings.view3d) setTimeout(() => this._toggle3d(true), 0);
     document.addEventListener("fullscreenchange", () => {
       if (document.fullscreenElement === this) { this._fsReal = true; return; }
       if (this._fsReal) { this._fsReal = false; if (this._full) this._toggleFull(false); } // uscita con il tasto Indietro
@@ -709,8 +748,10 @@ class NavigatorPanel extends HTMLElement {
   _setLayer(key) {
     const [, url, maxZoom, attribution] = LAYERS[key];
     if (this._tiles) this._map.removeLayer(this._tiles);
-    this._tiles = L.tileLayer(url, { maxZoom, attribution, subdomains: "abc" }).addTo(this._map);
+    this._tiles = L.tileLayer(url, { maxZoom, attribution, subdomains: "abc" });
+    if (!this._3d) this._tiles.addTo(this._map); // in 3D le mappe le scarica solo MapLibre
     this._layer = key;
+    if (this._3d) this._set3dBase();
   }
 
   _homePoint() {
@@ -946,6 +987,7 @@ class NavigatorPanel extends HTMLElement {
   _drawMarkers() {
     if (!this._markerLayer) return;
     this._markerLayer.clearLayers();
+    this._schedule3d();
     const n = this._points.length;
     this._points.forEach((p, i) => {
       if (!p || (this._nav && i === 0)) return; // in navigazione la partenza è il pallino della posizione
@@ -1122,6 +1164,8 @@ class NavigatorPanel extends HTMLElement {
     this._meMarker?.remove();
     this._accCircle?.remove();
     this._meMarker = this._accCircle = null;
+    this._me3d?.remove();
+    this._me3d = null;
     this._carRot = null;
     this._closeNearby();
     for (const id of ["navtop", "navbot", "navpop"]) this.$(id).hidden = true;
@@ -1334,6 +1378,7 @@ class NavigatorPanel extends HTMLElement {
     }
     const svg = this._meMarker.getElement()?.querySelector("svg");
     if (svg) svg.style.transform = `rotate(${this._carRot}deg)`;
+    this._drawMe3d();
   }
 
   _isGuida() {
@@ -1456,6 +1501,219 @@ class NavigatorPanel extends HTMLElement {
     try { await this._noSleep.play(); } catch (e) { /* il browser non lo permette: lo schermo può spegnersi */ }
   }
 
+  // ----------------------------------------------------------------- vista 3D (MapLibre): rilievo ed edifici
+  // Leaflet resta la mappa "vera" (percorso, guida, ricalcolo, gesti in 2D): la vista 3D la ricopia e le rimanda
+  // i movimenti fatti a mano. In guida la telecamera segue la posizione, inclinata e girata nella direzione di marcia.
+
+  _webgl() {
+    try {
+      const c = document.createElement("canvas");
+      return !!(c.getContext("webgl2") || c.getContext("webgl"));
+    } catch (e) { return false; }
+  }
+
+  async _toggle3d(on = !this._3d) {
+    if (on && !this._webgl()) { this._msg("Questo dispositivo non supporta la grafica 3D (WebGL)"); return; }
+    this._3d = on;
+    this._sync3dBtns();
+    if (on) {
+      try {
+        await this._init3d();
+      } catch (e) {
+        this._3d = false;
+        this._sync3dBtns();
+        this._msg(`Vista 3D non disponibile: ${e.message || e}`);
+        return;
+      }
+      if (!this._3d) return; // spenta mentre si caricava
+      this.$("map3d").hidden = false;
+      this.$("map").classList.add("under3d");
+      if (this._tiles && this._map.hasLayer(this._tiles)) this._map.removeLayer(this._tiles);
+      this._g3.resize();
+      this._update3d();
+      this._sync3d();
+    } else {
+      this.$("map3d").hidden = true;
+      this.$("map").classList.remove("under3d");
+      if (this._tiles && !this._map.hasLayer(this._tiles)) this._tiles.addTo(this._map);
+    }
+    this._settings.view3d = this._3d;
+    this._saveSettings();
+  }
+
+  _sync3dBtns() {
+    for (const b of [this.$("b3dbtn"), this.$("navbot")?.querySelector('[data-n="3d"]')]) {
+      if (!b) continue;
+      b.classList.toggle("attn", !!this._3d);
+      b.title = this._3d ? "Torna alla mappa piatta" : "Vista 3D con rilievo ed edifici";
+    }
+  }
+
+  _baseSource() {
+    const [, url, maxZoom, attribution] = LAYERS[this._layer] || LAYERS.strade;
+    const tiles = url.includes("{s}") ? ["a", "b", "c"].map((x) => url.replace("{s}", x)) : [url];
+    return { type: "raster", tiles, tileSize: 256, maxzoom: maxZoom, attribution };
+  }
+
+  async _init3d() {
+    if (this._g3) { await this._g3ready; this._apply3dSettings(); this._set3dBase(); return; }
+    const ml = await loadMaplibre();
+    if (!this.shadowRoot.querySelector("link[data-ml]")) {
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = MAPLIBRE_CSS;
+      link.dataset.ml = "1";
+      this.shadowRoot.prepend(link);
+    }
+    const el = this.$("map3d");
+    el.hidden = false; // MapLibre misura il contenitore alla creazione
+    const c = this._map.getCenter();
+    const dem = { type: "raster-dem", tiles: [DEM_URL], tileSize: 256, maxzoom: 15, encoding: "terrarium" };
+    const g = new ml.Map({
+      container: el, center: [c.lng, c.lat], zoom: this._map.getZoom() - 1, pitch: 55, maxPitch: 75,
+      attributionControl: { compact: true },
+      style: {
+        version: 8,
+        sources: {
+          base: this._baseSource(),
+          dem: { ...dem, attribution: DEM_ATTR },
+          hs: dem,
+          lines: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
+        },
+        layers: [
+          { id: "base", type: "raster", source: "base" },
+          { id: "hs", type: "hillshade", source: "hs", paint: { "hillshade-exaggeration": 0.3, "hillshade-shadow-color": "#3e3a36" } },
+          { id: "lines", type: "line", source: "lines", layout: { "line-join": "round", "line-cap": "round", "line-sort-key": ["get", "i"] },
+            paint: { "line-color": ["get", "c"], "line-width": ["get", "w"], "line-opacity": ["get", "o"] } },
+        ],
+        terrain: { source: "dem", exaggeration: +this._settings.terrainEx || 1.5 },
+        sky: { "sky-color": "#8cc3f0", "horizon-color": "#dcebf7", "fog-color": "#f2f2f2", "sky-horizon-blend": 0.6,
+          "horizon-fog-blend": 0.5, "fog-ground-blend": 0.85, "atmosphere-blend": 0.6 },
+      },
+    });
+    this._g3 = g;
+    this._g3markers = [];
+    // pronta appena c'è lo stile, senza aspettare i primi riquadri (con rete lenta il "load" arriva tardi)
+    this._g3ready = new Promise((ok) => { g.once("style.load", ok); g.once("load", ok); }).then(() => { this._g3ok = true; });
+    g.on("error", (e) => console.debug("Navigator 3D:", e?.error?.message || e)); // riquadri mancanti: la vista va avanti
+    // movimenti fatti a mano nella vista 3D: la guida smette di seguire, Leaflet si sposta nello stesso punto
+    for (const ev of ["dragstart", "zoomstart", "rotatestart", "pitchstart"]) {
+      g.on(ev, (e) => {
+        if (!e.originalEvent) return;
+        if (ev === "zoomstart" && this._nav) this._nav.manualZoomUntil = Date.now() + 20000;
+        if (ev !== "pitchstart") this._userMoved();
+      });
+    }
+    g.on("moveend", (e) => {
+      if (!e.originalEvent || (this._nav?.follow)) return;
+      const cc = g.getCenter();
+      this._from3d = true;
+      try { this._map.setView([cc.lat, cc.lng], g.getZoom() + 1, { animate: false }); } finally { this._from3d = false; }
+    });
+    g.on("click", (e) => this._mapClick(L.latLng(e.lngLat.lat, e.lngLat.lng)));
+    await this._g3ready;
+    this._apply3dSettings();
+  }
+
+  // impostazioni della vista 3D: rilievo ed edifici
+  _apply3dSettings() {
+    const g = this._g3;
+    if (!g || !this._g3ok) return;
+    g.setTerrain({ source: "dem", exaggeration: +this._settings.terrainEx || 1.5 });
+    const want = this._settings.b3d !== false;
+    if (want && !g.getLayer("bld")) {
+      if (!g.getSource("ofm")) g.addSource("ofm", { type: "vector", url: OFM_URL, attribution: OFM_ATTR });
+      g.addLayer({ id: "bld", type: "fill-extrusion", source: "ofm", "source-layer": "building", minzoom: 14,
+        paint: { "fill-extrusion-color": "#d9d4cb", "fill-extrusion-opacity": 0.85,
+          "fill-extrusion-height": ["coalesce", ["get", "render_height"], 8],
+          "fill-extrusion-base": ["coalesce", ["get", "render_min_height"], 0] } }, "lines");
+    } else if (!want && g.getLayer("bld")) {
+      g.removeLayer("bld");
+    }
+  }
+
+  _set3dBase() {
+    const g = this._g3;
+    if (!g || !this._g3ok) return;
+    g.removeLayer("base");
+    g.removeSource("base");
+    g.addSource("base", this._baseSource());
+    g.addLayer({ id: "base", type: "raster", source: "base" }, "hs");
+  }
+
+  // percorso e segnaposto ricopiati da Leaflet (una volta per fotogramma, anche se cambiano più cose insieme)
+  _schedule3d() {
+    if (!this._3d || this._g3pending) return;
+    this._g3pending = true;
+    requestAnimationFrame(() => { this._g3pending = false; this._update3d(); });
+  }
+
+  _update3d() {
+    const g = this._g3;
+    if (!this._3d || !g || !this._g3ok) return;
+    const feats = [];
+    let i = 0;
+    this._routeLayer.eachLayer((l) => {
+      if (!(l instanceof L.Polyline)) return;
+      const o = l.options;
+      feats.push({ type: "Feature", properties: { c: o.color, w: o.weight, o: o.opacity ?? 1, i: i++ },
+        geometry: { type: "LineString", coordinates: l.getLatLngs().map((p) => [p.lng, p.lat]) } });
+    });
+    g.getSource("lines").setData({ type: "FeatureCollection", features: feats });
+    for (const m of this._g3markers) m.remove();
+    this._g3markers = [];
+    for (const grp of [this._markerLayer, this._poiLayer]) {
+      grp.eachLayer((l) => {
+        const ic = l.options?.icon?.options;
+        if (!(l instanceof L.Marker) || !ic?.html) return;
+        const el = document.createElement("div");
+        el.innerHTML = ic.html;
+        const a = ic.iconAnchor || [0, 0];
+        const ll = l.getLatLng();
+        this._g3markers.push(new window.maplibregl.Marker({ element: el, anchor: "top-left", offset: [-a[0], -a[1]] })
+          .setLngLat([ll.lng, ll.lat]).addTo(g));
+      });
+    }
+    this._drawMe3d();
+  }
+
+  // il veicolo: disegnato sul piano della mappa, così si inclina con la vista e gira con la direzione di marcia
+  _drawMe3d() {
+    const g = this._g3;
+    const f = this._nav?.fix;
+    if (!this._3d || !g || !f) return;
+    if (!this._me3d) {
+      const el = document.createElement("div");
+      el.innerHTML = `<div class="nav-car">${VEHICLE_SVG[this._mode] || CAR_SVG}</div>`;
+      this._me3d = new window.maplibregl.Marker({ element: el, rotationAlignment: "map", pitchAlignment: "map" })
+        .setLngLat([f.lon, f.lat]).addTo(g);
+    }
+    this._me3d.setLngLat([f.lon, f.lat]).setRotation(this._nav.dir ?? 0);
+    this._sync3d();
+  }
+
+  // telecamera 3D: in guida segue la posizione (nel terzo basso, girata nella direzione di marcia), altrimenti ricopia Leaflet
+  _sync3d() {
+    const g = this._g3;
+    if (!this._3d || !g || this._from3d) return;
+    const nav = this._nav;
+    const z = this._map.getZoom() - 1; // MapLibre misura lo zoom con riquadri da 512 pixel, Leaflet da 256
+    const none = { top: 0, bottom: 0, left: 0, right: 0 };
+    if (nav?.fix && nav.follow) {
+      const guida = this._isGuida();
+      const key = `${nav.fix.lat},${nav.fix.lon},${z},${nav.dir},${guida}`;
+      if (key === this._g3key) return;
+      this._g3key = key;
+      g.easeTo({ center: [nav.fix.lon, nav.fix.lat], zoom: z, duration: 700, easing: (t) => t,
+        bearing: guida && nav.dir != null ? nav.dir : g.getBearing(), pitch: guida ? 60 : g.getPitch(),
+        padding: guida ? { ...none, top: this.$("mapwrap").clientHeight * 0.45 } : none });
+    } else {
+      this._g3key = null;
+      const c = this._map.getCenter();
+      g.jumpTo({ center: [c.lng, c.lat], zoom: z, padding: none });
+    }
+  }
+
   // dopo un cambio di dimensioni: mappa sulla posizione seguita, altrimenti sul centro di prima
   _relayout() {
     const m = this._map;
@@ -1463,6 +1721,7 @@ class NavigatorPanel extends HTMLElement {
     const c = m.getCenter();
     this._layoutRot();
     m.invalidateSize({ pan: false });
+    if (this._3d) this._g3?.resize();
     if (this._nav?.fix && this._nav.follow) this._followView(false);
     else m.setView(c, m.getZoom(), { animate: false });
   }
@@ -1856,6 +2115,7 @@ class NavigatorPanel extends HTMLElement {
     body.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => this._nearGo(cat, shown[+b.dataset.go])));
     // segnaposto sulla mappa
     this._poiLayer.clearLayers();
+    this._schedule3d();
     for (const it of shown) {
       const ic = cat === "fuel" ? "⛽" : cat === "parking" ? "🅿️" : "📷";
       const col = cat === "fuel" ? brandColor(it.brand) : cat === "parking" ? "#1565c0" : "#263238";
@@ -2084,6 +2344,12 @@ class NavigatorPanel extends HTMLElement {
       <div class="grp"><h3>Mappa</h3>
         ${sw("autoZoom", "Zoom automatico in base alla velocità", "In guida: più vicino in città, più largo in autostrada. Dopo + o − resta il tuo zoom per 20 secondi")}
       </div>
+      <div class="grp"><h3>Vista 3D</h3>
+        <div class="note">Tasto <b>3D</b> sulla mappa e nella barra della guida: mappa inclinata con il rilievo del terreno. Usa la grafica del
+          telefono e scarica anche le quote del terreno: consuma più batteria e dati della mappa piatta.</div>
+        <label class="line"><span>Rilievo</span><select data-s="terrainEx">${TERRAIN_EX.map(([v, n]) => `<option value="${v}" ${String(s.terrainEx) === v ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+        ${sw("b3d", "Edifici in 3D", "Da vicino, con l'altezza degli edifici dove è nota (OpenFreeMap, dati OpenStreetMap)")}
+      </div>
       <div class="grp"><h3>Velocità</h3>
         ${sw("camAlert", "Avviso autovelox fissi", "Cartello nella barra della guida e, con le indicazioni vocali o il beep attivi, avviso a 600 metri (da 1 km in autostrada)")}
         ${sw("beep", "Beep quando superi il limite", "Limiti da OpenStreetMap, per auto e moto; tolleranza di 3 km/h (5% sopra i 60)")}
@@ -2107,6 +2373,7 @@ class NavigatorPanel extends HTMLElement {
     wrap.querySelectorAll("input[data-s]").forEach((el) => el.addEventListener("change", () => {
       s[el.dataset.s] = el.checked;
       this._saveSettings();
+      if (el.dataset.s === "b3d") this._apply3dSettings();
       if (el.dataset.s === "voice" && el.checked) this._unlockAudio();
     }));
     wrap.querySelectorAll("select[data-s]").forEach((el) => el.addEventListener("change", () => {
@@ -2114,6 +2381,7 @@ class NavigatorPanel extends HTMLElement {
       s[k] = el.value;
       if (k === "lang") s.voiceSel = s.voiceSel === "m" ? "m" : "f"; // le voci cambiano con la lingua
       this._saveSettings();
+      if (k === "terrainEx") this._apply3dSettings();
       if (k === "lang" && this._result && !this._nav) this._compute(false); // indicazioni nella nuova lingua
       this._openSettings();
     }));
@@ -2210,6 +2478,7 @@ class NavigatorPanel extends HTMLElement {
         <button data-n="in" title="Ingrandisci">+</button>
         <button data-n="center" title="Centra sulla tua posizione">◎</button>
         <button data-n="near" title="Distributori, parcheggi e autovelox">🔎</button>
+        <button data-n="3d" class="b3d" title="Vista 3D con rilievo ed edifici">3D</button>
         <button data-n="full" title="Schermo intero">${FS_ON}</button>
         <select data-n="layer" title="Tipo di mappa">${opts}</select>
         <button class="stop" data-n="stop" title="Esci dalla navigazione">■ Esci</button>
@@ -2231,7 +2500,9 @@ class NavigatorPanel extends HTMLElement {
     bot.querySelector('[data-n="near"]').addEventListener("click", () => this._openNearby(this._nearCat || "fuel"));
     bot.querySelector('[data-n="stop"]').addEventListener("click", () => this._stopNav());
     bot.querySelector('[data-n="full"]').addEventListener("click", () => this._toggleFull());
+    bot.querySelector('[data-n="3d"]').addEventListener("click", () => this._toggle3d());
     this._syncFullBtns();
+    this._sync3dBtns();
   }
 
   // ----------------------------------------------------------------- calcolo del percorso
@@ -2275,6 +2546,7 @@ class NavigatorPanel extends HTMLElement {
 
   _drawRoute() {
     this._routeLayer.clearLayers();
+    this._schedule3d();
     const r = this._result;
     if (!r) return;
     // alternative (sotto, grigie e cliccabili), poi il percorso scelto

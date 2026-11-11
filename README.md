@@ -61,6 +61,8 @@ Tutte le richieste partono da Home Assistant (nessuna chiave, nessun account):
 | Carburanti e prezzi (Italia) | [Prezzi alle 8 del MIMIT](https://www.mimit.gov.it/images/exportCSV/prezzo_alle_8.csv) | due volte al giorno |
 | Autovelox fissi, parcheggi | OpenStreetMap tramite [Overpass](https://overpass-api.de) | autovelox una volta alla settimana, parcheggi su richiesta |
 | Mappe | Esri (stradale, topografica, scura, satellite), OpenTopoMap | caricate dal browser; i server di OpenStreetMap bloccano le richieste da un Home Assistant in rete locale |
+| Rilievo (vista 3D) | Quote del terreno [Mapzen/Tilezen Terrarium](https://registry.opendata.aws/terrain-tiles/) (AWS Open Data) | caricate dal browser, solo in 3D |
+| Edifici 3D | [OpenFreeMap](https://openfreemap.org) (dati OpenStreetMap, schema OpenMapTiles) | caricati dal browser, solo in 3D e da vicino |
 
 Sono servizi gratuiti offerti dalla comunità con limiti d'uso "ragionevole": Navigator è pensato per l'uso personale.
 Nelle **opzioni dell'integrazione** puoi indicare i tuoi server Valhalla, OSRM, Photon o Nominatim.
@@ -127,6 +129,18 @@ Con un percorso calcolato, la sezione **Nelle vicinanze** del pannello (e in gui
 
 I dati scaricati restano in `config/navigator_cache/`.
 
+### Vista 3D
+
+Il tasto **3D** (sulla mappa e nella barra della guida) inclina la mappa e mostra il **rilievo del terreno**, con le ombre sui
+versanti, e gli **edifici in 3D** da vicino (con l'altezza dove è mappata in OpenStreetMap). Sopra il rilievo resta la mappa scelta
+(stradale, satellite, topografica…), con percorso, tappe, distributori e veicolo. In guida la vista è inclinata, gira nella direzione
+di marcia e ti segue; con due dita si può girare e inclinare, trascinando smette di seguirti fino a **Ricentra**. Premuto di nuovo,
+**3D** torna alla mappa piatta; la scelta resta per le volte successive.
+
+- Usa la grafica del telefono (WebGL) e scarica anche le quote del terreno: consuma più batteria e dati della mappa piatta.
+- In ⚙ si sceglie quanto accentuare il rilievo e si possono togliere gli edifici.
+- La libreria 3D ([MapLibre GL JS](https://maplibre.org)) è inclusa in `frontend/maplibre` e si carica solo alla prima pressione di **3D**.
+
 ### Impostazioni (⚙ in alto a destra)
 
 Valgono per il dispositivo che stai usando:
@@ -160,6 +174,9 @@ Se resti fuori per almeno 6 secondi (e almeno due posizioni) ricalcola il percor
 
 Dati cartografici © [OpenStreetMap](https://www.openstreetmap.org/copyright) e collaboratori (ODbL).
 Mappa interattiva: [Leaflet](https://leafletjs.com) (BSD-2-Clause), incluso in `frontend/leaflet`.
+Vista 3D: [MapLibre GL JS](https://maplibre.org) (BSD-3-Clause), incluso in `frontend/maplibre`.
+Rilievo: dati [Mapzen/Tilezen](https://github.com/tilezen/joerd/blob/master/docs/attribution.md) (SRTM, GMTED, ETOPO1 e altri).
+Edifici: [OpenFreeMap](https://openfreemap.org), © [OpenMapTiles](https://openmaptiles.org), dati © OpenStreetMap.
 
 ## Licenza
 
