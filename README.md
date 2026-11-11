@@ -70,7 +70,7 @@ Tutte le richieste partono da Home Assistant (nessuna chiave, nessun account):
 | Autovelox fissi, parcheggi | OpenStreetMap tramite [Overpass](https://overpass-api.de) | autovelox una volta alla settimana, parcheggi su richiesta |
 | Mappe | Esri (stradale, topografica, scura, satellite), OpenTopoMap | caricate dal browser; i server di OpenStreetMap bloccano le richieste da un Home Assistant in rete locale |
 | Rilievo (vista 3D) | Quote del terreno [Mapzen/Tilezen Terrarium](https://registry.opendata.aws/terrain-tiles/) (AWS Open Data) | caricate dal browser, solo in 3D |
-| Edifici 3D | [OpenFreeMap](https://openfreemap.org) (dati OpenStreetMap, schema OpenMapTiles) | caricati dal browser, solo in 3D e da vicino |
+| Edifici 3D, gallerie | [OpenFreeMap](https://openfreemap.org) (dati OpenStreetMap, schema OpenMapTiles) | caricati dal browser, solo in 3D |
 
 Sono servizi gratuiti offerti dalla comunità con limiti d'uso "ragionevole": Navigator è pensato per l'uso personale.
 Nelle **opzioni dell'integrazione** puoi indicare i tuoi server Valhalla, OSRM, Photon o Nominatim.
@@ -151,6 +151,22 @@ alla telecamera, Navigator la allontana quanto basta (la vista resta sopra il te
 - Usa la grafica del telefono (WebGL) e scarica anche le quote del terreno: consuma più batteria e dati della mappa piatta.
 - In ⚙ si sceglie quanto accentuare il rilievo e si possono togliere gli edifici.
 - La libreria 3D ([MapLibre GL JS](https://maplibre.org)) è inclusa in `frontend/maplibre` e si carica solo alla prima pressione di **3D**.
+
+### Gallerie
+
+Con la vista 3D attiva Navigator riconosce le **gallerie** sul percorso (strade in galleria di OpenStreetMap, dalle mappe di
+OpenFreeMap, man mano che la zona si carica): sulla mappa quei tratti sono **grigi a trattini**, perché la linea in 3D segue
+comunque il terreno e sembrerebbe salire sulla collina.
+
+In guida, entrando in una galleria riconosciuta:
+
+- al posto della mappa compare l'**animazione di un tunnel** stilizzato che scorre (più veloce quando vai più forte), con
+  *"In galleria · uscita tra circa …"*; si può disattivare in ⚙ → *Animazione in galleria*;
+- il GPS di solito si perde o ti mette sulla strada sopra la collina: Navigator **stima la posizione** facendola avanzare sul
+  percorso alla velocità che avevi all'ingresso, ignora le posizioni sbagliate e **non ricalcola**;
+- quando il GPS ti ritrova all'uscita si torna alla posizione vera.
+
+Le gallerie trovate restano note anche tornando alla mappa piatta.
 
 ### Impostazioni (⚙ in alto a destra)
 

@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.4.4";
+const PANEL_VERSION = "1.5.0";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -178,7 +178,7 @@ const VEHICLE_SVG = { auto: CAR_SVG, moto: MOTO_SVG, bici: BICI_SVG, piedi: PIED
 // impostazioni salvate su questo dispositivo
 const SETTINGS_KEY = "navigator-panel-settings";
 const DEFAULT_SETTINGS = { voice: false, lang: "it", voiceSel: "f", out: "auto", autoZoom: true, beep: false,
-  fuelBrands: [], fuelKind: "", camAlert: true, view3d: false, b3d: true, terrainEx: "1.5", pitch3d: 60 };
+  fuelBrands: [], fuelKind: "", camAlert: true, view3d: false, b3d: true, terrainEx: "1.5", pitch3d: 60, tunnelFx: true };
 // marche dei distributori (come nell'anagrafica del MIMIT)
 const FUEL_BRANDS = ["Agip Eni", "Api-Ip", "Q8", "Esso", "Tamoil", "Shell", "Retitalia", "Beyfin", "Costantin", "Europam", "Pompe bianche"];
 const BRAND_COLORS = { "agip eni": "#f7c600", "eni": "#f7c600", "api-ip": "#0057a8", "ip": "#0057a8", "q8": "#0a3a7a", "esso": "#d71920",
@@ -544,6 +544,28 @@ const STYLE = `
   .pitchctl svg { width: 22px; height: 22px; display: block; margin: auto; fill: none; stroke: currentColor; stroke-width: 2.6;
     stroke-linecap: round; stroke-linejoin: round; }
   .pitchctl span { font: 600 12px sans-serif; padding: 1px 0; }
+  /* galleria: animazione stilizzata di un tunnel che si percorre (archi che vengono incontro, luci, strada) */
+  .tunfx { position: absolute; inset: 0; z-index: 960; pointer-events: none; overflow: hidden; opacity: 0; transition: opacity .6s;
+    background: radial-gradient(ellipse at 50% 45%, #4a3f2e 0%, #1d1913 40%, #060606 100%); --tfd: 2.4s; }
+  .tunfx.on { opacity: 1; }
+  .tunfx[hidden] { display: none; }
+  .tf-ring { position: absolute; left: 50%; top: 45%; width: 80vmin; height: 66vmin; margin-left: -40vmin; margin-top: -40vmin;
+    border: 4px solid rgba(255, 196, 120, .6); border-bottom: none; border-radius: 50% 50% 0 0 / 75% 75% 0 0;
+    transform-origin: 50% 61%; transform: scale(.04); opacity: 0; animation: tf-ring var(--tfd) linear infinite;
+    box-shadow: inset 0 6px 22px rgba(255, 170, 80, .25); }
+  .tf-ring::after { content: ""; position: absolute; left: 50%; top: -5px; width: 34px; height: 6px; margin-left: -17px; border-radius: 3px;
+    background: #ffe2b0; box-shadow: 0 0 14px 5px rgba(255, 205, 130, .65); }
+  @keyframes tf-ring { 0% { transform: scale(.04); opacity: 0; } 18% { opacity: .95; } 100% { transform: scale(2.8); opacity: 0; } }
+  .tf-road { position: absolute; left: 50%; top: 45%; bottom: 0; width: 170vmin; margin-left: -85vmin;
+    background: linear-gradient(#262626, #3a3a3a); clip-path: polygon(49.3% 0, 50.7% 0, 100% 100%, 0 100%); }
+  .tf-road::after { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 3vmin; margin-left: -1.5vmin;
+    background: repeating-linear-gradient(to bottom, #f2f2f2 0 7%, transparent 7% 16%); background-size: 100% 32%;
+    animation: tf-dash var(--tfd) linear infinite; clip-path: polygon(45% 0, 55% 0, 100% 100%, 0 100%); }
+  @keyframes tf-dash { from { background-position: 0 0; } to { background-position: 0 100%; } }
+  .tf-label { position: absolute; left: 50%; top: 64%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center;
+    gap: 2px; background: rgba(0, 0, 0, .6); color: #fff; padding: 8px 18px; border-radius: 18px; font: 600 16px sans-serif; white-space: nowrap; }
+  .tf-label small { font-weight: 400; font-size: 13px; opacity: .85; }
+  @media (prefers-reduced-motion: reduce) { .tf-ring, .tf-road::after { animation-duration: calc(var(--tfd) * 3); } }
 `;
 
 class NavigatorPanel extends HTMLElement {
@@ -658,6 +680,8 @@ class NavigatorPanel extends HTMLElement {
         <div class="mapwrap" id="mapwrap">
           <div id="map"></div>
           <div id="map3d" hidden></div>
+          <div class="tunfx" id="tunfx" hidden><div class="tf-road"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -0 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -1 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -2 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -3 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -4 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -5 / 6)"></div>
+            <div class="tf-label"><span>🚇 In galleria</span><small id="tunrem"></small></div></div>
           <div class="pitchctl" id="pitchctl" hidden>
             <button data-p="-15" title="Più dall'alto"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></button>
             <span id="pitchval"></span>
@@ -1170,6 +1194,7 @@ class NavigatorPanel extends HTMLElement {
   _stopNav() {
     const nav = this._nav;
     if (!nav) return;
+    this._tunnelExit();
     if (nav.watch != null) window.navigator.geolocation.clearWatch(nav.watch);
     clearTimeout(nav.popTimer);
     this._nav = null;
@@ -1238,6 +1263,7 @@ class NavigatorPanel extends HTMLElement {
     const nav = this._nav;
     if (!nav || !this._result) return;
     const now = Date.now();
+    if (nav.tun && this._tunnelGate(fix, now)) return; // in galleria: posizione stimata, il GPS non sposta la guida
     const prev = nav.fix;
     if (prev && distM([prev.lat, prev.lon], [fix.lat, fix.lon]) > 3) {
       nav.heading = bearing([prev.lat, prev.lon], [fix.lat, fix.lon]);
@@ -1285,10 +1311,188 @@ class NavigatorPanel extends HTMLElement {
       nav.idx = snap.idx;
       for (let leg = 1; leg < rt._legStart.length; leg++) if (snap.idx >= rt._legStart[leg]) nav.passed = Math.max(nav.passed, leg);
       if (!nav.rerouting) this._voiceGuide(rt, snap.along);
+      // il GPS si perde spesso poco prima dell'imbocco: la stima parte già 60 m prima (le posizioni buone valgono ancora)
+      const r = this._tunnelRanges(rt).find(([a, b]) => snap.along >= a - 60 && snap.along < b - 40);
+      if (r && !nav.tun) this._tunnelEnter(rt, r, snap.along);
     }
     this._speedCheck(rt, snap.dist <= limit ? snap.idx : null);
     if (snap.dist <= limit) this._cameraCheck(rt, snap.along);
     this._renderNav();
+  }
+
+  // ----------------------------------------------------------------- gallerie
+  // Riconosciute dalle strade in galleria di OpenStreetMap (mappe vettoriali OpenFreeMap, scaricate dalla vista 3D man mano
+  // che la zona si carica): i tratti del percorso che le seguono diventano "in galleria". In guida, dentro la galleria,
+  // il GPS si perde o salta (spesso sulla strada sopra la collina): la posizione avanza sul percorso alla velocità
+  // d'ingresso, compare l'animazione del tunnel e non si ricalcola, finché il GPS non ritrova l'uscita.
+
+  _scheduleTunnels() {
+    clearTimeout(this._tunTimer);
+    this._tunTimer = setTimeout(() => this._collectTunnels(), 400);
+  }
+
+  _collectTunnels() {
+    const g = this._g3;
+    if (!g || !this._g3ok || !g.getSource("ofm")) return;
+    let feats = [];
+    try {
+      feats = g.querySourceFeatures("ofm", { sourceLayer: "transportation", filter: ["==", ["get", "brunnel"], "tunnel"] });
+    } catch (e) { return; }
+    const roads = new Set(["motorway", "trunk", "primary", "secondary", "tertiary", "minor", "service"]);
+    this._tunGeoms ??= new Map();
+    let added = 0;
+    for (const f of feats) {
+      if (!roads.has(String(f.properties?.class || "").replace(/_construction$/, ""))) continue;
+      const geom = f.geometry;
+      const lines = geom.type === "LineString" ? [geom.coordinates] : geom.type === "MultiLineString" ? geom.coordinates : [];
+      for (const ln of lines) {
+        if (ln.length < 2) continue;
+        const key = ln.map((c) => `${c[0].toFixed(5)},${c[1].toFixed(5)}`).join(";");
+        if (this._tunGeoms.has(key)) continue;
+        const pts = ln.map((c) => [c[1], c[0]]);
+        const lats = pts.map((p) => p[0]);
+        const lons = pts.map((p) => p[1]);
+        this._tunGeoms.set(key, { pts, box: [Math.min(...lats), Math.min(...lons), Math.max(...lats), Math.max(...lons)] });
+        added++;
+      }
+    }
+    if (!added) return;
+    this._tunVer = (this._tunVer || 0) + 1;
+    const rt = this._result?.routes[this._sel];
+    if (!rt) return;
+    const before = JSON.stringify(rt._tun?.list || []);
+    if (JSON.stringify(this._tunnelRanges(rt)) !== before) this._drawRoute();
+  }
+
+  // tratti del percorso in galleria, in metri dall'inizio: [[da, a], ...]
+  _tunnelRanges(rt) {
+    if (!rt || !this._tunGeoms?.size) return [];
+    if (rt._tun && rt._tun.ver === this._tunVer) return rt._tun.list;
+    this._geom(rt);
+    const sh = rt.shape;
+    const c = rt._cum;
+    const pad = 0.00025; // ~25 m
+    const mark = new Uint8Array(Math.max(0, sh.length - 1));
+    for (const { pts, box } of this._tunGeoms.values()) {
+      for (let i = 0; i < sh.length - 1; i++) {
+        const m = [(sh[i][0] + sh[i + 1][0]) / 2, (sh[i][1] + sh[i + 1][1]) / 2];
+        if (m[0] < box[0] - pad || m[0] > box[2] + pad || m[1] < box[1] - pad || m[1] > box[3] + pad) continue;
+        const pos = { lat: m[0], lon: m[1] };
+        for (let k = 0; k < pts.length - 1; k++) {
+          if (segDist(pos, pts[k], pts[k + 1]).dist < 15) { mark[i] = 1; break; }
+        }
+      }
+    }
+    const list = [];
+    for (let i = 0; i < mark.length; i++) {
+      if (!mark[i]) continue;
+      let j = i;
+      while (j + 1 < mark.length && (mark[j + 1] || (mark[j + 2] && c[j + 2] - c[j + 1] < 30))) j++;
+      if (c[j + 1] - c[i] >= 60) list.push([Math.round(c[i]), Math.round(c[j + 1])]);
+      i = j;
+    }
+    rt._tun = { ver: this._tunVer, list };
+    return list;
+  }
+
+  // punti del percorso fra due distanze dall'inizio
+  _sliceAlong(rt, a, b) {
+    const out = [this._pointAt(rt, a).ll];
+    const c = rt._cum;
+    for (let i = 0; i < rt.shape.length; i++) if (c[i] > a && c[i] < b) out.push(rt.shape[i]);
+    out.push(this._pointAt(rt, b).ll);
+    return out;
+  }
+
+  // posizione sul percorso a una certa distanza dall'inizio, con la direzione della strada
+  _pointAt(rt, along) {
+    const sh = rt.shape;
+    const c = rt._cum;
+    let lo = 0;
+    let hi = c.length - 1;
+    while (lo < hi - 1) { const mid = (lo + hi) >> 1; if (c[mid] <= along) lo = mid; else hi = mid; }
+    const i = Math.min(lo, sh.length - 2);
+    const len = c[i + 1] - c[i];
+    const t = len > 0 ? Math.max(0, Math.min(1, (along - c[i]) / len)) : 0;
+    const ll = [sh[i][0] + t * (sh[i + 1][0] - sh[i][0]), sh[i][1] + t * (sh[i + 1][1] - sh[i][1])];
+    return { ll, idx: i, t, dir: bearing(sh[i], sh[i + 1]) };
+  }
+
+  _tunnelEnter(rt, [a, b], along) {
+    const nav = this._nav;
+    const v = Math.max(0, nav.speed || 0);
+    nav.tun = { rt, start: a, end: b, along0: along, t0: Date.now(), since: Date.now(), speed: v,
+      maxMs: Math.max(90000, ((b - along) / Math.max(v, 3)) * 3000) };
+    clearInterval(this._tunTick);
+    this._tunTick = setInterval(() => this._tunnelStep(), 1000);
+    this._tunnelStep();
+  }
+
+  _tunnelExit() {
+    clearInterval(this._tunTick);
+    this._tunTick = null;
+    if (this._nav) this._nav.tun = null;
+    this._tunnelFx();
+  }
+
+  // posizione GPS durante la galleria: vale solo se è sul percorso, precisa e più avanti; all'uscita si torna al GPS
+  _tunnelGate(fix, now) {
+    const nav = this._nav;
+    const t = nav.tun;
+    const rt = this._geom(this._result.routes[this._sel]);
+    if (t.rt !== rt) { this._tunnelExit(); return false; } // percorso cambiato
+    const snap = this._snap(rt, fix, nav.idx);
+    const limit = 45 + Math.min(fix.acc || 0, 80);
+    if ((snap.dist <= limit && snap.along >= t.end - 25) || now - t.since > t.maxMs) {
+      this._tunnelExit();
+      return false; // uscita (o stima scaduta): la posizione si usa normalmente
+    }
+    const cur = t.along0 + (t.speed * (now - t.t0)) / 1000;
+    if (snap.dist <= 20 && (fix.acc || 99) <= 25 && snap.along > cur - 30 && snap.along < t.end) {
+      t.along0 = snap.along; // GPS buono dentro la galleria (gallerie corte o con ripetitori): si riparte da lì
+      t.t0 = now;
+      this._tunnelStep();
+    }
+    return true;
+  }
+
+  _tunnelStep() {
+    const nav = this._nav;
+    const t = nav?.tun;
+    if (!t) return;
+    const now = Date.now();
+    const rt = t.rt;
+    const along = Math.min(t.end - 1, t.along0 + (t.speed * (now - t.t0)) / 1000);
+    const p = this._pointAt(rt, along);
+    nav.fix = { lat: p.ll[0], lon: p.ll[1], acc: 0, speed: t.speed, heading: p.dir, time: now, est: true };
+    nav.snap = { dist: 0, idx: p.idx, t: p.t, along };
+    nav.idx = p.idx;
+    nav.dir = p.dir;
+    nav.offSince = null;
+    nav.offCount = 0;
+    this._drawMe();
+    this._applyRotation();
+    if (nav.follow) this._followView();
+    if (!nav.rerouting) this._voiceGuide(rt, along);
+    this._renderNav();
+  }
+
+  // animazione della galleria: in guida, mentre si è dentro
+  _tunnelFx() {
+    const el = this.$("tunfx");
+    if (!el) return;
+    const t = this._nav?.tun;
+    const show = !!t && this._isGuida() && this._settings.tunnelFx !== false && (this._nav.snap?.along ?? 0) >= t.start - 10;
+    if (!show) {
+      el.classList.remove("on");
+      if (!el.hidden) setTimeout(() => { if (!el.classList.contains("on")) el.hidden = true; }, 600);
+      return;
+    }
+    if (el.hidden) { el.hidden = false; requestAnimationFrame(() => el.classList.add("on")); }
+    const v = t.speed || 0;
+    el.style.setProperty("--tfd", `${Math.max(0.8, Math.min(3.5, 3.5 - v * 0.09)).toFixed(2)}s`);
+    const left = Math.max(0, t.end - (this._nav.snap?.along ?? t.start));
+    this.$("tunrem").textContent = v > 0.5 ? `uscita tra circa ${fmtDist(left)}` : `galleria di ${fmtDist(t.end - t.start)}`;
   }
 
   // indicazioni vocali: un avviso in anticipo ("Tra 300 metri, …") e uno al momento della manovra
@@ -1673,8 +1877,11 @@ class NavigatorPanel extends HTMLElement {
         layers: [
           { id: "base", type: "raster", source: "base" },
           { id: "hs", type: "hillshade", source: "hs", paint: { "hillshade-exaggeration": 0.3, "hillshade-shadow-color": "#3e3a36" } },
-          { id: "lines", type: "line", source: "lines", layout: { "line-join": "round", "line-cap": "round", "line-sort-key": ["get", "i"] },
+          { id: "lines", type: "line", source: "lines", filter: ["!=", ["get", "d"], 1],
+            layout: { "line-join": "round", "line-cap": "round", "line-sort-key": ["get", "i"] },
             paint: { "line-color": ["get", "c"], "line-width": ["get", "w"], "line-opacity": ["get", "o"] } },
+          { id: "lines-d", type: "line", source: "lines", filter: ["==", ["get", "d"], 1], layout: { "line-join": "round" },
+            paint: { "line-color": ["get", "c"], "line-width": ["get", "w"], "line-opacity": ["get", "o"], "line-dasharray": [1.4, 1.4] } },
         ],
         terrain: { source: "dem", exaggeration: +this._settings.terrainEx || 1.5 },
         sky: { "sky-color": "#8cc3f0", "horizon-color": "#dcebf7", "fog-color": "#f2f2f2", "sky-horizon-blend": 0.6,
@@ -1702,6 +1909,7 @@ class NavigatorPanel extends HTMLElement {
     });
     g.on("click", (e) => this._mapClick(L.latLng(e.lngLat.lat, e.lngLat.lng)));
     g.on("pitchend", () => this._placePitchCtl());
+    g.on("sourcedata", (e) => { if (e.sourceId === "ofm" && e.isSourceLoaded) this._scheduleTunnels(); });
     // quando le quote del terreno sono arrivate si ricontrolla: se la telecamera è finita sotto una collina ci si allontana
     // (solo misura, nessun movimento se è tutto a posto: così "idle" non si ripete all'infinito)
     g.on("idle", () => {
@@ -1728,8 +1936,13 @@ class NavigatorPanel extends HTMLElement {
     const ex = +this._settings.terrainEx || 1.5;
     if (g.getTerrain()?.exaggeration !== ex) g.setTerrain({ source: "dem", exaggeration: ex });
     const want = this._settings.b3d !== false;
+    if (!g.getSource("ofm")) g.addSource("ofm", { type: "vector", url: OFM_URL, attribution: OFM_ATTR });
+    // strade in galleria (OpenStreetMap): livello invisibile, serve solo a far scaricare i dati per riconoscerle sul percorso
+    if (!g.getLayer("tun")) {
+      g.addLayer({ id: "tun", type: "line", source: "ofm", "source-layer": "transportation", minzoom: 12,
+        filter: ["==", ["get", "brunnel"], "tunnel"], paint: { "line-opacity": 0 } });
+    }
     if (want && !g.getLayer("bld")) {
-      if (!g.getSource("ofm")) g.addSource("ofm", { type: "vector", url: OFM_URL, attribution: OFM_ATTR });
       g.addLayer({ id: "bld", type: "fill-extrusion", source: "ofm", "source-layer": "building", minzoom: 14,
         paint: { "fill-extrusion-color": "#d9d4cb", "fill-extrusion-opacity": 0.85,
           "fill-extrusion-height": ["coalesce", ["get", "render_height"], 8],
@@ -1767,7 +1980,7 @@ class NavigatorPanel extends HTMLElement {
     this._routeLayer.eachLayer((l) => {
       if (!(l instanceof L.Polyline)) return;
       const o = l.options;
-      feats.push({ type: "Feature", properties: { c: o.color, w: o.weight, o: o.opacity ?? 1, i: i++ },
+      feats.push({ type: "Feature", properties: { c: o.color, w: o.weight, o: o.opacity ?? 1, i: i++, d: o.dashArray ? 1 : 0 },
         geometry: { type: "LineString", coordinates: l.getLatLngs().map((p) => [p.lng, p.lat]) } });
     });
     g.getSource("lines").setData({ type: "FeatureCollection", features: feats });
@@ -2532,6 +2745,7 @@ class NavigatorPanel extends HTMLElement {
       </div>
       <div class="grp"><h3>Mappa</h3>
         ${sw("autoZoom", "Zoom automatico in base alla velocità", "In guida: più vicino in città, più largo in autostrada. Dopo + o − resta il tuo zoom per 20 secondi")}
+        ${sw("tunnelFx", "Animazione in galleria", "In guida, dentro le gallerie riconosciute (con la vista 3D attiva), al posto della mappa un tunnel stilizzato che scorre")}
       </div>
       <div class="grp"><h3>Vista 3D</h3>
         <div class="note">Tasto <b>3D</b> sulla mappa e nella barra della guida: mappa inclinata con il rilievo del terreno. Usa la grafica del
@@ -2617,6 +2831,7 @@ class NavigatorPanel extends HTMLElement {
     const top = this.$("navtop");
     const bot = this.$("navbot");
     top.hidden = bot.hidden = false;
+    this._tunnelFx();
     if (this._3d) requestAnimationFrame(() => this._placePitchCtl(this._nav?.follow && this._isGuida() ? this._pitch3d() : undefined));
     const rt = this._geom(this._result.routes[this._sel]);
     const total = rt._cum[rt._cum.length - 1];
@@ -2745,6 +2960,13 @@ class NavigatorPanel extends HTMLElement {
     const color = ROUTE_COLORS[this._sel % ROUTE_COLORS.length];
     L.polyline(rt.shape, { color: "#fff", weight: 10, opacity: 0.9, interactive: false }).addTo(this._routeLayer);
     L.polyline(rt.shape, { color, weight: 6, opacity: 1, interactive: false }).addTo(this._routeLayer);
+    // gallerie: grigio a trattini, la strada passa sotto la collina (in 3D la linea segue comunque il terreno)
+    for (const [a, b] of this._tunnelRanges(rt)) {
+      const pts = this._sliceAlong(rt, a, b);
+      L.polyline(pts, { color: "#cfd8dc", weight: 7, opacity: 1, interactive: false }).addTo(this._routeLayer);
+      L.polyline(pts, { color: "#37474f", weight: 7, opacity: 1, dashArray: "8 8", interactive: false })
+        .bindTooltip(`🚇 Galleria · ${fmtDist(b - a)}`, { sticky: true }).addTo(this._routeLayer);
+    }
     for (const seg of rt.toll_segments) {
       L.polyline(rt.shape.slice(seg.begin, seg.end + 1), { color: "#f57c00", weight: 6, opacity: 1 })
         .bindTooltip(`💶 ${seg.name} · ${fmtKm(seg.length_km)} a pagamento`, { sticky: true })
