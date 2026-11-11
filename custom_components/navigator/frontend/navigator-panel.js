@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.5.1";
+const PANEL_VERSION = "1.5.2";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -178,7 +178,7 @@ const VEHICLE_SVG = { auto: CAR_SVG, moto: MOTO_SVG, bici: BICI_SVG, piedi: PIED
 // impostazioni salvate su questo dispositivo
 const SETTINGS_KEY = "navigator-panel-settings";
 const DEFAULT_SETTINGS = { voice: false, lang: "it", voiceSel: "f", out: "auto", autoZoom: true, beep: false,
-  fuelBrands: [], fuelKind: "", camAlert: true, view3d: false, b3d: true, terrainEx: "1.5", pitch3d: 60, tunnelFx: true };
+  fuelBrands: [], fuelKind: "", camAlert: true, view3d: false, b3d: true, terrainEx: "1.5", pitch3d: 60, tunnelFx: true, zoom3dOff: 0 };
 // marche dei distributori (come nell'anagrafica del MIMIT)
 const FUEL_BRANDS = ["Agip Eni", "Api-Ip", "Q8", "Esso", "Tamoil", "Shell", "Retitalia", "Beyfin", "Costantin", "Europam", "Pompe bianche"];
 const BRAND_COLORS = { "agip eni": "#f7c600", "eni": "#f7c600", "api-ip": "#0057a8", "ip": "#0057a8", "q8": "#0a3a7a", "esso": "#d71920",
@@ -1803,6 +1803,16 @@ class NavigatorPanel extends HTMLElement {
     if (el) el.innerHTML = "";
   }
 
+  // distanza della vista 3D in guida: scostamento (in livelli di zoom) dallo zoom automatico, memorizzato
+  _zoom3dOff() {
+    return Math.max(-5, Math.min(3, Number(this._settings.zoom3dOff) || 0));
+  }
+
+  _setZoom3dOff(v) {
+    this._settings.zoom3dOff = Math.max(-5, Math.min(3, Math.round(v * 4) / 4));
+    this._saveSettings();
+  }
+
   _pitch3d() {
     return Math.max(0, Math.min(80, Number(this._settings.pitch3d) || 60));
   }
@@ -1894,11 +1904,35 @@ class NavigatorPanel extends HTMLElement {
     this._g3ready = new Promise((ok) => { g.once("style.load", ok); g.once("load", ok); }).then(() => { this._g3ok = true; });
     g.on("error", (e) => console.debug("Navigator 3D:", e?.error?.message || e)); // riquadri mancanti: la vista va avanti
     // movimenti fatti a mano nella vista 3D: la guida smette di seguire, Leaflet si sposta nello stesso punto
+    // In guida, mentre la vista segue la posizione, zoom, rotazione e inclinazione con le dita non la fermano:
+    // cambiano la distanza (e l'inclinazione), che resta memorizzata. Solo trascinare la mappa smette di seguire.
+    this._g3gest = new Set();
+    const followGuida = () => !!(this._nav?.fix && this._nav.follow && this._isGuida());
     for (const ev of ["dragstart", "zoomstart", "rotatestart", "pitchstart"]) {
       g.on(ev, (e) => {
         if (!e.originalEvent) return;
+        if (followGuida()) {
+          if (ev === "dragstart") {
+            // anche il pinch sposta un po' la mappa: si aspetta un attimo per capire se è un trascinamento vero
+            clearTimeout(this._g3dragT);
+            this._g3dragT = setTimeout(() => { if (!this._g3gest.size) this._userMoved(); }, 250);
+          } else {
+            clearTimeout(this._g3dragT);
+            this._g3gest.add(ev.replace("start", ""));
+          }
+          return;
+        }
         if (ev === "zoomstart" && this._nav) this._nav.manualZoomUntil = Date.now() + 20000;
         if (ev !== "pitchstart") this._userMoved();
+      });
+    }
+    for (const kind of ["zoom", "rotate", "pitch"]) {
+      g.on(`${kind}end`, () => {
+        if (!this._g3gest.has(kind)) return;
+        this._g3gest.delete(kind);
+        if (kind === "zoom") this._setZoom3dOff(g.getZoom() - (this._map.getZoom() - 1));
+        if (kind === "pitch") { this._settings.pitch3d = Math.max(0, Math.min(80, Math.round(g.getPitch()))); this._saveSettings(); }
+        if (!this._g3gest.size) { this._g3key = null; this._sync3d(); }
       });
     }
     g.on("moveend", (e) => {
@@ -2108,9 +2142,10 @@ class NavigatorPanel extends HTMLElement {
 
   _sync3dCam() {
     const g = this._g3;
-    if (!this._3d || !g || this._from3d) return;
+    if (!this._3d || !g || this._from3d || this._g3gest?.size) return; // durante un gesto con le dita decide l'utente
     const nav = this._nav;
-    const z = this._map.getZoom() - 1; // MapLibre misura lo zoom con riquadri da 512 pixel, Leaflet da 256
+    // MapLibre misura lo zoom con riquadri da 512 pixel, Leaflet da 256; in guida si aggiunge la distanza scelta dall'utente
+    const z = this._map.getZoom() - 1 + (nav?.fix && nav.follow && this._isGuida() ? this._zoom3dOff() : 0);
     const none = { top: 0, bottom: 0, left: 0, right: 0 };
     if (nav?.fix && nav.follow) {
       const guida = this._isGuida();
@@ -2194,6 +2229,12 @@ class NavigatorPanel extends HTMLElement {
   _recenter() {
     const nav = this._nav;
     if (!nav) return;
+    // in 3D la distanza scelta resta; premuto due volte di seguito torna quella predefinita
+    if (this._3d && Date.now() - (this._lastCenter || 0) < 1500 && this._zoom3dOff() !== 0) {
+      this._setZoom3dOff(0);
+      this._msg("Vista 3D: distanza predefinita");
+    }
+    this._lastCenter = Date.now();
     nav.follow = true;
     nav.manualZoomUntil = 0;
     const z = this._settings.autoZoom && nav.speed != null ? zoomForSpeed(nav.speed * 3.6) : 17;
@@ -2914,8 +2955,19 @@ class NavigatorPanel extends HTMLElement {
         <select data-n="layer" title="Tipo di mappa">${opts}</select>
         <button class="stop" data-n="stop" title="Esci dalla navigazione">■ Esci</button>
       </div>`;
-    bot.querySelector('[data-n="out"]').addEventListener("click", () => { this._map.zoomOut(); this._afterZoom(); });
-    bot.querySelector('[data-n="in"]').addEventListener("click", () => { this._map.zoomIn(); this._afterZoom(); });
+    // + e −: in 3D, mentre la vista segue, cambiano la distanza memorizzata; altrimenti lo zoom come sempre
+    const zoomBtn = (d) => {
+      if (this._3d && this._nav?.follow && this._isGuida()) {
+        this._setZoom3dOff(this._zoom3dOff() + d * 0.5);
+        this._g3key = null;
+        this._sync3d();
+        return;
+      }
+      if (d > 0) this._map.zoomIn(); else this._map.zoomOut();
+      this._afterZoom();
+    };
+    bot.querySelector('[data-n="out"]').addEventListener("click", () => zoomBtn(-1));
+    bot.querySelector('[data-n="in"]').addEventListener("click", () => zoomBtn(1));
     bot.querySelector('[data-n="center"]').addEventListener("click", () => this._recenter());
     bot.querySelector('[data-n="layer"]').addEventListener("change", (e) => {
       this._setLayer(e.target.value);

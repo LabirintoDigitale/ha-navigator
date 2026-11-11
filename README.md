@@ -144,7 +144,10 @@ versanti, e gli **edifici in 3D** da vicino (con l'altezza dove è mappata in Op
 (stradale, satellite, topografica…), con percorso, tappe, distributori e veicolo. In guida la vista è inclinata, gira nella direzione
 di marcia e ti segue; con due dita si può girare e inclinare, trascinando smette di seguirti fino a **Ricentra**.
 I tasti **▲ / ▼** in alto a destra cambiano la prospettiva a passi di 15°: da 0° (mappa vista dall'alto) fino a 80°, quasi come
-una telecamera sul cruscotto; l'inclinazione scelta resta anche per le volte successive. Se una collina finirebbe davanti
+una telecamera sul cruscotto; l'inclinazione scelta resta anche per le volte successive.
+In guida anche la **distanza** dalla macchina si regola e resta memorizzata: con le dita, con la rotella o con **+ / −**
+(anche il gesto con due dita per inclinare viene ricordato); lo zoom con le dita non smette di seguirti, solo il trascinamento
+sì. **◎** torna sulla posizione mantenendo la distanza scelta; premuto **due volte di seguito** rimette quella predefinita. Se una collina finirebbe davanti
 alla telecamera, Navigator la allontana quanto basta (la vista resta sopra il terreno); **◎** rimette lo zoom automatico. Premuto di nuovo,
 **3D** torna alla mappa piatta; la scelta resta per le volte successive.
 
