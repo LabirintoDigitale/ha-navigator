@@ -179,7 +179,9 @@ Valgono per il dispositivo che stai usando:
 - **Lingua delle indicazioni e della voce**: italiano, inglese, tedesco, francese o spagnolo (anche il testo delle indicazioni cambia lingua).
 - **Voce**: donna, uomo o una voce precisa fra quelle del browser.
 - **Riproduci su**: il browser (computer, iPhone, Chrome) oppure il telefono con l'**app Companion**. Nell'app Android la pagina non sa parlare: Navigator manda il testo al telefono (comando `TTS` del servizio `notify.mobile_app_…`) e la voce è quella della sintesi vocale di Android.
-- **Zoom automatico in base alla velocità**: in guida più vicino in città e più largo in autostrada; dopo **+**, **−** o il pinch resta il tuo zoom per 20 secondi.
+- **Zoom automatico in base alla velocità**, con due interruttori separati:
+  - **mappa 2D**: in guida più vicino in città e più largo in autostrada; dopo **+**, **−** o il pinch resta il tuo zoom per 20 secondi;
+  - **vista 3D**: la distanza dalla macchina cambia con la velocità partendo da quella che hai scelto; spento, la distanza resta sempre quella scelta.
 - **Beep quando superi il limite**: in guida la barra mostra la tua velocità e il cartello del limite del tratto (da OpenStreetMap, per auto e moto); oltre il limite (+3 km/h, +5% sopra i 60) la velocità diventa rossa e suona un beep, al massimo ogni 5 secondi.
 
 Se il GPS risponde **"posizione negata"** (per esempio nell'app Companion), Navigator apre una finestra con i passi per

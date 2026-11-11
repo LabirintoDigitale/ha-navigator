@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.5.2";
+const PANEL_VERSION = "1.5.3";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -584,6 +584,7 @@ class NavigatorPanel extends HTMLElement {
     this._loadState();
     this._settings = { ...DEFAULT_SETTINGS };
     try { Object.assign(this._settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}")); } catch (e) { /* storage non disponibile */ }
+    if (this._settings.autoZoom3d == null) this._settings.autoZoom3d = this._settings.autoZoom !== false; // prima c'era un solo interruttore
   }
 
   set hass(hass) {
@@ -1803,6 +1804,16 @@ class NavigatorPanel extends HTMLElement {
     if (el) el.innerHTML = "";
   }
 
+  // zoom automatico in base alla velocità: un interruttore per la mappa piatta e uno per la vista 3D
+  _autoZoomOn() {
+    return this._3d ? this._settings.autoZoom3d !== false : this._settings.autoZoom !== false;
+  }
+
+  // zoom di partenza della vista 3D in guida (zoom MapLibre): quello automatico secondo la velocità, o fisso se è spento
+  _base3dZoom() {
+    return (this._autoZoomOn() ? this._map.getZoom() : 17) - 1;
+  }
+
   // distanza della vista 3D in guida: scostamento (in livelli di zoom) dallo zoom automatico, memorizzato
   _zoom3dOff() {
     return Math.max(-5, Math.min(3, Number(this._settings.zoom3dOff) || 0));
@@ -1930,7 +1941,7 @@ class NavigatorPanel extends HTMLElement {
       g.on(`${kind}end`, () => {
         if (!this._g3gest.has(kind)) return;
         this._g3gest.delete(kind);
-        if (kind === "zoom") this._setZoom3dOff(g.getZoom() - (this._map.getZoom() - 1));
+        if (kind === "zoom") this._setZoom3dOff(g.getZoom() - this._base3dZoom());
         if (kind === "pitch") { this._settings.pitch3d = Math.max(0, Math.min(80, Math.round(g.getPitch()))); this._saveSettings(); }
         if (!this._g3gest.size) { this._g3key = null; this._sync3d(); }
       });
@@ -2145,7 +2156,7 @@ class NavigatorPanel extends HTMLElement {
     if (!this._3d || !g || this._from3d || this._g3gest?.size) return; // durante un gesto con le dita decide l'utente
     const nav = this._nav;
     // MapLibre misura lo zoom con riquadri da 512 pixel, Leaflet da 256; in guida si aggiunge la distanza scelta dall'utente
-    const z = this._map.getZoom() - 1 + (nav?.fix && nav.follow && this._isGuida() ? this._zoom3dOff() : 0);
+    const z = nav?.fix && nav.follow && this._isGuida() ? this._base3dZoom() + this._zoom3dOff() : this._map.getZoom() - 1;
     const none = { top: 0, bottom: 0, left: 0, right: 0 };
     if (nav?.fix && nav.follow) {
       const guida = this._isGuida();
@@ -2209,7 +2220,7 @@ class NavigatorPanel extends HTMLElement {
     // al primo aggancio almeno zoom 16, poi resta quello scelto con + e −
     let z = nav.zoomed ? this._map.getZoom() : Math.max(this._map.getZoom(), 16);
     // zoom secondo la velocità, salvo per 20 secondi dopo uno zoom fatto a mano
-    if (this._settings.autoZoom && this._isGuida() && nav.speed != null && Date.now() > (nav.manualZoomUntil || 0)) {
+    if (this._autoZoomOn() && this._isGuida() && nav.speed != null && Date.now() > (nav.manualZoomUntil || 0)) {
       const target = zoomForSpeed(nav.speed * 3.6);
       if (Math.abs(target - z) >= 0.5) z = target;
     }
@@ -2237,7 +2248,7 @@ class NavigatorPanel extends HTMLElement {
     this._lastCenter = Date.now();
     nav.follow = true;
     nav.manualZoomUntil = 0;
-    const z = this._settings.autoZoom && nav.speed != null ? zoomForSpeed(nav.speed * 3.6) : 17;
+    const z = this._autoZoomOn() && nav.speed != null ? zoomForSpeed(nav.speed * 3.6) : 17;
     this._map.setZoom(z, { animate: false });
     this._g3key = null;
     if (nav.fix) this._followView();
@@ -2811,7 +2822,8 @@ class NavigatorPanel extends HTMLElement {
         <div class="row" style="margin-top:6px"><button data-s="testvoice">▶ Prova la voce</button></div>
       </div>
       <div class="grp"><h3>Mappa</h3>
-        ${sw("autoZoom", "Zoom automatico in base alla velocità", "In guida: più vicino in città, più largo in autostrada. Dopo + o − resta il tuo zoom per 20 secondi")}
+        ${sw("autoZoom", "Zoom automatico in base alla velocità (mappa 2D)", "In guida: più vicino in città, più largo in autostrada. Dopo + o − resta il tuo zoom per 20 secondi")}
+        ${sw("autoZoom3d", "Zoom automatico in base alla velocità (vista 3D)", "In guida la distanza dalla macchina cambia con la velocità, partendo da quella che hai scelto. Spento: la distanza resta sempre quella scelta")}
         ${sw("tunnelFx", "Animazione in galleria", "In guida, dentro le gallerie riconosciute (con la vista 3D attiva), al posto della mappa un tunnel stilizzato che scorre")}
       </div>
       <div class="grp"><h3>Vista 3D</h3>
@@ -2844,6 +2856,7 @@ class NavigatorPanel extends HTMLElement {
       s[el.dataset.s] = el.checked;
       this._saveSettings();
       if (el.dataset.s === "b3d") this._apply3dSettings();
+      if (el.dataset.s === "autoZoom3d") { this._g3key = null; this._sync3d(); }
       if (el.dataset.s === "voice" && el.checked) this._unlockAudio();
     }));
     wrap.querySelectorAll("select[data-s]").forEach((el) => el.addEventListener("change", () => {
