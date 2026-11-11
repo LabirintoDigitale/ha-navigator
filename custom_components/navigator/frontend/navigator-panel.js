@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.4.0";
+const PANEL_VERSION = "1.4.1";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -178,7 +178,7 @@ const VEHICLE_SVG = { auto: CAR_SVG, moto: MOTO_SVG, bici: BICI_SVG, piedi: PIED
 // impostazioni salvate su questo dispositivo
 const SETTINGS_KEY = "navigator-panel-settings";
 const DEFAULT_SETTINGS = { voice: false, lang: "it", voiceSel: "f", out: "auto", autoZoom: true, beep: false,
-  fuelBrands: [], fuelKind: "", camAlert: true, view3d: false, b3d: true, terrainEx: "1.5" };
+  fuelBrands: [], fuelKind: "", camAlert: true, view3d: false, b3d: true, terrainEx: "1.5", pitch3d: 60 };
 // marche dei distributori (come nell'anagrafica del MIMIT)
 const FUEL_BRANDS = ["Agip Eni", "Api-Ip", "Q8", "Esso", "Tamoil", "Shell", "Retitalia", "Beyfin", "Costantin", "Europam", "Pompe bianche"];
 const BRAND_COLORS = { "agip eni": "#f7c600", "eni": "#f7c600", "api-ip": "#0057a8", "ip": "#0057a8", "q8": "#0a3a7a", "esso": "#d71920",
@@ -535,6 +535,15 @@ const STYLE = `
   #map3d .maplibregl-ctrl-attrib { font-size: 10px; }
   .main.guida #map3d .maplibregl-ctrl-bottom-right { bottom: 96px; }
   button.b3d { font-weight: 700; font-size: 13px; }
+  /* inclinazione della vista 3D: dall'alto fino a quasi la telecamera dell'auto */
+  .pitchctl { position: absolute; z-index: 1002; right: 10px; top: 56px; display: flex; flex-direction: column; align-items: center;
+    background: rgba(32,33,36,.85); border-radius: 10px; padding: 3px; box-shadow: 0 1px 5px rgba(0,0,0,.35); color: #fff; }
+  .pitchctl[hidden] { display: none; }
+  .pitchctl button { width: 40px; height: 36px; padding: 0; border: none; background: transparent; color: #fff; }
+  .pitchctl button:disabled { opacity: .35; }
+  .pitchctl svg { width: 22px; height: 22px; display: block; margin: auto; fill: none; stroke: currentColor; stroke-width: 2.6;
+    stroke-linecap: round; stroke-linejoin: round; }
+  .pitchctl span { font: 600 12px sans-serif; padding: 1px 0; }
 `;
 
 class NavigatorPanel extends HTMLElement {
@@ -649,6 +658,11 @@ class NavigatorPanel extends HTMLElement {
         <div class="mapwrap" id="mapwrap">
           <div id="map"></div>
           <div id="map3d" hidden></div>
+          <div class="pitchctl" id="pitchctl" hidden>
+            <button data-p="-15" title="Più dall'alto"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></button>
+            <span id="pitchval"></span>
+            <button data-p="15" title="Più bassa, come dall'auto"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+          </div>
           <div class="ctl tr" id="ctltr"><select id="layer"></select></div>
           <div class="navtop" id="navtop" hidden></div>
           <div class="navbot" id="navbot" hidden></div>
@@ -691,6 +705,7 @@ class NavigatorPanel extends HTMLElement {
     // schermo intero e schermo sempre acceso
     $("fullbtn").addEventListener("click", () => this._toggleFull());
     $("b3dbtn").addEventListener("click", () => this._toggle3d());
+    $("pitchctl").querySelectorAll("[data-p]").forEach((b) => b.addEventListener("click", () => this._setPitch3d(+b.dataset.p)));
     this._map.on("moveend zoomend", () => this._sync3d());
     if (this._settings.view3d) setTimeout(() => this._toggle3d(true), 0);
     document.addEventListener("fullscreenchange", () => {
@@ -1169,6 +1184,7 @@ class NavigatorPanel extends HTMLElement {
     this._carRot = null;
     this._closeNearby();
     for (const id of ["navtop", "navbot", "navpop"]) this.$(id).hidden = true;
+    this._placePitchCtl();
     this.$("ctltr").hidden = false;
     this._applyView();
     this._drawRoute();
@@ -1532,13 +1548,46 @@ class NavigatorPanel extends HTMLElement {
       this._g3.resize();
       this._update3d();
       this._sync3d();
+      this._placePitchCtl();
     } else {
       this.$("map3d").hidden = true;
       this.$("map").classList.remove("under3d");
+      this._placePitchCtl();
       if (this._tiles && !this._map.hasLayer(this._tiles)) this._tiles.addTo(this._map);
     }
     this._settings.view3d = this._3d;
     this._saveSettings();
+  }
+
+  _pitch3d() {
+    return Math.max(0, Math.min(85, Number(this._settings.pitch3d) || 60));
+  }
+
+  // ▲ più dall'alto (0° = vista da sopra), ▼ più bassa fino a 85°, quasi come una telecamera sul cruscotto
+  _setPitch3d(delta) {
+    const g = this._g3;
+    if (!g) return;
+    const cur = this._nav?.follow && this._isGuida() ? this._pitch3d() : Math.round(g.getPitch());
+    const next = Math.max(0, Math.min(85, Math.round((cur + delta) / 5) * 5));
+    this._settings.pitch3d = next;
+    this._saveSettings();
+    if (this._nav?.fix && this._nav.follow) this._sync3d();
+    else g.easeTo({ pitch: next, duration: 400 });
+    this._placePitchCtl(next);
+  }
+
+  // in alto a destra, sotto l'indicazione della guida (o sotto la scelta della mappa)
+  _placePitchCtl(pitch) {
+    const el = this.$("pitchctl");
+    if (!el) return;
+    el.hidden = !this._3d || !this._g3;
+    if (el.hidden) return;
+    const top = this.$("navtop");
+    el.style.top = top && !top.hidden ? `${top.offsetTop + top.offsetHeight + 8}px` : "56px";
+    const p = Math.round(pitch ?? this._g3.getPitch());
+    this.$("pitchval").textContent = `${p}°`;
+    el.querySelector('[data-p="-15"]').disabled = p <= 0;
+    el.querySelector('[data-p="15"]').disabled = p >= 85;
   }
 
   _sync3dBtns() {
@@ -1570,7 +1619,7 @@ class NavigatorPanel extends HTMLElement {
     const c = this._map.getCenter();
     const dem = { type: "raster-dem", tiles: [DEM_URL], tileSize: 256, maxzoom: 15, encoding: "terrarium" };
     const g = new ml.Map({
-      container: el, center: [c.lng, c.lat], zoom: this._map.getZoom() - 1, pitch: 55, maxPitch: 75,
+      container: el, center: [c.lng, c.lat], zoom: this._map.getZoom() - 1, pitch: this._pitch3d(), maxPitch: 85,
       attributionControl: { compact: true },
       style: {
         version: 8,
@@ -1611,6 +1660,7 @@ class NavigatorPanel extends HTMLElement {
       try { this._map.setView([cc.lat, cc.lng], g.getZoom() + 1, { animate: false }); } finally { this._from3d = false; }
     });
     g.on("click", (e) => this._mapClick(L.latLng(e.lngLat.lat, e.lngLat.lng)));
+    g.on("pitchend", () => this._placePitchCtl());
     await this._g3ready;
     this._apply3dSettings();
   }
@@ -1701,11 +1751,11 @@ class NavigatorPanel extends HTMLElement {
     const none = { top: 0, bottom: 0, left: 0, right: 0 };
     if (nav?.fix && nav.follow) {
       const guida = this._isGuida();
-      const key = `${nav.fix.lat},${nav.fix.lon},${z},${nav.dir},${guida}`;
+      const key = `${nav.fix.lat},${nav.fix.lon},${z},${nav.dir},${guida},${this._pitch3d()}`;
       if (key === this._g3key) return;
       this._g3key = key;
       g.easeTo({ center: [nav.fix.lon, nav.fix.lat], zoom: z, duration: 700, easing: (t) => t,
-        bearing: guida && nav.dir != null ? nav.dir : g.getBearing(), pitch: guida ? 60 : g.getPitch(),
+        bearing: guida && nav.dir != null ? nav.dir : g.getBearing(), pitch: guida ? this._pitch3d() : g.getPitch(),
         padding: guida ? { ...none, top: this.$("mapwrap").clientHeight * 0.45 } : none });
     } else {
       this._g3key = null;
@@ -2428,6 +2478,7 @@ class NavigatorPanel extends HTMLElement {
     const top = this.$("navtop");
     const bot = this.$("navbot");
     top.hidden = bot.hidden = false;
+    if (this._3d) requestAnimationFrame(() => this._placePitchCtl(this._nav?.follow && this._isGuida() ? this._pitch3d() : undefined));
     const rt = this._geom(this._result.routes[this._sel]);
     const total = rt._cum[rt._cum.length - 1];
     const ms = rt.maneuvers;

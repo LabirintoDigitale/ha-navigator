@@ -8,6 +8,13 @@ Cerca un indirizzo o un'attività, imposta partenza, tappe e destinazione e calc
 
 ![Percorso con alternative e tratte a pagamento](docs/images/screenshots/percorso.jpg)
 
+### Novità: guida in 3D
+
+Con il tasto **3D** la mappa si inclina e mostra il **rilievo del terreno** e gli **edifici in 3D**; in guida gira nella direzione di
+marcia e ti segue. Con **▲ / ▼** scegli la prospettiva, dalla vista dall'alto fino a quasi la telecamera dell'auto.
+
+<p align="center"><img src="docs/images/screenshots/guida-3d.jpg" alt="Guida in 3D sul satellite, con rilievo, edifici e percorso" width="360"></p>
+
 ## Funzioni
 
 - **Pannello "Navigator" nella barra laterale**, a tutta pagina, anche da telefono (app Companion).
@@ -25,6 +32,7 @@ Cerca un indirizzo o un'attività, imposta partenza, tappe e destinazione e calc
 - **Navigazione** con la tua posizione: la mappa ti segue, in alto vedi la prossima manovra e la distanza, in basso tempo e km rimanenti e l'orario di arrivo. Se esci dal percorso per qualche secondo compare il popup **"Ricalcolo del percorso…"** e Navigator rifà la strada da dove sei (con le stesse opzioni: pedaggi, tratte tolte, tappe ancora da raggiungere).
 - Apri il percorso in **Google Maps**, **Waze** o **OpenStreetMap**, oppure copia il riepilogo.
 - Mappe gratuite senza chiave: stradale, topografica, scura e satellite (Esri), escursionistica (OpenTopoMap).
+- **Vista 3D** con rilievo del terreno ed edifici, anche in guida, con la prospettiva regolabile ([dettagli](#vista-3d)).
 - Servizio **`navigator.plan_route`** per le automazioni (tempo di viaggio, distanza, pedaggi).
 
 | Togli una tratta a pagamento | Ricalcola senza pedaggi |
@@ -134,7 +142,9 @@ I dati scaricati restano in `config/navigator_cache/`.
 Il tasto **3D** (sulla mappa e nella barra della guida) inclina la mappa e mostra il **rilievo del terreno**, con le ombre sui
 versanti, e gli **edifici in 3D** da vicino (con l'altezza dove è mappata in OpenStreetMap). Sopra il rilievo resta la mappa scelta
 (stradale, satellite, topografica…), con percorso, tappe, distributori e veicolo. In guida la vista è inclinata, gira nella direzione
-di marcia e ti segue; con due dita si può girare e inclinare, trascinando smette di seguirti fino a **Ricentra**. Premuto di nuovo,
+di marcia e ti segue; con due dita si può girare e inclinare, trascinando smette di seguirti fino a **Ricentra**.
+I tasti **▲ / ▼** in alto a destra cambiano la prospettiva a passi di 15°: da 0° (mappa vista dall'alto) fino a 85°, quasi come
+una telecamera sul cruscotto; l'inclinazione scelta resta anche per le volte successive. Premuto di nuovo,
 **3D** torna alla mappa piatta; la scelta resta per le volte successive.
 
 - Usa la grafica del telefono (WebGL) e scarica anche le quote del terreno: consuma più batteria e dati della mappa piatta.
