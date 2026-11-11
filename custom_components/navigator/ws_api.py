@@ -138,7 +138,8 @@ async def ws_route(hass: HomeAssistant, connection: websocket_api.ActiveConnecti
 
 @websocket_api.websocket_command({
     vol.Required("type"): "navigator/place_save",
-    vol.Optional("id", default=""): str,
+    # "id" è già il numero del messaggio WebSocket: l'identificativo del preferito da modificare si chiama place_id
+    vol.Optional("place_id", default=""): str,
     vol.Required("name"): cv.string,
     vol.Optional("address", default=""): str,
     vol.Required("lat"): vol.Coerce(float),
@@ -149,7 +150,7 @@ async def ws_route(hass: HomeAssistant, connection: websocket_api.ActiveConnecti
 async def ws_place_save(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
     async def go():
         data = _data(hass)
-        place = data.places.save_favorite(msg["name"], msg["address"], msg["lat"], msg["lon"], msg["icon"], msg["id"])
+        place = data.places.save_favorite(msg["name"], msg["address"], msg["lat"], msg["lon"], msg["icon"], msg["place_id"])
         return {"place": place, **data.places.as_dict()}
 
     await _run(connection, msg["id"], go())
