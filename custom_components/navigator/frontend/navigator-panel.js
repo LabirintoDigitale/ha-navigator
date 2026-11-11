@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.5.3";
+const PANEL_VERSION = "1.5.4";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -566,6 +566,9 @@ const STYLE = `
     gap: 2px; background: rgba(0, 0, 0, .6); color: #fff; padding: 8px 18px; border-radius: 18px; font: 600 16px sans-serif; white-space: nowrap; }
   .tf-label small { font-weight: 400; font-size: 13px; opacity: .85; }
   @media (prefers-reduced-motion: reduce) { .tf-ring, .tf-road::after { animation-duration: calc(var(--tfd) * 3); } }
+  /* frecce del verso di marcia sul percorso (2D) */
+  .rarrow { width: 16px; height: 16px; background: no-repeat center / 16px 16px
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 11 8 5l5 6' fill='none' stroke='%23263238' stroke-width='4.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M3 11 8 5l5 6' fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
 `;
 
 class NavigatorPanel extends HTMLElement {
@@ -720,6 +723,8 @@ class NavigatorPanel extends HTMLElement {
     this._routeLayer = L.layerGroup().addTo(this._map);
     this._markerLayer = L.layerGroup().addTo(this._map);
     this._poiLayer = L.layerGroup().addTo(this._map);
+    this._arrowLayer = L.layerGroup().addTo(this._map); // frecce del verso di marcia (solo 2D: in 3D le disegna MapLibre)
+    this._map.on("moveend zoomend", () => this._scheduleArrows());
     this._map.on("click", (e) => this._mapClick(e.latlng));
     this._map.on("dragstart", () => this._userMoved());
     this._bindGuidaGestures();
@@ -1765,10 +1770,12 @@ class NavigatorPanel extends HTMLElement {
       }
       if (this._tiles && this._map.hasLayer(this._tiles)) this._map.removeLayer(this._tiles);
       this.$("gattr").hidden = true;
+      this._arrowLayer?.clearLayers();
       this._placePitchCtl();
     } else {
       this.$("map3d").hidden = true;
       this.$("map").classList.remove("under3d");
+      this._scheduleArrows();
       this.$("gattr").hidden = !this._isGuida();
       this._placePitchCtl();
       if (this._tiles && !this._map.hasLayer(this._tiles)) this._tiles.addTo(this._map);
@@ -1992,6 +1999,26 @@ class NavigatorPanel extends HTMLElement {
     const want = this._settings.b3d !== false;
     if (!g.getSource("ofm")) g.addSource("ofm", { type: "vector", url: OFM_URL, attribution: OFM_ATTR });
     // strade in galleria (OpenStreetMap): livello invisibile, serve solo a far scaricare i dati per riconoscerle sul percorso
+    // frecce del verso di marcia sul percorso scelto, appoggiate sul terreno
+    if (!g.hasImage("nav-arrow")) {
+      const c = document.createElement("canvas");
+      c.width = c.height = 48;
+      const x = c.getContext("2d");
+      x.lineCap = x.lineJoin = "round";
+      for (const [col, w] of [["#263238", 13], ["#ffffff", 6.5]]) {
+        x.strokeStyle = col;
+        x.lineWidth = w;
+        x.beginPath();
+        x.moveTo(17, 9); x.lineTo(33, 24); x.lineTo(17, 39); // punta verso destra = verso della linea
+        x.stroke();
+      }
+      g.addImage("nav-arrow", x.getImageData(0, 0, 48, 48), { pixelRatio: 3 });
+    }
+    if (!g.getLayer("arrows")) {
+      g.addLayer({ id: "arrows", type: "symbol", source: "lines", filter: ["==", ["get", "a"], 1],
+        layout: { "symbol-placement": "line", "symbol-spacing": 90, "icon-image": "nav-arrow", "icon-allow-overlap": true,
+          "icon-ignore-placement": true, "icon-rotation-alignment": "map", "icon-pitch-alignment": "map" } });
+    }
     if (!g.getLayer("tun")) {
       g.addLayer({ id: "tun", type: "line", source: "ofm", "source-layer": "transportation", minzoom: 12,
         filter: ["==", ["get", "brunnel"], "tunnel"], paint: { "line-opacity": 0 } });
@@ -2034,7 +2061,7 @@ class NavigatorPanel extends HTMLElement {
     this._routeLayer.eachLayer((l) => {
       if (!(l instanceof L.Polyline)) return;
       const o = l.options;
-      feats.push({ type: "Feature", properties: { c: o.color, w: o.weight, o: o.opacity ?? 1, i: i++, d: o.dashArray ? 1 : 0 },
+      feats.push({ type: "Feature", properties: { c: o.color, w: o.weight, o: o.opacity ?? 1, i: i++, d: o.dashArray ? 1 : 0, a: o.arrows ? 1 : 0 },
         geometry: { type: "LineString", coordinates: l.getLatLngs().map((p) => [p.lng, p.lat]) } });
     });
     g.getSource("lines").setData({ type: "FeatureCollection", features: feats });
@@ -3038,6 +3065,7 @@ class NavigatorPanel extends HTMLElement {
   _drawRoute() {
     this._routeLayer.clearLayers();
     this._schedule3d();
+    this._scheduleArrows();
     const r = this._result;
     if (!r) return;
     // alternative (sotto, grigie e cliccabili), poi il percorso scelto
@@ -3050,7 +3078,7 @@ class NavigatorPanel extends HTMLElement {
     const rt = r.routes[this._sel];
     const color = ROUTE_COLORS[this._sel % ROUTE_COLORS.length];
     L.polyline(rt.shape, { color: "#fff", weight: 10, opacity: 0.9, interactive: false }).addTo(this._routeLayer);
-    L.polyline(rt.shape, { color, weight: 6, opacity: 1, interactive: false }).addTo(this._routeLayer);
+    L.polyline(rt.shape, { color, weight: 6, opacity: 1, interactive: false, arrows: true }).addTo(this._routeLayer);
     // gallerie: grigio a trattini, la strada passa sotto la collina (in 3D la linea segue comunque il terreno)
     for (const [a, b] of this._tunnelRanges(rt)) {
       const pts = this._sliceAlong(rt, a, b);
@@ -3067,6 +3095,36 @@ class NavigatorPanel extends HTMLElement {
       if (m.ferry) {
         L.polyline(rt.shape.slice(m.begin, m.end + 1), { color: "#0288d1", weight: 5, dashArray: "8 8" }).addTo(this._routeLayer);
       }
+    }
+  }
+
+  // frecce del verso di marcia in 2D: una ogni ~90 pixel, solo nella parte visibile (i percorsi lunghi restano leggeri)
+  _scheduleArrows() {
+    if (this._arrowPending) return;
+    this._arrowPending = true;
+    requestAnimationFrame(() => { this._arrowPending = false; this._drawArrows(); });
+  }
+
+  _drawArrows() {
+    const lay = this._arrowLayer;
+    if (!lay) return;
+    lay.clearLayers();
+    const r = this._result;
+    if (!r || this._3d) return;
+    const rt = this._geom(r.routes[this._sel]);
+    const m = this._map;
+    const total = rt._cum[rt._cum.length - 1];
+    const mpp = (40075016.7 * Math.cos((m.getCenter().lat * Math.PI) / 180)) / (256 * 2 ** m.getZoom());
+    const step = Math.max(10, 90 * mpp);
+    const view = m.getBounds().pad(0.15);
+    let n = 0;
+    for (let a = step / 2; a < total && n < 250; a += step) {
+      const p = this._pointAt(rt, a);
+      if (!view.contains(p.ll)) continue;
+      n++;
+      L.marker(p.ll, { interactive: false, keyboard: false,
+        icon: L.divIcon({ className: "", html: `<div class="rarrow" style="transform:rotate(${p.dir.toFixed(0)}deg)"></div>`,
+          iconSize: [16, 16], iconAnchor: [8, 8] }) }).addTo(lay);
     }
   }
 
