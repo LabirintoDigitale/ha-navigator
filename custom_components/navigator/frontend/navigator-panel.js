@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.3.2";
+const PANEL_VERSION = "1.3.3";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 const ICON = new URL("./icon.png", import.meta.url).href;
@@ -164,6 +164,9 @@ const FUEL_KINDS = [["benzina", "Benzina"], ["gasolio", "Gasolio"], ["benzina_pl
 const fuelMatch = (f, kind) => f.k === kind || (kind === "benzina_plus" && f.k === "benzina100");
 const fuelPrice = (f) => f.s ?? f.v ?? null;
 const fmtPrice = (p) => p.toLocaleString("it-IT", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+// video nero di 2 secondi, muto e in loop: dove il browser non ha il blocco dello standby (es. app Companion)
+// un video in riproduzione tiene acceso lo schermo
+const NOSLEEP_MP4 = "data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAMrbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAB9AAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAlV0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAB9AAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAABAAAAAQAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAfQAAAAAAABAAAAAAHNbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAABAAAAAgABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABeG1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAThzdGJsAAAAuHN0c2QAAAAAAAAAAQAAAKhhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAABAAEABIAAAASAAAAAAAAAABFUxhdmM2MC4zMS4xMDIgbGlieDI2NAAAAAAAAAAAAAAAGP//AAAALmF2Y0MBQsAK/+EAFmdCwArZHsBEAAADAAQAAAMACDxImSABAAVoy4PLIAAAABBwYXNwAAAAAQAAAAEAAAAUYnRydAAAAAAAAApAAAAKQAAAABhzdHRzAAAAAAAAAAEAAAACAABAAAAAABRzdHNzAAAAAAAAAAEAAAABAAAAHHN0c2MAAAAAAAAAAQAAAAEAAAACAAAAAQAAABxzdHN6AAAAAAAAAAAAAAACAAAChgAAAAoAAAAUc3RjbwAAAAAAAAABAAADWwAAAGJ1ZHRhAAAAWm1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAG1kaXJhcHBsAAAAAAAAAAAAAAAALWlsc3QAAAAlqXRvbwAAAB1kYXRhAAAAAQAAAABMYXZmNjAuMTYuMTAwAAAACGZyZWUAAAKYbWRhdAAAAnAGBf//bNxF6b3m2Ui3lizYINkj7u94MjY0IC0gY29yZSAxNjQgcjMxMDggMzFlMTlmOSAtIEguMjY0L01QRUctNCBBVkMgY29kZWMgLSBDb3B5bGVmdCAyMDAzLTIwMjMgLSBodHRwOi8vd3d3LnZpZGVvbGFuLm9yZy94MjY0Lmh0bWwgLSBvcHRpb25zOiBjYWJhYz0wIHJlZj0zIGRlYmxvY2s9MTowOjAgYW5hbHlzZT0weDE6MHgxMTEgbWU9aGV4IHN1Ym1lPTcgcHN5PTEgcHN5X3JkPTEuMDA6MC4wMCBtaXhlZF9yZWY9MSBtZV9yYW5nZT0xNiBjaHJvbWFfbWU9MSB0cmVsbGlzPTEgOHg4ZGN0PTAgY3FtPTAgZGVhZHpvbmU9MjEsMTEgZmFzdF9wc2tpcD0xIGNocm9tYV9xcF9vZmZzZXQ9LTIgdGhyZWFkcz0xIGxvb2thaGVhZF90aHJlYWRzPTEgc2xpY2VkX3RocmVhZHM9MCBucj0wIGRlY2ltYXRlPTEgaW50ZXJsYWNlZD0wIGJsdXJheV9jb21wYXQ9MCBjb25zdHJhaW5lZF9pbnRyYT0wIGJmcmFtZXM9MCB3ZWlnaHRwPTAga2V5aW50PTI1MCBrZXlpbnRfbWluPTEgc2NlbmVjdXQ9NDAgaW50cmFfcmVmcmVzaD0wIHJjX2xvb2thaGVhZD00MCByYz1jcmYgbWJ0cmVlPTEgY3JmPTIzLjAgcWNvbXA9MC42MCBxcG1pbj0wIHFwbWF4PTY5IHFwc3RlcD00IGlwX3JhdGlvPTEuNDAgYXE9MToxLjAwAIAAAAAOZYiEBb///w9FAAFPf4AAAAAGQZo4CvqA";
 const NEAR_CATS = { fuel: ["⛽", "Distributori"], parking: ["🅿️", "Parcheggi"], cameras: ["📷", "Autovelox"] };
 const LANG_NAMES = { it: "Italiano", en: "English", de: "Deutsch", fr: "Français", es: "Español" };
 const LANG_BCP = { it: "it-IT", en: "en-US", de: "de-DE", fr: "fr-FR", es: "es-ES" };
@@ -404,6 +407,11 @@ const STYLE = `
   /* modalità guida: mappa a tutto schermo che ruota con la direzione di marcia */
   .mapwrap { overflow: hidden; }
   .main.guida .side { display: none; }
+  /* schermo intero: solo la mappa, sopra la barra laterale e l'intestazione di Home Assistant */
+  :host(.full) { position: fixed; inset: 0; z-index: 2000; width: 100vw; height: 100vh; height: 100dvh; }
+  :host(.full) .toolbar, :host(.full) #verwarn, :host(.full) .main .side { display: none; }
+  :host(.full) .main .mapwrap { flex: 1; height: auto; }
+  .nosleep { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
   .main.guida .mapwrap { flex: 1; height: auto; }
   .main.guida .leaflet-control-container { display: none; }
   #map.rot { transition: transform .8s ease-out; }
@@ -412,6 +420,7 @@ const STYLE = `
   .main.guida #map.moving { cursor: grabbing; }
   .ctl button.mode { width: auto; height: 42px; padding: 0 12px; font-size: 14px; font-weight: 600; white-space: nowrap; }
   .ctl button.mode.go { background: #0b6e3a; color: #fff; }
+  .ctl button.attn { background: var(--primary-color, #03a9f4); color: var(--text-primary-color, #fff); }
   .gattr { position: absolute; z-index: 1000; bottom: 2px; right: 6px; font-size: 10px; color: #333; padding: 0 4px;
     background: rgba(255,255,255,.75); border-radius: 3px; max-width: 70%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .gattr a { color: inherit; }
@@ -607,6 +616,7 @@ class NavigatorPanel extends HTMLElement {
             <button id="modebtn" class="mode go" hidden>▶ Parti</button>
             <button id="locate" title="La mia posizione">◎</button>
             <button id="fit" title="Mostra tutto il percorso">⤢</button>
+            <button id="fullbtn" title="Schermo intero">⛶</button>
           </div>
         </div>
       </div>`;
@@ -634,6 +644,14 @@ class NavigatorPanel extends HTMLElement {
     this._ro = new ResizeObserver(() => this._relayout());
     this._ro.observe($("mapwrap"));
     setTimeout(() => this._map.invalidateSize(), 300);
+
+    // schermo intero e schermo sempre acceso
+    $("fullbtn").addEventListener("click", () => this._toggleFull());
+    document.addEventListener("fullscreenchange", () => {
+      if (document.fullscreenElement === this) { this._fsReal = true; return; }
+      if (this._fsReal) { this._fsReal = false; if (this._full) this._toggleFull(false); } // uscita con il tasto Indietro
+    });
+    document.addEventListener("visibilitychange", () => this._updateAwake());
 
     // controlli
     $("locate").addEventListener("click", () => {
@@ -1072,6 +1090,7 @@ class NavigatorPanel extends HTMLElement {
     this._buildNavBar();
     this._applyView();
     this._renderNav();
+    this._updateAwake(); // schermo acceso durante la guida
     if (source === "gps") {
       this._nav.watch = window.navigator.geolocation.watchPosition(
         (pos) => this._onFix({ lat: pos.coords.latitude, lon: pos.coords.longitude, acc: pos.coords.accuracy || 0,
@@ -1081,8 +1100,6 @@ class NavigatorPanel extends HTMLElement {
           this._navPopup("warn", "📡", `GPS non disponibile: ${esc(err.message)}`, 4000);
         },
         { enableHighAccuracy: true, maximumAge: 2000, timeout: 30000 });
-      // schermo acceso durante la guida, dove il browser lo permette
-      try { this._nav.wake = await window.navigator.wakeLock?.request("screen"); } catch (e) { /* lo schermo può spegnersi */ }
     } else {
       this._entityFix();
     }
@@ -1092,9 +1109,9 @@ class NavigatorPanel extends HTMLElement {
     const nav = this._nav;
     if (!nav) return;
     if (nav.watch != null) window.navigator.geolocation.clearWatch(nav.watch);
-    try { nav.wake?.release(); } catch (e) { /* già rilasciato */ }
     clearTimeout(nav.popTimer);
     this._nav = null;
+    this._updateAwake();
     this._meMarker?.remove();
     this._accCircle?.remove();
     this._meMarker = this._accCircle = null;
@@ -1376,6 +1393,60 @@ class NavigatorPanel extends HTMLElement {
     this._relayout();
     requestAnimationFrame(() => this._relayout());
     if (this._nav) this._renderNav();
+  }
+
+  // schermo intero: prima quello vero del browser (nasconde anche le barre di Android), altrimenti
+  // il pannello copre tutta la finestra di Home Assistant (barra laterale e intestazione comprese)
+  async _toggleFull(on = !this._full) {
+    this._full = on;
+    this.classList.toggle("full", on);
+    if (on) {
+      const req = this.requestFullscreen || this.webkitRequestFullscreen;
+      try { if (req && !document.fullscreenElement) await req.call(this, { navigationUI: "hide" }); } catch (e) { /* resta lo schermo intero nella pagina */ }
+    } else if (document.fullscreenElement === this) {
+      try { await document.exitFullscreen(); } catch (e) { /* già uscito */ }
+    }
+    this._syncFullBtns();
+    this._updateAwake();
+    setTimeout(() => this._relayout(), 150);
+  }
+
+  _syncFullBtns() {
+    for (const b of [this.$("fullbtn"), this.$("navbot")?.querySelector('[data-n="full"]')]) {
+      if (!b) continue;
+      b.textContent = this._full ? "🗗" : "⛶";
+      b.title = this._full ? "Esci dallo schermo intero" : "Schermo intero";
+      b.classList.toggle("attn", !!this._full);
+    }
+  }
+
+  // schermo sempre acceso in guida e a schermo intero: blocco dello standby del browser o, se manca, video muto in loop
+  async _updateAwake() {
+    const want = !!(this._full || this._nav) && document.visibilityState === "visible";
+    if (!want) {
+      try { this._wake?.release(); } catch (e) { /* già rilasciato */ }
+      this._wake = null;
+      this._noSleep?.pause();
+      return;
+    }
+    if (this._wake && !this._wake.released) return;
+    try {
+      this._wake = await window.navigator.wakeLock.request("screen");
+      this._noSleep?.pause();
+      return;
+    } catch (e) { /* non disponibile (es. app Companion): video */ }
+    if (!this._noSleep) {
+      const v = document.createElement("video");
+      v.className = "nosleep";
+      v.muted = true;
+      v.loop = true;
+      v.setAttribute("playsinline", "");
+      v.setAttribute("muted", "");
+      v.src = NOSLEEP_MP4;
+      this.shadowRoot.appendChild(v);
+      this._noSleep = v;
+    }
+    try { await this._noSleep.play(); } catch (e) { /* il browser non lo permette: lo schermo può spegnersi */ }
   }
 
   // dopo un cambio di dimensioni: mappa sulla posizione seguita, altrimenti sul centro di prima
@@ -2132,6 +2203,7 @@ class NavigatorPanel extends HTMLElement {
         <button data-n="in" title="Ingrandisci">+</button>
         <button data-n="center" title="Centra sulla tua posizione">◎</button>
         <button data-n="near" title="Distributori, parcheggi e autovelox">🔎</button>
+        <button data-n="full" title="Schermo intero">⛶</button>
         <select data-n="layer" title="Tipo di mappa">${opts}</select>
         <button class="stop" data-n="stop" title="Esci dalla navigazione">■ Esci</button>
       </div>`;
@@ -2151,6 +2223,8 @@ class NavigatorPanel extends HTMLElement {
     });
     bot.querySelector('[data-n="near"]').addEventListener("click", () => this._openNearby(this._nearCat || "fuel"));
     bot.querySelector('[data-n="stop"]').addEventListener("click", () => this._stopNav());
+    bot.querySelector('[data-n="full"]').addEventListener("click", () => this._toggleFull());
+    this._syncFullBtns();
   }
 
   // ----------------------------------------------------------------- calcolo del percorso
