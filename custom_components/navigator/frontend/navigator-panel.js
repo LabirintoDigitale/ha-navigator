@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.3.0";
+const PANEL_VERSION = "1.3.1";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 const ICON = new URL("./icon.png", import.meta.url).href;
@@ -469,6 +469,18 @@ const STYLE = `
   .plist .dd { font-size: 13px; font-weight: 600; white-space: nowrap; text-align: right; }
   .plist .dd small { display: block; font-weight: 400; color: var(--secondary-text-color); font-size: 11px; }
   .plist button { font-size: 12px; padding: 6px 8px; white-space: nowrap; }
+  /* distributori: marca, nome e indirizzo in alto, distanza e Tappa a destra, carburanti sotto a tutta larghezza */
+  .plist li.fu { flex-wrap: wrap; align-items: flex-start; row-gap: 6px; }
+  .plist li.fu .bd { margin-top: 2px; }
+  .plist li.fu .nm { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-weight: 600; }
+  .plist li.fu .tx small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .plist li.fu .tx { flex: 1 1 0; }
+  .plist li.fu .fs { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; }
+  .plist .fl { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 4px; font-size: 12px; }
+  .plist .fl .fp { white-space: nowrap; padding: 2px 7px; border-radius: 10px; background: rgba(127,127,127,.15); }
+  .plist .fl .fp.hi { background: var(--primary-color); color: var(--text-primary-color, #fff); font-weight: 600; }
+  .plist .fl .old { white-space: nowrap; color: #e65100; padding: 2px 0; }
+  .plist .fl .muted { color: var(--secondary-text-color); }
   .pmark { width: 26px; height: 26px; border-radius: 50%; border: 2px solid #fff; display: flex; align-items: center; justify-content: center;
     font-size: 14px; box-shadow: 0 1px 4px rgba(0,0,0,.45); }
   .navbot .lim { width: 30px; height: 30px; border-radius: 50%; border: 4px solid #d32f2f; background: #fff; color: #111;
@@ -1726,7 +1738,7 @@ class NavigatorPanel extends HTMLElement {
       let act;
       if (cat === "fuel") {
         bd = `<span class="bd" style="background:${brandColor(it.brand)}">${esc(it.brand || "?")}</span>`;
-        tx = `${esc(it.name || it.brand)}<small>${esc([it.addr, it.town].filter(Boolean).join(", "))}${it.motorway ? " · autostrada" : ""}</small>${this._fuelLine(it)}`;
+        tx = `<span class="nm">${esc(it.name || it.brand)}</span><small>${esc([it.addr, it.town].filter(Boolean).join(", "))}${it.motorway ? " · autostrada" : ""}</small>`;
         dd = `${nav ? `tra ${fmtDist(it.to)}` : fmtDist(it.along)}<small>${it.off} m dalla strada</small>`;
         act = `<button data-go="${k}">➕ Tappa</button>`;
       } else if (cat === "parking") {
@@ -1741,6 +1753,9 @@ class NavigatorPanel extends HTMLElement {
         tx = `Autovelox fisso${it.maxspeed ? ` · limite ${it.maxspeed} km/h` : ""}<small>${esc(it.name || "")}</small>`;
         dd = nav ? `tra ${fmtDist(it.to)}` : fmtDist(it.along);
         act = "";
+      }
+      if (cat === "fuel") {
+        return `<li data-k="${k}" class="fu">${bd}<div class="tx">${tx}</div><div class="fs"><div class="dd">${dd}</div>${act}</div>${this._fuelLine(it)}</li>`;
       }
       return `<li data-k="${k}">${bd}<div class="tx">${tx}</div><div class="dd">${dd}</div>${act}</li>`;
     }).join("");
@@ -1774,17 +1789,17 @@ class NavigatorPanel extends HTMLElement {
   // carburanti venduti dall'impianto, con il prezzo; in evidenza quello scelto nel filtro
   _fuelLine(it) {
     const fuels = (it.fuels || []).filter((f) => f.k !== "altro" || fuelPrice(f) != null);
-    if (!fuels.length) return `<small class="muted">Carburanti non comunicati</small>`;
+    if (!fuels.length) return `<div class="fl"><span class="muted">Carburanti non comunicati</span></div>`;
     const kind = this._fuelShowKind;
     const parts = fuels.map((f) => {
       const p = fuelPrice(f);
       const txt = `${esc(f.n)}${p != null ? ` ${fmtPrice(p)}${f.s == null ? " serv." : ""}` : ""}`;
-      return kind && fuelMatch(f, kind) ? `<b>${txt}</b>` : txt;
+      return `<span class="fp${kind && fuelMatch(f, kind) ? " hi" : ""}">${txt}</span>`;
     });
     const t = Math.max(...fuels.map((f) => f.t || 0));
     const old = t && Date.now() / 1000 - t > 7 * 86400
-      ? ` · <span style="color:#e65100">prezzi del ${new Date(t * 1000).toLocaleDateString("it-IT")}</span>` : "";
-    return `<small>⛽ ${parts.join(" · ")}${old}</small>`;
+      ? `<span class="old">prezzi del ${new Date(t * 1000).toLocaleDateString("it-IT")}</span>` : "";
+    return `<div class="fl">${parts.join("")}${old}</div>`;
   }
 
   // ⛽ diventa una tappa prima dell'arrivo, 🅿️ diventa l'arrivo
