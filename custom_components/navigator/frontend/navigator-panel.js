@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.4.3";
+const PANEL_VERSION = "1.4.4";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1531,22 +1531,35 @@ class NavigatorPanel extends HTMLElement {
     this._3d = on;
     this._sync3dBtns();
     if (on) {
-      try {
-        await this._init3d();
-      } catch (e) {
-        this._3d = false;
-        this._sync3dBtns();
-        this._msg(`Vista 3D non disponibile: ${e.message || e}`);
-        return;
+      // se la vista 3D va in errore (anche dentro MapLibre) la si butta e la si ricrea da zero, una volta
+      let ok = false;
+      for (let tries = 0; tries < 2 && !ok; tries++) {
+        try {
+          await this._init3d();
+          if (!this._3d) return; // spenta mentre si caricava
+          this.$("map3d").hidden = false;
+          this.$("map").classList.add("under3d");
+          this._g3.resize();
+          this._update3d();
+          this._sync3d();
+          ok = true;
+        } catch (e) {
+          console.warn("Navigator 3D:", e);
+          this._destroy3d();
+          if (tries === 1) {
+            this._3d = false;
+            this._sync3dBtns();
+            this.$("map").classList.remove("under3d");
+            this.$("map3d").hidden = true;
+            this._msg(`Vista 3D non disponibile: ${e.message || e}`);
+            this._settings.view3d = false;
+            this._saveSettings();
+            return;
+          }
+        }
       }
-      if (!this._3d) return; // spenta mentre si caricava
-      this.$("map3d").hidden = false;
-      this.$("map").classList.add("under3d");
       if (this._tiles && this._map.hasLayer(this._tiles)) this._map.removeLayer(this._tiles);
       this.$("gattr").hidden = true;
-      this._g3.resize();
-      this._update3d();
-      this._sync3d();
       this._placePitchCtl();
     } else {
       this.$("map3d").hidden = true;
@@ -1557,6 +1570,33 @@ class NavigatorPanel extends HTMLElement {
     }
     this._settings.view3d = this._3d;
     this._saveSettings();
+  }
+
+  // errore nella vista 3D mentre la si usa: la si ricrea da zero, così non resta rotta
+  _recover3d(err) {
+    console.warn("Navigator 3D, la vista viene ricreata:", err);
+    if (this._recovering) return;
+    this._recovering = true;
+    this._destroy3d();
+    setTimeout(async () => {
+      this._recovering = false;
+      if (!this._3d) return;
+      this._3d = false;
+      await this._toggle3d(true);
+    }, 500);
+  }
+
+  // butta la vista 3D (la prossima pressione di 3D la ricrea da zero)
+  _destroy3d() {
+    try { this._g3?.remove(); } catch (e) { /* già rotta */ }
+    this._g3 = null;
+    this._g3ok = false;
+    this._g3ready = null;
+    this._g3key = null;
+    this._g3markers = [];
+    this._me3d = null;
+    const el = this.$("map3d");
+    if (el) el.innerHTML = "";
   }
 
   _pitch3d() {
@@ -1665,11 +1705,13 @@ class NavigatorPanel extends HTMLElement {
     // quando le quote del terreno sono arrivate si ricontrolla: se la telecamera è finita sotto una collina ci si allontana
     // (solo misura, nessun movimento se è tutto a posto: così "idle" non si ripete all'infinito)
     g.on("idle", () => {
-      if (!this._3d) return;
-      const cl = this._camClearance();
-      if (cl == null || cl >= 5) return; // solo se la telecamera è davvero quasi dentro il terreno
-      const cam = this._clearCamera({ center: g.getCenter(), zoom: g.getZoom(), bearing: g.getBearing(), pitch: g.getPitch(), padding: g.getPadding() });
-      if (cam.zoom < g.getZoom() - 0.05) g.easeTo({ ...cam, duration: 500 });
+      if (!this._3d || this._g3 !== g) return;
+      try {
+        const cl = this._camClearance();
+        if (cl == null || cl >= 5) return; // solo se la telecamera è davvero quasi dentro il terreno
+        const cam = this._clearCamera({ center: g.getCenter(), zoom: g.getZoom(), bearing: g.getBearing(), pitch: g.getPitch(), padding: g.getPadding() });
+        if (cam.zoom < g.getZoom() - 0.05) g.easeTo({ ...cam, duration: 500 });
+      } catch (e) { this._recover3d(e); }
     });
     // fonti delle mappe: chiuse (tasto ⓘ), altrimenti in guida coprono il fondo della mappa
     const shut = () => el.querySelectorAll(".maplibregl-compact-show").forEach((x) => x.classList.remove("maplibregl-compact-show"));
@@ -1683,7 +1725,8 @@ class NavigatorPanel extends HTMLElement {
   _apply3dSettings() {
     const g = this._g3;
     if (!g || !this._g3ok) return;
-    g.setTerrain({ source: "dem", exaggeration: +this._settings.terrainEx || 1.5 });
+    const ex = +this._settings.terrainEx || 1.5;
+    if (g.getTerrain()?.exaggeration !== ex) g.setTerrain({ source: "dem", exaggeration: ex });
     const want = this._settings.b3d !== false;
     if (want && !g.getLayer("bld")) {
       if (!g.getSource("ofm")) g.addSource("ofm", { type: "vector", url: OFM_URL, attribution: OFM_ATTR });
@@ -1713,6 +1756,10 @@ class NavigatorPanel extends HTMLElement {
   }
 
   _update3d() {
+    try { this._update3dData(); } catch (e) { this._recover3d(e); }
+  }
+
+  _update3dData() {
     const g = this._g3;
     if (!this._3d || !g || !this._g3ok) return;
     const feats = [];
@@ -1746,13 +1793,15 @@ class NavigatorPanel extends HTMLElement {
     const g = this._g3;
     const f = this._nav?.fix;
     if (!this._3d || !g || !f) return;
-    if (!this._me3d) {
-      const el = document.createElement("div");
-      el.innerHTML = `<div class="nav-car">${VEHICLE_SVG[this._mode] || CAR_SVG}</div>`;
-      this._me3d = new window.maplibregl.Marker({ element: el, rotationAlignment: "map", pitchAlignment: "map" })
-        .setLngLat([f.lon, f.lat]).addTo(g);
-    }
-    this._me3d.setLngLat([f.lon, f.lat]).setRotation(this._nav.dir ?? 0);
+    try { // un errore nella vista 3D non deve fermare la guida (chiamata a ogni posizione)
+      if (!this._me3d) {
+        const el = document.createElement("div");
+        el.innerHTML = `<div class="nav-car">${VEHICLE_SVG[this._mode] || CAR_SVG}</div>`;
+        this._me3d = new window.maplibregl.Marker({ element: el, rotationAlignment: "map", pitchAlignment: "map" })
+          .setLngLat([f.lon, f.lat]).addTo(g);
+      }
+      this._me3d.setLngLat([f.lon, f.lat]).setRotation(this._nav.dir ?? 0);
+    } catch (e) { this._recover3d(e); return; }
     this._sync3d();
   }
 
@@ -1773,8 +1822,10 @@ class NavigatorPanel extends HTMLElement {
         if (cl == null || cl >= min) break;
         z -= 0.25;
       }
+    } catch (e) {
+      z = opts.zoom; // controllo non riuscito: si va dove richiesto
     } finally {
-      g.jumpTo(save);
+      try { g.jumpTo(save); } catch (e) { /* resta dov'è */ }
     }
     return { ...opts, zoom: z };
   }
@@ -1785,18 +1836,38 @@ class NavigatorPanel extends HTMLElement {
     const g = this._g3;
     const tr = g?.transform;
     if (!g || !g.getTerrain() || typeof tr?.getCameraAltitude !== "function") return null;
-    const cam = tr.getCameraLngLat();
-    const c = g.getCenter();
+    let cam;
+    let c;
+    let alt;
+    try {
+      cam = tr.getCameraLngLat();
+      c = g.getCenter();
+      alt = tr.getCameraAltitude();
+    } catch (e) { return null; }
+    const cv = g.getCanvas();
+    const w = cv.clientWidth;
+    const h = cv.clientHeight;
     let ground = null;
     for (let t = 0.25; t <= 1.001; t += 0.075) {
-      const e = g.queryTerrainElevation([cam.lng + (c.lng - cam.lng) * t, cam.lat + (c.lat - cam.lat) * t]);
-      if (e != null && (ground == null || e > ground)) ground = e;
+      const ll = [cam.lng + (c.lng - cam.lng) * t, cam.lat + (c.lat - cam.lat) * t];
+      // solo i punti sullo schermo: lì le quote sono caricate. MapLibre, interrogato su un punto senza quote pronte,
+      // a volte va in errore ("Out of range source coordinates for DEM data"): quel punto si salta
+      try {
+        const px = g.project(ll);
+        if (!(px.x >= 0 && px.x <= w && px.y >= 0 && px.y <= h)) continue;
+        const e = g.queryTerrainElevation(ll);
+        if (e != null && Number.isFinite(e) && (ground == null || e > ground)) ground = e;
+      } catch (e) { /* quota non disponibile in quel punto */ }
     }
-    return ground == null ? null : tr.getCameraAltitude() - ground;
+    return ground == null ? null : alt - ground;
   }
 
   // telecamera 3D: in guida segue la posizione (nel terzo basso, girata nella direzione di marcia), altrimenti ricopia Leaflet
   _sync3d() {
+    try { this._sync3dCam(); } catch (e) { this._recover3d(e); }
+  }
+
+  _sync3dCam() {
     const g = this._g3;
     if (!this._3d || !g || this._from3d) return;
     const nav = this._nav;
