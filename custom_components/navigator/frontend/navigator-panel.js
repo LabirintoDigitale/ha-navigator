@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.8.1";
+const PANEL_VERSION = "1.8.2";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -808,6 +808,7 @@ class NavigatorPanel extends HTMLElement {
             <div class="field search"><input type="text" id="q" placeholder="Indirizzo, città, attività…" autocomplete="off"></div>
             <div id="placecard"></div>
           </div>
+          <div class="sec" id="vehsec"></div>
           <div class="sec">
             <h3>Itinerario <span><button class="link" id="swap" title="Inverti partenza e arrivo">⇅ Inverti</button>
               <button class="link" id="clear" title="Svuota l'itinerario">✕ Svuota</button></span></h3>
@@ -819,6 +820,7 @@ class NavigatorPanel extends HTMLElement {
               <label class="chk"><input type="checkbox" id="av_highways"> Evita autostrade</label>
               <label class="chk"><input type="checkbox" id="av_ferries"> Evita traghetti</label>
             </div>
+            <div id="srcbox" style="margin-top:10px"></div>
             <div class="row" style="margin-top:10px"><button class="primary" id="go" style="flex:1">Calcola percorso</button></div>
           </div>
           <div id="results"></div>
@@ -880,6 +882,7 @@ class NavigatorPanel extends HTMLElement {
     this._applyNight();
     this._loadTrips();
     this._loadGarage();
+    this._renderPlanSel();
     $("sidetabs").querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => this._showTab(b.dataset.tab)));
     this._poiTiles = new Map();
     this._map.on("moveend zoomend", () => this._schedulePois());
@@ -1334,6 +1337,32 @@ class NavigatorPanel extends HTMLElement {
     return (mine || list.find((s) => s.ok) || list[0])?.id;
   }
 
+  // Veicolo (sopra l'itinerario) e "Segui la posizione di" (sopra Calcola percorso): sempre visibili, anche senza percorso
+  _renderPlanSel() {
+    const vb = this.$("vehsec");
+    const sb = this.$("srcbox");
+    if (!vb || !sb) return;
+    const curV = vb.querySelector("#navveh")?.value || this._vehicleId();
+    vb.innerHTML = `<h3>Veicolo</h3><select class="inp" id="navveh">${this._vehicles().map((v) => `<option value="${esc(v.id)}" ${v.id === curV ? "selected" : ""}>${
+      vehIcon(v.type)} ${esc(v.name || "Veicolo")}${v.plate ? ` · ${esc(v.plate)}` : ""}</option>`).join("")}</select>`;
+    const list = this._navSources();
+    const curS = sb.querySelector("#navsrc")?.value;
+    const def = list.some((x) => x.id === curS && x.ok) ? curS : this._defaultNavSource(list);
+    // accanto a persone e dispositivi: da quanto è aggiornata la loro posizione (⚠ se vecchia)
+    sb.innerHTML = `<label class="muted" style="display:block;margin-bottom:4px">Segui la posizione di</label>
+      <select class="inp" id="navsrc">${list.map((x) => `<option value="${esc(x.id)}" ${x.id === def ? "selected" : ""} ${x.ok ? "" : "disabled"}>${esc(x.name)}${
+        x.ageText ? ` · ${x.age > STALE_MS ? "⚠ " : ""}${esc(x.ageText)}` : ""}</option>`).join("")}</select>`;
+    vb.querySelector("#navveh").addEventListener("change", (e) => {
+      try { localStorage.setItem(`${STORE_KEY}-veh`, e.target.value); } catch (err) { /* storage non disponibile */ }
+      if (this._result) this._renderResults();
+    });
+    sb.querySelector("#navsrc").addEventListener("change", (e) => {
+      try { localStorage.setItem(`${STORE_KEY}-navsrc`, e.target.value); } catch (err) { /* storage non disponibile */ }
+      if (this._me) this._locate(false, e.target.value);
+      if (this._result) this._renderResults();
+    });
+  }
+
   _navSectionHtml() {
     if (this._nav) {
       const src = this._navSources().find((s) => s.id === this._nav.source);
@@ -1343,10 +1372,6 @@ class NavigatorPanel extends HTMLElement {
           Navigator ricalcola la strada da dove sei.</div></div>`;
     }
     const list = this._navSources();
-    const def = this._defaultNavSource(list);
-    // accanto a persone e dispositivi: da quanto è aggiornata la loro posizione (⚠ se vecchia)
-    const opts = list.map((s) => `<option value="${esc(s.id)}" ${s.id === def ? "selected" : ""} ${s.ok ? "" : "disabled"}>${esc(s.name)}${
-      s.ageText ? ` · ${s.age > STALE_MS ? "⚠ " : ""}${esc(s.ageText)}` : ""}</option>`).join("");
     const hint = this._companion() === "android"
       ? `<div class="muted" style="margin-top:6px">Nell'app Android puoi provare il GPS del dispositivo; se l'app non lo passa alla pagina
          scegli la tua persona. Per seguirti bene in auto con la persona attiva
@@ -1356,12 +1381,10 @@ class NavigatorPanel extends HTMLElement {
       : `<div class="muted" style="margin-top:6px">Home Assistant è aperto in http: il browser non concede il GPS. Usa la posizione che l'app
          Companion invia a Home Assistant; per aggiornamenti ogni pochi secondi attiva nell'app la posizione ad alta precisione
          (Impostazioni → App Companion → Gestisci sensori → Posizione in background → Modalità alta precisione).</div>`;
+    const src = list.find((x) => x.id === this._meSource());
+    const veh = this._vehicles().find((v) => v.id === this._vehicleId());
     return `<div class="sec"><h3>Navigazione</h3>
-      <label class="muted" style="display:block;margin-bottom:4px">Segui la posizione di</label>
-      <select class="inp" id="navsrc">${opts}</select>
-      <label class="muted" style="display:block;margin:8px 0 4px">Veicolo</label>
-      <select class="inp" id="navveh">${this._vehicles().map((v) => `<option value="${esc(v.id)}" ${v.id === this._vehicleId() ? "selected" : ""}>${
-        vehIcon(v.type)} ${esc(v.name || "Veicolo")}${v.plate ? ` · ${esc(v.plate)}` : ""}</option>`).join("")}</select>
+      <div class="muted">${veh ? `${vehIcon(veh.type)} ${esc(veh.name || "Veicolo")}${veh.plate ? ` · ${esc(veh.plate)}` : ""} · ` : ""}posizione da ${esc(src?.name || "—")}</div>
       <div class="row" style="margin-top:8px"><button class="primary" data-a="navstart" style="flex:1">▶ Parti</button></div>${hint}
       <button class="link" data-a="devpos" style="margin-top:6px;padding-left:0;display:block">📱 Mostra la posizione di questo dispositivo</button>
       <button class="link" data-a="gpshelp" style="margin-top:2px;padding-left:0">📡 Problemi con il GPS? Posizione negata?</button></div>`;
@@ -3848,6 +3871,7 @@ class NavigatorPanel extends HTMLElement {
 
   async _loadGarage() {
     try { this._garage = (await this._hass.callWS({ type: "navigator/garage" })).vehicles || []; } catch (e) { this._garage = []; }
+    this._renderPlanSel();
     if (this._result) this._renderResults();
   }
 
@@ -3871,6 +3895,7 @@ class NavigatorPanel extends HTMLElement {
     } catch (e) {
       this._msg(`Garage non salvato: ${e.message || e}`);
     }
+    this._renderPlanSel();
     if (this._result) this._renderResults();
   }
 
@@ -4230,13 +4255,7 @@ class NavigatorPanel extends HTMLElement {
     }
     box.innerHTML = html;
     // cambiando la fonte in "Segui la posizione di", il punto blu passa subito alla nuova fonte
-    box.querySelector("#navveh")?.addEventListener("change", (e) => {
-      try { localStorage.setItem(`${STORE_KEY}-veh`, e.target.value); } catch (err) { /* storage non disponibile */ }
-    });
-    box.querySelector("#navsrc")?.addEventListener("change", (e) => {
-      try { localStorage.setItem(`${STORE_KEY}-navsrc`, e.target.value); } catch (err) { /* storage non disponibile */ }
-      if (this._me) this._locate(false, e.target.value);
-    });
+    this._renderPlanSel();
     box.querySelectorAll(".alt").forEach((el) => el.addEventListener("click", () => this._select(+el.dataset.i)));
     box.querySelectorAll(".steps li[data-k]").forEach((el) => el.addEventListener("click", () => {
       const m = r.routes[this._sel].maneuvers[+el.dataset.k];
@@ -4270,7 +4289,7 @@ class NavigatorPanel extends HTMLElement {
         this._drawMarkers();
         this._autoCompute(false);
       } else if (a === "navstart") {
-        this._startNav(box.querySelector("#navsrc")?.value || "gps");
+        this._startNav(this.$("navsrc")?.value || this._meSource() || "gps");
       } else if (a.startsWith("near-")) {
         this._openNearby(a.slice(5));
       } else if (a === "gpshelp") {
