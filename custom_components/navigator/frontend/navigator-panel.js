@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.8.2";
+const PANEL_VERSION = "1.8.3";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -248,7 +248,7 @@ const VEHICLE_TYPES = [["auto", "🚗", "Auto"], ["moto", "🏍️", "Moto"], ["
   ["camper", "🚌", "Camper"], ["bici", "🚲", "Bici"], ["altro", "🚙", "Altro"]];
 const vehIcon = (t) => (VEHICLE_TYPES.find((v) => v[0] === t) || VEHICLE_TYPES[0])[1];
 const NIGHT_MODES = [["auto", "Automatica (al tramonto)"], ["on", "Sempre"], ["off", "Mai"]];
-const POI_MIN_ZOOM = 15;
+const POI_MIN_ZOOM = 14;
 const NEAR_CATS = { fuel: ["⛽", "Distributori"], parking: ["🅿️", "Parcheggi"], cameras: ["📷", "Autovelox"] };
 const LANG_NAMES = { it: "Italiano", en: "English", de: "Deutsch", fr: "Français", es: "Español" };
 const LANG_BCP = { it: "it-IT", en: "en-US", de: "de-DE", fr: "fr-FR", es: "es-ES" };
@@ -886,6 +886,7 @@ class NavigatorPanel extends HTMLElement {
     $("sidetabs").querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => this._showTab(b.dataset.tab)));
     this._poiTiles = new Map();
     this._map.on("moveend zoomend", () => this._schedulePois());
+    setTimeout(() => this._schedulePois(), 1500); // anche all'apertura, senza aspettare che la mappa si muova
     this._map.on("click", (e) => this._mapClick(e.latlng));
     this._map.on("dragstart", () => this._userMoved());
     this._bindGuidaGestures();
@@ -3993,7 +3994,13 @@ class NavigatorPanel extends HTMLElement {
   async _loadPois() {
     const m = this._map;
     if (!m || !this._poiTiles) return;
-    if (!this._poiKindsOn().size || m.getZoom() < POI_MIN_ZOOM) { this._renderPois(); return; }
+    if (!this._poiKindsOn().size) { this._renderPois(); return; }
+    if (m.getZoom() < POI_MIN_ZOOM) {
+      // una volta per sessione: i punti ci sono solo da vicino
+      if (!this._poiZoomHint) { this._poiZoomHint = true; this._msg("Punti di interesse: avvicina la mappa (sono visibili da vicino)"); }
+      this._renderPois();
+      return;
+    }
     const b = m.getBounds();
     const c = m.getCenter();
     const tiles = [];
@@ -4016,6 +4023,13 @@ class NavigatorPanel extends HTMLElement {
         this._renderPois();
       } catch (e) {
         this._poiTiles.set(key, { failed: Date.now() }); // Overpass carico: si riprova fra un minuto
+        // il motivo, al massimo una volta ogni 5 minuti
+        if (Date.now() - (this._poiErrAt || 0) > 300000) {
+          this._poiErrAt = Date.now();
+          const unknown = /unknown command|unknown_command|Unknown command/i.test(`${e.code || ""} ${e.message || ""}`);
+          this._msg(unknown ? "Punti di interesse: aggiorna l'integrazione Navigator e riavvia Home Assistant"
+            : `Punti di interesse non caricati: ${e.message || e}. Riprovo fra un minuto.`);
+        }
       }
     }
   }
@@ -4026,7 +4040,12 @@ class NavigatorPanel extends HTMLElement {
     if (!kinds.size || !this._poiView || this._map.getZoom() < POI_MIN_ZOOM) return [];
     const c = this._map.getCenter();
     const out = [];
-    for (const key of this._poiView) for (const it of this._poiTiles.get(key)?.items || []) if (kinds.has(it.k)) out.push(it);
+    const seen = new Set(); // un edificio a cavallo di due riquadri arriva da tutti e due
+    for (const key of this._poiView) {
+      for (const it of this._poiTiles.get(key)?.items || []) {
+        if (kinds.has(it.k) && !seen.has(it.id)) { seen.add(it.id); out.push(it); }
+      }
+    }
     out.sort((a, z) => Math.hypot(a.lat - c.lat, a.lon - c.lng) - Math.hypot(z.lat - c.lat, z.lon - c.lng));
     return out.slice(0, 150);
   }

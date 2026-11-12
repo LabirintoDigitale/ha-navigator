@@ -345,7 +345,10 @@ class Pois:
              f'nwr["shop"~"^({"|".join(_POI_SHOP)})$"]{bb};'
              f'nwr["tourism"~"^({"|".join(_POI_TOURISM)})$"]{bb};'
              ");out center tags;")
-        els = await self._overpass(q, 30)  # una richiesta alla volta (regole d'uso dei server pubblici)
+        try:
+            els = await self._overpass_race(q, 25)  # tutti i server insieme: vince la prima risposta valida
+        except PoiError:
+            els = await self._overpass(q, 30)  # nessuno ha risposto in tempo: uno alla volta, con più pazienza
         items = []
         for e in els:
             it = self._osm_item(e)
