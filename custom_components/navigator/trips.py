@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 from typing import Any
 
@@ -12,6 +13,7 @@ from .const import DOMAIN
 
 MAX_TRIPS = 300   # per utente
 MAX_TRACK = 3000  # punti della traccia
+STALE_S = 30 * 60  # un viaggio "in corso" senza notizie da 30 minuti è interrotto (app chiusa senza Esci)
 
 
 class Trips:
@@ -52,8 +54,54 @@ class Trips:
         self._save()
         return item
 
+    # viaggio salvato man mano: creato alla partenza, punti aggiunti durante la guida, concluso con Esci
+    def start(self, user_id: str, meta: dict[str, Any]) -> dict:
+        now = time.time()
+        item = {**meta, "id": uuid.uuid4().hex[:12], "track": [], "km": 0, "duration": 0, "avg": 0, "max": 0,
+                "start": meta.get("start") or now, "end": now, "status": "in_corso", "updated": now}
+        trips = self.data.setdefault(user_id, [])
+        for t in trips:  # un viaggio rimasto aperto (app chiusa senza Esci) è interrotto
+            if t.get("status") == "in_corso":
+                t["status"] = "interrotto"
+        trips.insert(0, item)
+        del trips[MAX_TRIPS:]
+        self._save()
+        return item
+
+    def append(self, user_id: str, trip_id: str, points: list, stats: dict[str, Any]) -> dict | None:
+        t = self.get(user_id, trip_id)
+        if t is None:
+            return None
+        t["track"].extend(points)
+        if len(t["track"]) > MAX_TRACK:  # si dimezzano i punti più vecchi, l'ultimo resta
+            t["track"] = t["track"][: len(t["track"]) - 1 : 2] + [t["track"][-1]]
+        for k in ("km", "duration", "avg", "max", "end", "to"):
+            if stats.get(k) is not None:
+                t[k] = stats[k]
+        t["updated"] = time.time()
+        if t.get("status") != "concluso":
+            t["status"] = "in_corso"
+        self._save()
+        return t
+
+    def finish(self, user_id: str, trip_id: str) -> None:
+        t = self.get(user_id, trip_id)
+        if t is None:
+            return
+        if (t.get("km") or 0) < 0.3 or len(t.get("track") or []) < 2:  # troppo corto: non serve in archivio
+            self.delete(user_id, trip_id)
+            return
+        t["status"] = "concluso"
+        self._save()
+
     def summaries(self, user_id: str) -> list[dict]:
-        return [{k: v for k, v in t.items() if k != "track"} for t in self.data.get(user_id, [])]
+        out = []
+        for t in self.data.get(user_id, []):
+            item = {k: v for k, v in t.items() if k != "track"}
+            if item.get("status") == "in_corso" and time.time() - item.get("updated", 0) > STALE_S:
+                item["status"] = "interrotto"
+            out.append(item)
+        return out
 
     def get(self, user_id: str, trip_id: str) -> dict | None:
         return next((t for t in self.data.get(user_id, []) if t["id"] == trip_id), None)

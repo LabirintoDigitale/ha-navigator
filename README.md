@@ -176,7 +176,8 @@ vicina alla macchina; quando la valle si apre torna quella scelta); **◎** rime
   15 minuti senza aggiornamenti). Esempio: accendere il riscaldamento quando mancano 15 minuti a casa, o aprire il cancello a 2.
 - **Pulsanti all'arrivo** (⚙): entità a scelta (cancello, garage, serratura, luci, script…) che in guida, a meno di 500 m dalla
   destinazione, diventano tasti grandi nella barra in basso (di serie solo arrivando a Casa).
-- **Archivio** (scheda *🗂️ Archivio* del pannello): ogni guida finita viene salvata per il tuo utente con data, partenza e arrivo,
+- **Archivio** (scheda *🗂️ Archivio* del pannello): ogni guida viene salvata **man mano** per il tuo utente (punti GPS e totali ogni
+  30 secondi e quando l'app va in secondo piano; senza **Esci** il viaggio resta, segnato "interrotto") con data, partenza e arrivo,
   veicolo, km, tempo, velocità media e massima e la traccia; viaggi raggruppati per mese con i totali, e si possono mostrare sulla
   mappa (più viaggi insieme, colori diversi).
 - **Garage** (⚙): i tuoi veicoli con nome, targa e tipo (auto, moto, scooter, furgone, camper, bici); alla partenza si sceglie il

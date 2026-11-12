@@ -32,7 +32,7 @@ def async_setup(hass: HomeAssistant) -> None:
         return
     for handler in (ws_info, ws_search, ws_reverse, ws_route, ws_place_save, ws_place_delete, ws_recent_clear, ws_nearby,
                     ws_poi_tile, ws_live, ws_weather, ws_trip_save, ws_trips, ws_trip, ws_trip_delete, ws_garage,
-                    ws_garage_save):
+                    ws_garage_save, ws_trip_start, ws_trip_append, ws_trip_finish):
         websocket_api.async_register_command(hass, handler)
     hass.data[DATA_WS_REGISTERED] = True
 
@@ -336,5 +336,62 @@ async def ws_garage_save(hass: HomeAssistant, connection: websocket_api.ActiveCo
     async def go():
         uid, _name = _user(connection)
         return {"vehicles": _data(hass).trips.set_vehicles(uid, msg["vehicles"])}
+
+    await _run(connection, msg["id"], go())
+
+
+def _vehicle(v) -> dict:
+    v = v if isinstance(v, dict) else {}
+    return {k: str(v.get(k) or "")[:40] for k in ("id", "name", "plate", "type")}
+
+
+def _points(raw) -> list[list[float]]:
+    return [[round(float(p[0]), 5), round(float(p[1]), 5)] for p in (raw or []) if isinstance(p, (list, tuple)) and len(p) >= 2][:5000]
+
+
+@websocket_api.websocket_command({vol.Required("type"): "navigator/trip_start", vol.Required("trip"): dict})
+@websocket_api.async_response
+async def ws_trip_start(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Crea il viaggio alla partenza: i punti arrivano man mano (trip_append), anche se la guida non finisce con Esci."""
+    async def go():
+        uid, _name = _user(connection)
+        t = msg["trip"]
+        meta = {k: str(t.get(k) or "")[:80] for k in ("from", "to", "mode")}
+        meta["start"] = float(t.get("start") or 0) or None
+        meta["vehicle"] = _vehicle(t.get("vehicle"))
+        return {"id": _data(hass).trips.start(uid, meta)["id"]}
+
+    await _run(connection, msg["id"], go())
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "navigator/trip_append",
+    vol.Required("trip_id"): str,
+    vol.Optional("points", default=[]): list,
+    vol.Optional("stats", default={}): dict,
+})
+@websocket_api.async_response
+async def ws_trip_append(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    async def go():
+        uid, _name = _user(connection)
+        st = msg["stats"]
+        stats = {k: float(st[k]) for k in ("km", "duration", "avg", "max", "end") if isinstance(st.get(k), (int, float))}
+        if st.get("to"):
+            stats["to"] = str(st["to"])[:80]
+        ok = _data(hass).trips.append(uid, msg["trip_id"], _points(msg["points"]), stats)
+        if ok is None:
+            raise NavigatorError("Viaggio non trovato")
+        return {"ok": True}
+
+    await _run(connection, msg["id"], go())
+
+
+@websocket_api.websocket_command({vol.Required("type"): "navigator/trip_finish", vol.Required("trip_id"): str})
+@websocket_api.async_response
+async def ws_trip_finish(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    async def go():
+        uid, _name = _user(connection)
+        _data(hass).trips.finish(uid, msg["trip_id"])
+        return {"ok": True}
 
     await _run(connection, msg["id"], go())

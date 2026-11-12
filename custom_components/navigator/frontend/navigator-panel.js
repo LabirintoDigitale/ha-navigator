@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.8.0";
+const PANEL_VERSION = "1.8.1";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -900,7 +900,10 @@ class NavigatorPanel extends HTMLElement {
       if (document.fullscreenElement === this) { this._fsReal = true; return; }
       if (this._fsReal) { this._fsReal = false; if (this._full) this._toggleFull(false); } // uscita con il tasto Indietro
     });
-    document.addEventListener("visibilitychange", () => this._updateAwake());
+    document.addEventListener("visibilitychange", () => {
+      this._updateAwake();
+      if (document.visibilityState === "hidden") this._tripFlush(); // app chiusa o in secondo piano: i punti partono subito
+    });
 
     // controlli
     $("locate").addEventListener("click", () => {
@@ -1382,6 +1385,7 @@ class NavigatorPanel extends HTMLElement {
     this._tripVehicle = this._vehicles().find((v) => v.id === (this.shadowRoot.getElementById("navveh")?.value || this._vehicleId())) || this._vehicles()[0];
     this._nav = { source, follow: true, idx: 0, passed: 0, offSince: null, offCount: 0, rerouting: false, lastReroute: 0,
       lastKey: null, fix: null, arrived: false, view: "guida", dir: null };
+    this._tripBegin();
     this.$("ctltr").hidden = true;
     this._unlockAudio();
     this._drawRoute();
@@ -1409,7 +1413,7 @@ class NavigatorPanel extends HTMLElement {
     const nav = this._nav;
     if (!nav) return;
     this._tunnelExit();
-    this._tripSave(nav);
+    this._tripEnd(nav);
     this._hass.callWS({ type: "navigator/live", active: false }).catch(() => { /* sensori non aggiornati */ });
     if (nav.watch != null) window.navigator.geolocation.clearWatch(nav.watch);
     clearTimeout(nav.popTimer);
@@ -3667,15 +3671,65 @@ class NavigatorPanel extends HTMLElement {
   _tripPoint(f) {
     const nav = this._nav;
     if (!nav || f.est) return;
-    nav.trip ??= { start: Date.now(), track: [], km: 0, max: 0 };
+    nav.trip ??= { start: Date.now(), track: [], km: 0, max: 0, pending: [] };
     const t = nav.trip;
     const last = t.track[t.track.length - 1];
     const here = [+f.lat.toFixed(5), +f.lon.toFixed(5)];
     if (!last || distM(last, here) >= 25) {
       if (last) t.km += distM(last, here) / 1000;
       t.track.push(here);
+      t.pending.push(here);
     }
     if (typeof f.speed === "number" && f.speed >= 0 && (f.acc || 0) < 50) t.max = Math.max(t.max, f.speed * 3.6);
+  }
+
+  // viaggio salvato man mano: creato alla partenza, punti e totali ogni 30 s (e quando l'app va in secondo piano),
+  // concluso con Esci; senza Esci resta in archivio con i punti arrivati fino a quel momento
+  async _tripBegin() {
+    const nav = this._nav;
+    nav.trip = { start: Date.now(), track: [], km: 0, max: 0, pending: [] };
+    const dest = this._points[this._points.length - 1] || {};
+    try {
+      const r = await this._hass.callWS({ type: "navigator/trip_start", trip: { start: nav.trip.start / 1000, from: this._tripFrom || "",
+        to: dest.name || "", mode: this._mode, vehicle: this._tripVehicle || {} } });
+      if (this._nav === nav) nav.trip.id = r.id;
+    } catch (e) { /* integrazione vecchia: il viaggio si salva tutto alla fine */ }
+    clearInterval(this._tripTimer);
+    this._tripTimer = setInterval(() => this._tripFlush(), 30000);
+  }
+
+  _tripStats(t) {
+    const now = Date.now();
+    const duration = Math.round((now - t.start) / 1000);
+    const dest = this._points[this._points.length - 1] || {};
+    return { km: Math.round(t.km * 100) / 100, duration, end: now / 1000, max: Math.round(t.max), to: dest.name || "",
+      avg: duration > 60 ? Math.round((t.km / (duration / 3600)) * 10) / 10 : 0 };
+  }
+
+  async _tripFlush(nav = this._nav) {
+    const t = nav?.trip;
+    if (!t?.id || t.flushing || (!t.pending.length && Date.now() - (t.flushedAt || 0) < 60000)) return;
+    const points = t.pending.splice(0);
+    t.flushing = true;
+    try {
+      await this._hass.callWS({ type: "navigator/trip_append", trip_id: t.id, points, stats: this._tripStats(t) });
+      t.flushedAt = Date.now();
+    } catch (e) {
+      t.pending.unshift(...points); // si riprova al prossimo giro
+    } finally {
+      t.flushing = false;
+    }
+  }
+
+  async _tripEnd(nav) {
+    clearInterval(this._tripTimer);
+    const t = nav.trip;
+    if (!t) return;
+    if (!t.id) { this._tripSave(nav); return; } // integrazione vecchia
+    t.flushedAt = 0;
+    await this._tripFlush(nav);
+    try { await this._hass.callWS({ type: "navigator/trip_finish", trip_id: t.id }); } catch (e) { /* resta "interrotto" */ }
+    this._loadTrips();
   }
 
   async _tripSave(nav) {
@@ -3740,7 +3794,7 @@ class NavigatorPanel extends HTMLElement {
         html += `<div class="trip"><input type="checkbox" data-tc="${k}" ${col ? "checked" : ""} style="--tc:${col || ""}" title="Mostra sulla mappa">
           ${col ? `<span class="sw" style="background:${col}"></span>` : ""}
           <div class="nm" data-tv="${k}">${esc(t.from || "?")} → ${esc(t.to || "?")}
-          <small>${when}${veh} · ${fmtKm(t.km || 0)} · ${fmtTime(t.duration || 0)} · media ${Math.round(t.avg || 0)} · max ${Math.round(t.max || 0)} km/h</small></div>
+          <small>${t.status === "in_corso" ? "🔴 in corso · " : t.status === "interrotto" ? "⚠ interrotto (senza Esci) · " : ""}${when}${veh} · ${fmtKm(t.km || 0)} · ${fmtTime(t.duration || 0)} · media ${Math.round(t.avg || 0)} · max ${Math.round(t.max || 0)} km/h</small></div>
           <button class="icon" data-td="${k}" title="Elimina">🗑</button></div>`;
       });
     }
