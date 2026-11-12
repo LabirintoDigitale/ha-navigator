@@ -199,6 +199,9 @@ vicina alla macchina; quando la valle si apre torna quella scelta); **◎** rime
 - Dopo il calcolo, il **meteo previsto lungo il percorso all'ora in cui passerai** (Open-Meteo, gratuito e senza chiave): temperature
   e avvisi per neve, pioggia, ghiaccio, gelo, vento forte, nebbia e temporali, con le icone sulla mappa; in guida un avviso (anche a
   voce) quando uno di questi punti è a meno di 10 km (disattivabile in ⚙).
+- **Nuvole in 3D** (⚙ → Vista 3D): con la vista inclinata, nuvole soffici in cielo a 1–2 km sopra il terreno, tante quanta la
+  nuvolosità prevista nella zona (Open-Meteo, su ~18 km intorno) e lungo il percorso; grigie dove piove. Dall'alto spariscono per
+  non coprire la mappa. In 3D anche le icone del meteo lungo il percorso stanno sospese in cielo.
 - **Modalità notte** (⚙ → Mappa): automatica al tramonto (sole di Home Assistant), sempre o mai. Mappa stradale e topografica scure,
   satellite attenuato, in 3D cielo notturno, edifici scuri e finestre accese.
 

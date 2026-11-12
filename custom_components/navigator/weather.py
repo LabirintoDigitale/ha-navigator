@@ -11,7 +11,7 @@ import aiohttp
 from .const import USER_AGENT
 
 OPEN_METEO = "https://api.open-meteo.com/v1/forecast"
-HOURLY = "temperature_2m,precipitation,snowfall,weather_code,wind_gusts_10m"
+HOURLY = "temperature_2m,precipitation,snowfall,weather_code,wind_gusts_10m,cloud_cover"
 
 
 class WeatherError(Exception):
@@ -29,7 +29,7 @@ class Weather:
         for lat, lon, _t in points:
             key = f"{lat:.2f},{lon:.2f}"
             hit = self._cache.get(key)
-            if not hit or time.time() - hit[0] > 1800:
+            if not hit or time.time() - hit[0] > 1800 or "cloud_cover" not in hit[1]:
                 need.append((key, round(lat, 2), round(lon, 2)))
         if need:
             uniq = list({k: (k, la, lo) for k, la, lo in need}.values())
@@ -57,5 +57,6 @@ class Weather:
             i = min(range(len(times)), key=lambda k: abs(times[k] - t))
             pick = lambda name: (h.get(name) or [None] * len(times))[i]  # noqa: E731
             out.append({"lat": lat, "lon": lon, "t": t, "temp": pick("temperature_2m"), "prec": pick("precipitation"),
-                        "snow": pick("snowfall"), "code": pick("weather_code"), "gust": pick("wind_gusts_10m")})
+                        "snow": pick("snowfall"), "code": pick("weather_code"), "gust": pick("wind_gusts_10m"),
+                        "cloud": pick("cloud_cover")})
         return out

@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.4";
+const PANEL_VERSION = "1.9.5";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -413,7 +413,7 @@ const VEHICLE_SVG = { auto: CAR_SVG, moto: motoSvg(), bici: biciSvg(), piedi: PI
 // impostazioni salvate su questo dispositivo
 const SETTINGS_KEY = "navigator-panel-settings";
 const DEFAULT_SETTINGS = { voice: false, lang: "it", voiceSel: "f", out: "auto", autoZoom: true, beep: false,
-  fuelBrands: [], fuelKind: "", camAlert: true, view3d: false, b3d: true, terrainEx: "1.5", pitch3d: 60, tunnelFx: true, zoom3dOff: 0,
+  fuelBrands: [], fuelKind: "", camAlert: true, view3d: false, b3d: true, clouds3d: true, terrainEx: "1.5", pitch3d: 60, tunnelFx: true, zoom3dOff: 0,
   voiceStyle: "normale", voiceRate: 1, voicePitch: 1, bldStyle: "colorati",
   poiKinds: ["farmacia", "ospedale", "supermercato"], arrEntities: [], arrHomeOnly: true, nightMode: "auto", wxAlert: true };
 // marche dei distributori (come nell'anagrafica del MIMIT)
@@ -998,6 +998,8 @@ const STYLE = `
   .navbot .arr button { flex: 1 1 140px; height: 48px; font-size: 16px; font-weight: 600; background: #0b6e3a; color: #fff; border-color: #0b6e3a; }
   /* meteo lungo il percorso */
   .wxm { font-size: 20px; line-height: 1; filter: drop-shadow(0 1px 2px rgba(0,0,0,.6)); }
+  .wx3d .wxm { font-size: 30px; }
+  .clouds3d { position: absolute; left: 0; top: 0; pointer-events: none; }
   .wxlist { margin: 4px 0 0; padding: 0; list-style: none; font-size: 13px; }
   .wxlist li { padding: 3px 0; }
   /* diario dei viaggi */
@@ -2375,6 +2377,8 @@ class NavigatorPanel extends HTMLElement {
     this._g3key = null;
     this._g3markers = [];
     this._me3d = null;
+    this._cloudCanvas = null;
+    this._cloudHooked = false;
     const el = this.$("map3d");
     if (el) el.innerHTML = "";
   }
@@ -2521,6 +2525,7 @@ class NavigatorPanel extends HTMLElement {
       });
     }
     g.on("moveend", () => this._schedulePois()); // i punti di interesse della zona ora visibile
+    g.on("moveend", () => this._scheduleClouds()); // nuvole della zona ora visibile
     g.on("moveend", (e) => {
       if (!e.originalEvent || (this._nav?.follow)) return;
       const cc = g.getCenter();
@@ -2634,6 +2639,203 @@ class NavigatorPanel extends HTMLElement {
       : style === "semplici" ? { anchor: "viewport", color: "#ffffff", intensity: 0.5, position: [1.15, 210, 30] }
       : { anchor: "viewport", color: "#fff8ee", intensity: 0.45, position: [1.3, 230, 45] });
     try { g.setSky(this._skySpec()); } catch (e) { /* cielo non supportato */ }
+    // nuvole in cielo: disegnate su un foglio sopra la mappa, in prospettiva con la telecamera
+    if (!this._cloudHooked) {
+      this._cloudHooked = true;
+      g.on("render", () => this._drawClouds());
+      g.on("resize", () => this._drawClouds());
+    }
+    this._cloudKey = null; // ricolora (giorno/notte) e ridisegna
+    this._scheduleClouds(true);
+  }
+
+  // ----------------------------------------------------------------- nuvole in 3D
+  // Nuvolosità prevista (Open-Meteo, dal backend) su una griglia 3×3 intorno al centro della vista; le nuvole stanno su un
+  // reticolo fisso di ~1,5 km con posizione e forma "casuali" ma sempre uguali per ogni casella, così non saltano muovendo la mappa.
+
+  _scheduleClouds(now = false) {
+    clearTimeout(this._cloudTimer);
+    this._cloudTimer = setTimeout(() => this._updateClouds(), now ? 50 : 800);
+  }
+
+  async _updateClouds() {
+    const g = this._g3;
+    if (!this._3d || !g || !this._g3ok) return;
+    if (this._settings.clouds3d === false) {
+      this._clouds = [];
+      this._cloudKey = "off";
+      this._drawClouds();
+      return;
+    }
+    const c = g.getCenter();
+    // meteo della zona: di nuovo se ci si sposta di oltre ~8 km o dopo mezz'ora
+    const az = this._cloudWx;
+    if (!az || Math.abs(az.lat - c.lat) > 0.08 || Math.abs(az.lon - c.lng) > 0.08 || Date.now() - az.at > 1800000) {
+      if (!this._cloudLoading) {
+        this._cloudLoading = true;
+        const lat = +c.lat.toFixed(2), lon = +c.lng.toFixed(2), t = Date.now() / 1000;
+        const pts = [];
+        for (const dy of [-0.12, 0, 0.12]) for (const dx of [-0.16, 0, 0.16]) pts.push([+(lat + dy).toFixed(2), +(lon + dx).toFixed(2), t]);
+        try {
+          const r = await this._hass.callWS({ type: "navigator/weather", points: pts });
+          this._cloudWx = { lat, lon, at: Date.now(), pts: r.points.map((w) => ({ lat: w.lat, lon: w.lon, cloud: w.cloud,
+            rain: (w.prec || 0) >= 0.3 || (w.code ?? 0) >= 51 }) ) };
+          console.debug("[Navigator nuvole] meteo della zona", this._cloudWx.pts.map((p) => p.cloud));
+        } catch (e) {
+          // meteo non disponibile: nuvole "medie", si riprova tra 5 minuti
+          this._cloudWx = { lat, lon, at: Date.now() - 1500000, pts: [{ lat, lon, cloud: 45, rain: false }] };
+          console.debug("[Navigator nuvole] meteo non disponibile", e?.message || e);
+        }
+        this._cloudLoading = false;
+        this._cloudKey = null;
+      }
+    }
+    if (!this._cloudWx) return;
+    const key = `${this._nightOn ? 1 : 0}|${this._cloudWx.at}|${Math.round(c.lat / 0.03)}|${Math.round(c.lng / 0.04)}`;
+    if (key === this._cloudKey) return;
+    this._cloudKey = key;
+    this._clouds = this._cloudList(c.lat, c.lng);
+    this._drawClouds();
+  }
+
+  // nuvole della zona: [{x, y (Mercatore), alt (m), rain, puffs: [{dx, dy, dz, r} in metri]}]
+  _cloudList(lat0, lon0) {
+    const wx = this._cloudWx.pts;
+    // lungo il percorso vale il meteo all'ora di passaggio (pioggia compresa)
+    const route = (this._wx?.done ? this._wx.items : []).map((p) => ({ lat: p.ll[0], lon: p.ll[1], cloud: p.cloud,
+      rain: !!p.warn?.some((w) => /Pioggia|Temporale|Neve/.test(w.txt)) }));
+    const all = [...route, ...wx];
+    const near = (la, lo) => {
+      let best = null, bd = Infinity;
+      for (const p of all) {
+        const d = (p.lat - la) ** 2 + ((p.lon - lo) * 0.7) ** 2;
+        if (d < bd) { bd = d; best = p; }
+      }
+      return best;
+    };
+    const rnd = (a, b, k) => { // numero pseudo-casuale fisso per casella
+      const x = Math.sin(a * 127.1 + b * 311.7 + k * 74.7) * 43758.5453;
+      return x - Math.floor(x);
+    };
+    const MC = window.maplibregl.MercatorCoordinate;
+    let ground = 0; // quota del terreno al centro (già col rilievo accentuato): le nuvole stanno sopra
+    try { ground = this._g3.queryTerrainElevation([lon0, lat0]) || 0; } catch (e) { /* senza rilievo */ }
+    const STEP = 0.014; // ~1,5 km
+    const out = [];
+    const ci = Math.round(lat0 / STEP), cj = Math.round(lon0 / STEP);
+    const R = 12; // caselle per lato: ~18 km intorno al centro
+    for (let i = ci - R; i <= ci + R; i++) {
+      for (let j = cj - R; j <= cj + R; j++) {
+        const la = i * STEP, lo = j * STEP;
+        const w = near(la, lo);
+        const cover = w?.cloud ?? 45;
+        // fino a tre nuvole per casella: con cielo coperto tante e grandi, con sereno qualche nuvoletta
+        for (let n = 0; n < 3; n++) {
+          if (rnd(i, j, n) > Math.min(0.97, 0.05 + (cover / 100) * 0.95) * [1, 0.8, 0.5][n]) continue;
+          const clat = la + (rnd(i, j, n + 10) - 0.5) * STEP, clon = lo + (rnd(i, j, n + 20) - 0.5) * STEP * 1.4;
+          const size = 260 + rnd(i, j, n + 30) * 600 * (0.6 + cover / 200); // metri
+          const m = MC.fromLngLat([clon, clat], 0);
+          const puffs = [];
+          const np = 5 + Math.floor(rnd(i, j, n + 50) * 5);
+          for (let k = 0; k < np; k++) {
+            const ang = rnd(i, j, n * 11 + k + 60) * Math.PI * 2;
+            const off = k ? size * (0.3 + rnd(i, j, n * 11 + k + 70) * 0.7) : 0;
+            puffs.push({ dx: Math.cos(ang) * off, dy: Math.sin(ang) * off * 0.6, dz: (k ? rnd(i, j, n * 11 + k + 90) * 0.5 : 0.3) * size * 0.6,
+              r: size * (k ? 0.3 + rnd(i, j, n * 11 + k + 80) * 0.3 : 0.55) });
+          }
+          out.push({ x: m.x, y: m.y, alt: ground + 1000 + rnd(i, j, n + 40) * 1200, rain: !!w?.rain, puffs });
+        }
+      }
+    }
+    return out;
+  }
+
+  // sbuffo di nuvola: macchia bianca sfumata (e una grigia per la parte in ombra)
+  _cloudSprite(col) {
+    this._cloudSprites ??= {};
+    if (this._cloudSprites[col]) return this._cloudSprites[col];
+    const c = document.createElement("canvas");
+    c.width = c.height = 128;
+    const x = c.getContext("2d");
+    const gr = x.createRadialGradient(64, 58, 4, 64, 64, 64);
+    gr.addColorStop(0, `rgba(${col},1)`);
+    gr.addColorStop(0.55, `rgba(${col},.85)`);
+    gr.addColorStop(1, `rgba(${col},0)`);
+    x.fillStyle = gr;
+    x.fillRect(0, 0, 128, 128);
+    return (this._cloudSprites[col] = c);
+  }
+
+  // disegna le nuvole a ogni fotogramma della vista 3D: proiezione prospettica fatta qui, con posizione e orientamento
+  // della telecamera di MapLibre (che non sa mettere oggetti in quota)
+  _drawClouds() {
+    const g = this._g3;
+    if (!g) return;
+    let cv = this._cloudCanvas;
+    if (!cv || !cv.isConnected) {
+      cv = this._cloudCanvas = document.createElement("canvas");
+      cv.className = "clouds3d";
+      g.getCanvas().after(cv); // subito sopra la mappa, sotto i segnaposto
+    }
+    const W = g.getCanvas().clientWidth, H = g.getCanvas().clientHeight, dpr = Math.min(2, window.devicePixelRatio || 1);
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) {
+      cv.width = Math.round(W * dpr);
+      cv.height = Math.round(H * dpr);
+      cv.style.width = `${W}px`;
+      cv.style.height = `${H}px`;
+    }
+    const x = cv.getContext("2d");
+    x.setTransform(dpr, 0, 0, dpr, 0, 0);
+    x.clearRect(0, 0, W, H);
+    if (!this._3d || !this._clouds?.length) return;
+    let cam;
+    try { // posizione della telecamera (MapLibre 5: dalla trasformazione della vista)
+      const t = g.transform;
+      cam = window.maplibregl.MercatorCoordinate.fromLngLat(t.getCameraLngLat(), t.getCameraAltitude());
+    } catch (e) { return; }
+    if (!cam) return;
+    const MC = window.maplibregl.MercatorCoordinate;
+    const u = MC.fromLngLat(g.getCenter(), 0).meterInMercatorCoordinateUnits();
+    const b = (g.getBearing() * Math.PI) / 180, p = (g.getPitch() * Math.PI) / 180;
+    const fov = ((g.transform?.fov || 36.87) * Math.PI) / 180;
+    const F = H / 2 / Math.tan(fov / 2);
+    // assi della telecamera nel Mercatore (x verso est, y verso sud, z in alto)
+    const hx = Math.sin(b), hy = -Math.cos(b);
+    const f = [hx * Math.sin(p), hy * Math.sin(p), -Math.cos(p)];
+    const r = [Math.cos(b), Math.sin(b), 0];
+    const up = [hx * Math.cos(p), hy * Math.cos(p), Math.sin(p)];
+    const night = this._nightOn;
+    const light = this._cloudSprite(night ? "120,130,150" : "255,255,255");
+    const shadow = this._cloudSprite(night ? "70,78,95" : "196,203,212");
+    const rainL = this._cloudSprite(night ? "85,92,108" : "170,177,187");
+    const rainS = this._cloudSprite(night ? "55,60,72" : "128,135,146");
+    const items = [];
+    for (const c of this._clouds) {
+      for (const pf of c.puffs) {
+        const vx = c.x + pf.dx * u - cam.x, vy = c.y + pf.dy * u - cam.y, vz = (c.alt + pf.dz) * u - cam.z;
+        const z = vx * f[0] + vy * f[1] + vz * f[2];
+        if (z <= 50 * u) continue; // dietro o troppo vicino alla telecamera
+        const sx = W / 2 + ((vx * r[0] + vy * r[1]) / z) * F;
+        const sy = H / 2 - ((vx * up[0] + vy * up[1] + vz * up[2]) / z) * F;
+        const rad = ((pf.r * u) / z) * F;
+        if (rad < 1 || sx + rad < 0 || sx - rad > W || sy + rad < 0 || sy - rad > H) continue;
+        const dist = Math.hypot(vx, vy, vz) / u;
+        // sfumano lontano (oltre ~15 km) e molto vicino, per non coprire tutto lo schermo
+        const a = Math.min(1, Math.max(0, (22000 - dist) / 7000)) * Math.min(1, Math.max(0, (dist - 300) / 900));
+        if (a <= 0.02) continue;
+        items.push([z, sx, sy, rad, a, c.rain]);
+      }
+    }
+    items.sort((m, n) => n[0] - m[0]); // prima le lontane
+    // vista dall'alto o poco inclinata: niente nuvole, coprirebbero la mappa (compaiono da 40° a 55°)
+    const top = 0.92 * Math.min(1, Math.max(0, (g.getPitch() - 40) / 15));
+    if (top <= 0) return;
+    for (const [, sx, sy, rad, a, rain] of items) {
+      x.globalAlpha = a * top;
+      x.drawImage(rain ? rainS : shadow, sx - rad, sy - rad * 0.8, rad * 2, rad * 2); // ombra sotto
+      x.drawImage(rain ? rainL : light, sx - rad, sy - rad * 1.1, rad * 2, rad * 2);
+    }
+    x.globalAlpha = 1;
   }
 
   // aspetto degli edifici: semplici (grigio chiaro), colorati secondo l'altezza (bassi chiari, alti azzurri) o con finestre
@@ -2721,7 +2923,9 @@ class NavigatorPanel extends HTMLElement {
         el.innerHTML = ic.html;
         const a = ic.iconAnchor || [0, 0];
         const ll = l.getLatLng();
-        this._g3markers.push(new window.maplibregl.Marker({ element: el, anchor: "top-left", offset: [-a[0], -a[1]] })
+        const up = grp === this._wxLayer ? 120 : 0; // meteo: sospeso in cielo
+        if (up) el.classList.add("wx3d");
+        this._g3markers.push(new window.maplibregl.Marker({ element: el, anchor: "top-left", offset: [-a[0], -a[1] - up] })
           .setLngLat([ll.lng, ll.lat]).addTo(g));
       });
     }
@@ -3560,6 +3764,7 @@ class NavigatorPanel extends HTMLElement {
         ${sw("b3d", "Edifici in 3D", "Da vicino, con l'altezza degli edifici dove è nota (OpenFreeMap, dati OpenStreetMap)")}
         ${s.b3d !== false ? `<label class="line"><span>Stile degli edifici</span><select data-s="bldStyle">${
           BLD_STYLES.map(([v, n]) => `<option value="${v}" ${(s.bldStyle || "colorati") === v ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>` : ""}
+        ${sw("clouds3d", "Nuvole in 3D", "In cielo, a 1–2 km di quota, tante quante la nuvolosità prevista nella zona (Open-Meteo); grigie dove piove")}
       </div>
       <div class="grp"><h3>Velocità</h3>
         ${sw("camAlert", "Avviso autovelox fissi", "Cartello nella barra della guida e, con le indicazioni vocali o il beep attivi, avviso a 600 metri (da 1 km in autostrada)")}
@@ -3601,6 +3806,7 @@ class NavigatorPanel extends HTMLElement {
     wrap.querySelectorAll("input[data-s]").forEach((el) => el.addEventListener("change", () => {
       s[el.dataset.s] = el.checked;
       this._saveSettings();
+      if (el.dataset.s === "clouds3d") { this._cloudKey = null; this._scheduleClouds(true); }
       if (el.dataset.s === "b3d") { this._apply3dSettings(); this._openSettings(); } // compare o sparisce lo stile degli edifici
       if (el.dataset.s === "autoZoom3d") { this._g3key = null; this._sync3d(); }
       if (el.dataset.s === "voice" && el.checked) this._unlockAudio();
