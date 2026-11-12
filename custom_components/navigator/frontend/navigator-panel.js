@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.8.7";
+const PANEL_VERSION = "1.8.8";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -4014,7 +4014,12 @@ class NavigatorPanel extends HTMLElement {
     if (!m || !this._poiTiles) return;
     if (!this._poiKindsOn().size) { this._poiStatus(""); this._renderPois(); return; }
     // in 3D i punti arrivano con le mappe di OpenFreeMap (subito, dal browser): niente Overpass
-    if (this._3d && this._g3ok && this._g3?.getSource("ofm")) { this._poiStatus(""); this._renderPois(); return; }
+    if (this._3d && this._g3ok && this._g3?.getSource("ofm")) {
+      this._poiStatus("");
+      this._renderPois();
+      console.debug("[Navigator POI] 3D: punti dalle mappe di OpenFreeMap", this._poiShown?.length || 0);
+      return;
+    }
     if (m.getZoom() < POI_MIN_ZOOM) {
       this._poiStatus("far");
       this._renderPois();
@@ -4040,6 +4045,8 @@ class NavigatorPanel extends HTMLElement {
       // una sola richiesta per tutti i riquadri mancanti (il backend li divide e li tiene in memoria)
       for (const key of todo) this._poiTiles.set(key, { pending: true });
       this._poiReqStart = Date.now();
+      const kindsReq = [...this._poiKindsOn()];
+      console.info("[Navigator POI] richiesta", { zone: todo, categorie: kindsReq, zoom: this._map.getZoom(), "3d": !!this._3d });
       try {
         // al massimo 45 s: oltre, errore e Riprova (il backend si arrende prima, con la riserva di Photon)
         const r = await Promise.race([
@@ -4048,7 +4055,12 @@ class NavigatorPanel extends HTMLElement {
         ]);
         for (const t of r.tiles || []) this._poiTiles.set(`${t.x},${t.y}`, { items: t.items || [], partial: !!t.partial, at: Date.now() });
         this._poiReason = r.partial ? r.reason : "";
+        const per = {};
+        for (const t of r.tiles || []) for (const it of t.items || []) per[it.k] = (per[it.k] || 0) + 1;
+        console.info(`[Navigator POI] risposta in ${Date.now() - this._poiReqStart} ms`, { fonte: r.debug?.source, parziale: !!r.partial,
+          motivo: r.reason || "", perCategoria: per, server: r.debug || "(integrazione senza dettagli)" });
       } catch (e) {
+        console.warn(`[Navigator POI] errore dopo ${Date.now() - this._poiReqStart} ms`, e);
         for (const key of todo) this._poiTiles.set(key, { failed: Date.now(), error: e }); // si riprova fra un minuto
       }
       this._renderPois();

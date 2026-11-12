@@ -350,23 +350,30 @@ class Pois:
         """
         now = time.time()
         missing = [k for k in tiles if not (self._poi_tiles.get(k) and now - self._poi_tiles[k][0] < POI_TILE_MAX_AGE)]
+        debug: dict[str, Any] = {"cache": len(tiles) - len(missing), "missing": len(missing)}
         if missing:
             x0, x1 = min(k[0] for k in missing), max(k[0] for k in missing)
             y0, y1 = min(k[1] for k in missing), max(k[1] for k in missing)
+            debug["bbox"] = [round(y0 * POI_TILE, 4), round(x0 * POI_TILE, 4), round((y1 + 1) * POI_TILE, 4), round((x1 + 1) * POI_TILE, 4)]
+            t0 = time.monotonic()
             try:
                 items = await self._poi_query(y0 * POI_TILE, x0 * POI_TILE, (y1 + 1) * POI_TILE, (x1 + 1) * POI_TILE)
+                debug.update(source="overpass", overpass_ms=round((time.monotonic() - t0) * 1000), found=len(items))
             except PoiError as err:
                 _LOGGER.warning("Punti di interesse non scaricati da Overpass: %s", err)
+                debug.update(overpass_ms=round((time.monotonic() - t0) * 1000), overpass_error=str(err))
                 if not kinds:
                     raise
+                t1 = time.monotonic()
                 found = await self._poi_photon(y0 * POI_TILE, x0 * POI_TILE, (y1 + 1) * POI_TILE, (x1 + 1) * POI_TILE, kinds)
+                debug.update(source="photon", photon_ms=round((time.monotonic() - t1) * 1000), found=len(found))
                 out = []
                 for x, y in tiles:
                     its = [it for it in found if math.floor(it["lon"] / POI_TILE) == x and math.floor(it["lat"] / POI_TILE) == y]
                     if (x, y) not in missing:
                         its = (self._poi_tiles.get((x, y)) or (0, []))[1]
                     out.append({"x": x, "y": y, "items": its, "partial": (x, y) in missing})
-                return {"tiles": out, "partial": True, "reason": str(err)}
+                return {"tiles": out, "partial": True, "reason": str(err), "debug": debug}
             split: dict[tuple[int, int], list] = {(x, y): [] for x in range(x0, x1 + 1) for y in range(y0, y1 + 1)}
             for it in items:
                 key = (math.floor(it["lon"] / POI_TILE), math.floor(it["lat"] / POI_TILE))
@@ -377,7 +384,8 @@ class Pois:
                 self._poi_tiles.move_to_end(key)
             while len(self._poi_tiles) > POI_TILE_CACHE:
                 self._poi_tiles.popitem(last=False)
-        return {"tiles": [{"x": x, "y": y, "items": (self._poi_tiles.get((x, y)) or (0, []))[1]} for x, y in tiles]}
+        debug.setdefault("source", "cache")
+        return {"tiles": [{"x": x, "y": y, "items": (self._poi_tiles.get((x, y)) or (0, []))[1]} for x, y in tiles], "debug": debug}
 
     async def _poi_photon(self, s: float, w: float, n: float, e: float, kinds: list[str]) -> list[dict]:
         """Riserva: per ogni categoria scelta, i punti con un nome trovati da Photon nella zona."""

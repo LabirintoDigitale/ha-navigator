@@ -15,6 +15,11 @@ marcia e ti segue. Con **▲ / ▼** scegli la prospettiva, dalla vista dall'alt
 
 <p align="center"><img src="docs/images/screenshots/guida-3d.jpg" alt="Guida in 3D sul satellite, con rilievo, edifici e percorso" width="360"></p>
 
+Con i **punti di interesse** accesi (⚙), in 3D gli edifici di farmacie, ospedali, distributori e negozi prendono il colore della
+categoria e sopra fluttua l'icona:
+
+<p align="center"><img src="docs/images/screenshots/poi-3d.jpg" alt="Vista 3D con i punti di interesse: edifici colorati e icone sopra" width="480"></p>
+
 ## Funzioni
 
 - **Pannello "Navigator" nella barra laterale**, a tutta pagina, anche da telefono (app Companion).
