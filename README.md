@@ -49,6 +49,10 @@ categoria e sopra fluttua l'icona:
   bancomat, hotel, colonnine di ricarica, distributori, polizia, poste, officine, scuole, chiese. Da OpenStreetMap (una sola richiesta per la zona visibile), visibili da
   vicino; in 2D un'icona colorata, in 3D l'edificio colorato con la categoria e sopra l'icona che fluttua. Tocca un punto per andarci. I punti arrivano dalle mappe vettoriali di OpenFreeMap (livello *poi* di OpenStreetMap), lette direttamente dal browser: subito, in 2D
   e in 3D. Solo se OpenFreeMap non risponde si usa Overpass (con Photon come riserva).
+- **Scheda del punto di interesse**: toccando un bar, un ristorante, una farmacia… la scheda mostra gli **orari** con *aperto ora /
+  chiuso* e quando chiude o riapre, telefono, sito, indirizzo e servizi (tavoli all'aperto, asporto, Wi-Fi, accessibilità), dai dati
+  di OpenStreetMap (Nominatim, una richiesta solo quando apri la scheda). Se gli orari mancano o sono sbagliati, il link *correggi o
+  aggiungi orari* porta al luogo su OpenStreetMap.
 - Servizio **`navigator.plan_route`** per le automazioni (tempo di viaggio, distanza, pedaggi).
 
 | Togli una tratta a pagamento | Ricalcola senza pedaggi |
@@ -88,6 +92,7 @@ Tutte le richieste partono da Home Assistant (nessuna chiave, nessun account):
 | Rilievo (vista 3D) | Quote del terreno [Mapzen/Tilezen Terrarium](https://registry.opendata.aws/terrain-tiles/) (AWS Open Data) | caricate dal browser, solo in 3D |
 | Edifici 3D, gallerie | [OpenFreeMap](https://openfreemap.org) (dati OpenStreetMap, schema OpenMapTiles) | caricati dal browser, solo in 3D |
 | Meteo lungo il percorso | [Open-Meteo](https://open-meteo.com) | previsioni orarie nei punti del percorso, all'ora di passaggio |
+| Orari e contatti dei punti di interesse | OpenStreetMap tramite [Nominatim](https://nominatim.org) | una richiesta quando apri la scheda, in memoria |
 
 Sono servizi gratuiti offerti dalla comunità con limiti d'uso "ragionevole": Navigator è pensato per l'uso personale.
 Nelle **opzioni dell'integrazione** puoi indicare i tuoi server Valhalla, OSRM, Photon o Nominatim.

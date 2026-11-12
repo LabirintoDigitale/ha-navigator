@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.5";
+const PANEL_VERSION = "1.9.6";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -565,6 +565,82 @@ function wxWarnings(w) {
   return out;
 }
 
+// ----------------------------------------------------------------- orari di apertura (opening_hours di OpenStreetMap)
+// Si leggono i casi comuni ("Mo-Fr 07:00-20:00; Sa 08:00-13:00; Su off", "24/7", più fasce, oltre la mezzanotte);
+// con regole più complesse (mesi, festivi con orari, date) si mostra il testo così com'è.
+const OH_DAYS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
+const OH_IT = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"];
+function parseOpeningHours(src) {
+  const txt = String(src || "").trim();
+  if (!txt) return null;
+  const week = Array.from({ length: 7 }, () => []);
+  if (/^24\/7$/.test(txt)) return week.map(() => [[0, 1440]]);
+  const hm = (t) => { const m = /^(\d{1,2}):(\d{2})$/.exec(t); return m ? +m[1] * 60 + +m[2] : null; };
+  for (let rule of txt.split(/;|\|\|/)) {
+    rule = rule.trim().replace(/\s*,\s*/g, ",").replace(/\s*-\s*/g, "-");
+    if (!rule) continue;
+    const parts = rule.split(/\s+/);
+    let days = null;
+    if (/^(Mo|Tu|We|Th|Fr|Sa|Su|PH|SH)/.test(parts[0])) {
+      days = new Set();
+      let onlyHoliday = true;
+      for (const d of parts.shift().split(",")) {
+        if (d === "PH" || d === "SH") continue;
+        const m = /^(Mo|Tu|We|Th|Fr|Sa|Su)(?:-(Mo|Tu|We|Th|Fr|Sa|Su))?$/.exec(d);
+        if (!m) return null;
+        onlyHoliday = false;
+        const a = OH_DAYS.indexOf(m[1]), b = OH_DAYS.indexOf(m[2] || m[1]);
+        for (let k = a; ; k = (k + 1) % 7) { days.add(k); if (k === b) break; }
+      }
+      if (onlyHoliday) continue; // regola solo per i festivi: ignorata
+    }
+    const rest = parts.join(" ").trim();
+    let ranges = [];
+    if (/^(off|closed)$/i.test(rest)) ranges = [];
+    else if (!rest) ranges = [[0, 1440]];
+    else {
+      for (const r of rest.split(",")) {
+        const m = /^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})\+?$/.exec(r);
+        if (!m) return null;
+        const a = hm(m[1]); let b = hm(m[2]);
+        if (a == null || b == null) return null;
+        if (b <= a) b += 1440; // oltre la mezzanotte
+        ranges.push([a, b]);
+      }
+    }
+    for (const k of days || [0, 1, 2, 3, 4, 5, 6]) week[k] = ranges.map((x) => [...x]);
+  }
+  return week;
+}
+const ohClock = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+// giorni consecutivi con lo stesso orario insieme: [[primo, ultimo, "06:30–20:00"], ...]
+function ohGroups(week) {
+  const txt = (r) => (r.length ? r.map(([a, b]) => `${ohClock(a)}–${ohClock(b)}`).join(", ") : "chiuso");
+  const out = [];
+  week.forEach((r, k) => {
+    const t = txt(r), last = out[out.length - 1];
+    if (last && last[2] === t) last[1] = k; else out.push([k, k, t]);
+  });
+  return out;
+}
+// aperto adesso? e quando cambia: { open, text }
+function ohStatus(week, now = new Date()) {
+  const d = (now.getDay() + 6) % 7, t = now.getHours() * 60 + now.getMinutes();
+  const prev = (d + 6) % 7;
+  for (const [a, b] of week[d]) {
+    if (t < a || t >= b) continue;
+    if (a === 0 && b === 1440) return { open: true, text: "aperto 24 ore" };
+    return { open: true, text: `chiude alle ${ohClock(b)}` }; // oltre la mezzanotte: l'ora del giorno dopo
+  }
+  for (const [, b] of week[prev]) if (b > 1440 && t < b - 1440) return { open: true, text: `chiude alle ${ohClock(b - 1440)}` };
+  for (let k = 0; k < 7; k++) {
+    const day = (d + k) % 7;
+    const next = week[day].map((r) => r[0]).filter((a) => k > 0 || a > t).sort((x, y) => x - y)[0];
+    if (next != null) return { open: false, text: `apre ${k === 0 ? "" : k === 1 ? "domani " : `${OH_IT[day].toLowerCase()} `}alle ${ohClock(next)}` };
+  }
+  return { open: false, text: "chiuso" };
+}
+
 const fmtClock = (t) => new Date(t * 1000).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
 
 // Lettore minimo dei riquadri vettoriali (formato Mapbox Vector Tile, protobuf): solo i punti di un livello, con le proprietà.
@@ -736,6 +812,16 @@ const STYLE = `
   .modes button.on { background: var(--primary-color); color: var(--text-primary-color, #fff); border-color: var(--primary-color); }
   label.chk { display: inline-flex; align-items: center; gap: 5px; font-size: 14px; margin-right: 12px; cursor: pointer; }
   .placecard { margin-top: 10px; padding: 10px; border-radius: 10px; background: var(--secondary-background-color, #f5f5f5); }
+  .pinfo { margin: 2px 0 10px; font-size: 13px; }
+  .pinfo .ohst { font-weight: 600; } .pinfo .ohst.on { color: #2e7d32; } .pinfo .ohst.off { color: #c62828; }
+  .pinfo .ohst span { font-weight: 400; color: var(--primary-text-color); }
+  .pinfo table.oh { border-collapse: collapse; margin: 4px 0 2px; font-size: 12px; }
+  .pinfo table.oh td { padding: 1px 10px 1px 0; color: var(--secondary-text-color); }
+  .pinfo table.oh tr.today td { color: var(--primary-text-color); font-weight: 600; }
+  .pinfo .pchips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .pinfo .pchips span { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: rgba(127,127,127,.15); }
+  .pinfo .plinks { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
+  .pinfo a { color: var(--primary-color); text-decoration: none; word-break: break-all; }
   .placecard .n { font-weight: 500; } .placecard .a { font-size: 13px; color: var(--secondary-text-color); margin: 2px 0 8px; }
   .alts { display: flex; flex-direction: column; gap: 6px; }
   .alt { padding: 9px 10px; border-radius: 10px; border: 2px solid var(--divider-color); cursor: pointer; }
@@ -1391,6 +1477,7 @@ class NavigatorPanel extends HTMLElement {
     this._place = p;
     const box = this.$("placecard");
     box.innerHTML = `<div class="placecard"><div class="n">${esc(p.name)}</div><div class="a">${esc(p.address || `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`)}</div>
+      ${p.poi ? `<div class="pinfo"><div class="muted"><span class="loading"></span> Orari e contatti…</div></div>` : ""}
       <div class="row">
         <button class="primary" data-a="dest">➜ Portami qui</button>
         <button data-a="stop">＋ Tappa</button>
@@ -1399,8 +1486,70 @@ class NavigatorPanel extends HTMLElement {
         <button class="icon" data-a="close" title="Chiudi">✕</button>
       </div></div>`;
     box.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => this._placeAction(b.dataset.a, p)));
+    if (p.poi) this._loadPoiInfo(p);
     this._drawMarkers();
     if (fly) this._map.flyTo([p.lat, p.lon], Math.max(this._map.getZoom(), 15), { duration: 0.8 });
+  }
+
+  // scheda del punto di interesse: orari (aperto ora?), telefono, sito, indirizzo, servizi — da OpenStreetMap
+  async _loadPoiInfo(p) {
+    const box = () => (this._place === p ? this.$("placecard")?.querySelector(".pinfo") : null);
+    let d;
+    try {
+      d = await this._hass.callWS({ type: "navigator/poi_info", lat: p.lat, lon: p.lon, name: p.poi.name, osm: p.poi.osm });
+    } catch (e) {
+      const el = box();
+      if (el) el.innerHTML = `<div class="muted">${esc(String(e.message || e).includes("Unknown command")
+        ? "Scheda non disponibile: aggiorna l'integrazione e riavvia Home Assistant." : e.message || e)}</div>`;
+      return;
+    }
+    const el = box();
+    if (!el) return;
+    if (!d.found) { el.innerHTML = `<div class="muted">Nessun dettaglio su OpenStreetMap per questo luogo.</div>`; return; }
+    let html = "";
+    if (d.address) {
+      const a = this.$("placecard").querySelector(".a");
+      if (a) a.textContent = `${p.address ? `${p.address} · ` : ""}${d.address}`;
+    }
+    if (d.opening_hours) {
+      const week = parseOpeningHours(d.opening_hours);
+      if (week) {
+        const st = ohStatus(week);
+        const today = (new Date().getDay() + 6) % 7;
+        html += `<div class="ohst ${st.open ? "on" : "off"}">${st.open ? "● Aperto" : "● Chiuso"} <span>· ${esc(st.text)}</span></div>
+          <table class="oh">${ohGroups(week).map(([d1, d2, txt]) => `<tr class="${today >= d1 && today <= d2 ? "today" : ""}"><td>${
+            d1 === d2 ? OH_IT[d1] : `${OH_IT[d1].slice(0, 3)}–${OH_IT[d2].slice(0, 3)}`}</td><td>${txt}</td></tr>`).join("")}</table>`;
+      } else {
+        html += `<div class="ohraw">🕒 ${esc(d.opening_hours)}</div>`;
+      }
+    } else {
+      html += `<div class="muted">Orari non indicati su OpenStreetMap.</div>`;
+    }
+    const chips = [];
+    if (d.cuisine) chips.push(`🍽 ${esc(d.cuisine.split(";").map((c) => c.replace(/_/g, " ")).join(", "))}`);
+    if (d.outdoor_seating === "yes") chips.push("☀️ Tavoli all'aperto");
+    if (d.takeaway === "yes" || d.takeaway === "only") chips.push("🥡 Da asporto");
+    if (["yes", "wlan", "wifi"].includes(d.internet_access)) chips.push("📶 Wi-Fi");
+    if (d.wheelchair === "yes") chips.push("♿ Accessibile");
+    else if (d.wheelchair === "limited") chips.push("♿ In parte accessibile");
+    if (chips.length) html += `<div class="pchips">${chips.map((c) => `<span>${c}</span>`).join("")}</div>`;
+    const links = [];
+    if (d.phone) {
+      const ph = d.phone.split(";")[0].trim();
+      links.push(`<a href="tel:${esc(ph.replace(/[^\d+]/g, ""))}">📞 ${esc(ph)}</a>`);
+    }
+    if (d.website) {
+      const url = /^https?:\/\//i.test(d.website) ? d.website : `https://${d.website}`;
+      links.push(`<a href="${esc(url)}" target="_blank" rel="noopener">🌐 ${esc(url.replace(/^https?:\/\/(www\.)?/i, "").replace(/\/$/, ""))}</a>`);
+    }
+    if (d.email) links.push(`<a href="mailto:${esc(d.email)}">✉️ ${esc(d.email)}</a>`);
+    if (links.length) html += `<div class="plinks">${links.join("")}</div>`;
+    const osm = /^([nwr])(\d+)$/.exec(d.osm || "");
+    if (osm) {
+      html += `<div class="muted" style="font-size:11px;margin-top:4px">Dati OpenStreetMap · <a href="https://www.openstreetmap.org/${
+        { n: "node", w: "way", r: "relation" }[osm[1]]}/${osm[2]}" target="_blank" rel="noopener">correggi o aggiungi orari</a></div>`;
+    }
+    el.innerHTML = html;
   }
 
   _placeAction(action, p) {
@@ -4788,7 +4937,8 @@ class NavigatorPanel extends HTMLElement {
     this._poi3dMarkers?.forEach((mk) => mk.remove());
     this._poi3dMarkers = [];
     this._poiShown = items;
-    const open = (it) => this._showPlace({ name: it.name || POI_KINDS[it.k][0], address: POI_KINDS[it.k][0], lat: it.lat, lon: it.lon }, false);
+    const open = (it) => this._showPlace({ name: it.name || POI_KINDS[it.k][0], address: POI_KINDS[it.k][0], lat: it.lat, lon: it.lon,
+      poi: { name: it.name || "", osm: /^[nwr]\d+$/.test(it.id || "") ? it.id : "" } }, false);
     if (this._3d && this._g3 && window.maplibregl) {
       for (const it of items) {
         const [label, ico, col] = POI_KINDS[it.k];

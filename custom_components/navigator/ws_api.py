@@ -32,7 +32,7 @@ def async_setup(hass: HomeAssistant) -> None:
         return
     for handler in (ws_info, ws_search, ws_reverse, ws_route, ws_place_save, ws_place_delete, ws_recent_clear, ws_nearby,
                     ws_poi_tile, ws_live, ws_weather, ws_trip_save, ws_trips, ws_trip, ws_trip_delete, ws_garage,
-                    ws_garage_save, ws_trip_start, ws_trip_append, ws_trip_finish, ws_poi_tiles):
+                    ws_garage_save, ws_trip_start, ws_trip_append, ws_trip_finish, ws_poi_tiles, ws_poi_info):
         websocket_api.async_register_command(hass, handler)
     hass.data[DATA_WS_REGISTERED] = True
 
@@ -107,6 +107,22 @@ async def ws_search(hass: HomeAssistant, connection: websocket_api.ActiveConnect
 async def ws_reverse(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
     async def go():
         return await _data(hass).maps.reverse(msg["lat"], msg["lon"])
+
+    await _run(connection, msg["id"], go())
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "navigator/poi_info",
+    vol.Required("lat"): vol.Coerce(float),
+    vol.Required("lon"): vol.Coerce(float),
+    vol.Optional("name", default=""): vol.All(str, vol.Length(max=120)),
+    vol.Optional("osm", default=""): vol.All(str, vol.Length(max=24)),
+})
+@websocket_api.async_response
+async def ws_poi_info(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Scheda di un punto di interesse: orari, telefono, sito, indirizzo (OpenStreetMap tramite Nominatim)."""
+    async def go():
+        return await _data(hass).maps.poi_info(msg["lat"], msg["lon"], msg["name"], msg["osm"])
 
     await _run(connection, msg["id"], go())
 

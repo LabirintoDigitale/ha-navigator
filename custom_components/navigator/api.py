@@ -214,6 +214,64 @@ class MapServices:
         self._cache_put(key, result)
         return result
 
+    # ------------------------------------------------------------------ scheda di un punto di interesse
+
+    async def poi_info(self, lat: float, lon: float, name: str = "", osm: str = "") -> dict:
+        """Orari, contatti e indirizzo di un punto di interesse, dai dati di OpenStreetMap (Nominatim con extratags).
+
+        Una sola richiesta quando si apre la scheda (mai mentre si scrive): con l'id OpenStreetMap se noto, altrimenti
+        cercando il nome in un riquadro di ~300 m intorno al punto, o il luogo più vicino al punto.
+        """
+        key = f"pi|{osm}|{name}|{lat:.4f}|{lon:.4f}"
+        if (cached := self._cache_get(key)) is not None:
+            return cached
+        base = {"extratags": 1, "addressdetails": 1, "namedetails": 0}
+        item: dict | None = None
+        try:
+            m = re.fullmatch(r"([nwr])(\d+)", osm or "")
+            if m:
+                data = await self._nominatim("lookup", {**base, "osm_ids": f"{m.group(1).upper()}{m.group(2)}"})
+                item = data[0] if data else None
+            if item is None and name:
+                d = 0.003
+                data = await self._nominatim("search", {**base, "q": name, "limit": 5, "bounded": 1,
+                                                        "viewbox": f"{lon - d},{lat + d},{lon + d},{lat - d}"})
+                if data:
+                    item = min(data, key=lambda x: _dist_m(lat, lon, float(x["lat"]), float(x["lon"])))
+            if item is None:
+                rev = await self._nominatim("reverse", {**base, "lat": lat, "lon": lon, "zoom": 18})
+                if rev and not rev.get("error") and _dist_m(lat, lon, float(rev["lat"]), float(rev["lon"])) < 60:
+                    item = rev
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, KeyError) as err:
+            raise NavigatorError("Dettagli del luogo non disponibili ora (Nominatim non risponde)") from err
+        if item is None:
+            result: dict[str, Any] = {"found": False}
+        else:
+            tags = item.get("extratags") or {}
+            addr = item.get("address") or {}
+            street = " ".join(x for x in (addr.get("road") or addr.get("pedestrian") or addr.get("square") or "",
+                                          addr.get("house_number") or "") if x)
+            town = addr.get("city") or addr.get("town") or addr.get("village") or addr.get("hamlet") or ""
+            pick = lambda *ks: next((tags[k] for k in ks if tags.get(k)), "")  # noqa: E731
+            result = {
+                "found": True,
+                "name": item.get("name") or "",
+                "type": item.get("type") or "",
+                "address": ", ".join(x for x in (street, town) if x),
+                "opening_hours": pick("opening_hours"),
+                "phone": pick("phone", "contact:phone", "contact:mobile"),
+                "website": pick("website", "contact:website", "url"),
+                "email": pick("email", "contact:email"),
+                "cuisine": pick("cuisine"),
+                "wheelchair": pick("wheelchair"),
+                "outdoor_seating": pick("outdoor_seating"),
+                "takeaway": pick("takeaway"),
+                "internet_access": pick("internet_access"),
+                "osm": f"{(item.get('osm_type') or 'n')[0]}{item.get('osm_id', '')}",
+            }
+        self._cache_put(key, result)
+        return result
+
     # ------------------------------------------------------------------ percorsi
 
     async def route(
