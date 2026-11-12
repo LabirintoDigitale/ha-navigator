@@ -32,7 +32,7 @@ def async_setup(hass: HomeAssistant) -> None:
         return
     for handler in (ws_info, ws_search, ws_reverse, ws_route, ws_place_save, ws_place_delete, ws_recent_clear, ws_nearby,
                     ws_poi_tile, ws_live, ws_weather, ws_trip_save, ws_trips, ws_trip, ws_trip_delete, ws_garage,
-                    ws_garage_save, ws_trip_start, ws_trip_append, ws_trip_finish):
+                    ws_garage_save, ws_trip_start, ws_trip_append, ws_trip_finish, ws_poi_tiles):
         websocket_api.async_register_command(hass, handler)
     hass.data[DATA_WS_REGISTERED] = True
 
@@ -393,5 +393,18 @@ async def ws_trip_finish(hass: HomeAssistant, connection: websocket_api.ActiveCo
         uid, _name = _user(connection)
         _data(hass).trips.finish(uid, msg["trip_id"])
         return {"ok": True}
+
+    await _run(connection, msg["id"], go())
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "navigator/poi_tiles",
+    vol.Required("tiles"): vol.All([vol.All(vol.Length(min=2, max=2), [vol.Coerce(int)])], vol.Length(min=1, max=16)),
+})
+@websocket_api.async_response
+async def ws_poi_tiles(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Punti di interesse di più riquadri con una sola richiesta a Overpass (quelli già in memoria non si richiedono)."""
+    async def go():
+        return await _data(hass).pois.poi_tiles([(x, y) for x, y in msg["tiles"]])
 
     await _run(connection, msg["id"], go())

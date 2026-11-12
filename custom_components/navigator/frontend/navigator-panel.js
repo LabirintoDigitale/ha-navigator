@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.8.3";
+const PANEL_VERSION = "1.8.4";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -248,7 +248,7 @@ const VEHICLE_TYPES = [["auto", "🚗", "Auto"], ["moto", "🏍️", "Moto"], ["
   ["camper", "🚌", "Camper"], ["bici", "🚲", "Bici"], ["altro", "🚙", "Altro"]];
 const vehIcon = (t) => (VEHICLE_TYPES.find((v) => v[0] === t) || VEHICLE_TYPES[0])[1];
 const NIGHT_MODES = [["auto", "Automatica (al tramonto)"], ["on", "Sempre"], ["off", "Mai"]];
-const POI_MIN_ZOOM = 14;
+const POI_MIN_ZOOM = 13;
 const NEAR_CATS = { fuel: ["⛽", "Distributori"], parking: ["🅿️", "Parcheggi"], cameras: ["📷", "Autovelox"] };
 const LANG_NAMES = { it: "Italiano", en: "English", de: "Deutsch", fr: "Français", es: "Español" };
 const LANG_BCP = { it: "it-IT", en: "en-US", de: "de-DE", fr: "fr-FR", es: "es-ES" };
@@ -705,6 +705,12 @@ const STYLE = `
   .trip .sw { width: 10px; height: 10px; border-radius: 50%; flex: none; }
   .month { margin: 12px 0 2px; font-weight: 600; font-size: 13px; display: flex; justify-content: space-between; }
   .month span { font-weight: 400; color: var(--secondary-text-color); }
+  /* stato dei punti di interesse, in basso a sinistra sulla mappa */
+  .poistat { position: absolute; z-index: 1000; left: 10px; bottom: 26px; max-width: calc(100% - 80px); display: flex; gap: 8px; align-items: center;
+    background: rgba(32,33,36,.88); color: #fff; font-size: 13px; padding: 6px 12px; border-radius: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+  .poistat[hidden] { display: none; }
+  .poistat button { font-size: 12px; padding: 2px 10px; height: auto; background: #fff; color: #222; border: none; }
+  .main.guida .poistat { bottom: auto; top: 50%; }
 `;
 
 class NavigatorPanel extends HTMLElement {
@@ -835,6 +841,7 @@ class NavigatorPanel extends HTMLElement {
         <div class="mapwrap" id="mapwrap">
           <div id="map"></div>
           <div id="map3d" hidden></div>
+          <div class="poistat" id="poistat" hidden></div>
           <div class="tunfx" id="tunfx" hidden><div class="tf-road"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -0 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -1 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -2 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -3 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -4 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -5 / 6)"></div>
             <div class="tf-label"><span>🚇 In galleria</span><small id="tunrem"></small></div></div>
           <div class="pitchctl" id="pitchctl" hidden>
@@ -3994,10 +4001,9 @@ class NavigatorPanel extends HTMLElement {
   async _loadPois() {
     const m = this._map;
     if (!m || !this._poiTiles) return;
-    if (!this._poiKindsOn().size) { this._renderPois(); return; }
+    if (!this._poiKindsOn().size) { this._poiStatus(""); this._renderPois(); return; }
     if (m.getZoom() < POI_MIN_ZOOM) {
-      // una volta per sessione: i punti ci sono solo da vicino
-      if (!this._poiZoomHint) { this._poiZoomHint = true; this._msg("Punti di interesse: avvicina la mappa (sono visibili da vicino)"); }
+      this._poiStatus("far");
       this._renderPois();
       return;
     }
@@ -4012,26 +4018,53 @@ class NavigatorPanel extends HTMLElement {
     tiles.sort((a, z) => a.d - z.d);
     this._poiView = tiles.slice(0, 9).map((t) => `${t.x},${t.y}`);
     this._renderPois();
-    for (const key of this._poiView) {
-      const t = this._poiTiles.get(key);
-      if (t && (t.items || t.pending || Date.now() - (t.failed || 0) < 60000)) continue;
-      const [x, y] = key.split(",").map(Number);
-      this._poiTiles.set(key, { pending: true });
+    const view = this._poiView;
+    const todo = view.filter((key) => { const t = this._poiTiles.get(key); return !(t && (t.items || t.pending || Date.now() - (t.failed || 0) < 60000)); });
+    if (todo.length) this._poiStatus("loading");
+    else this._poiStatusAfter();
+    if (todo.length) {
+      // una sola richiesta per tutti i riquadri mancanti (il backend li divide e li tiene in memoria)
+      for (const key of todo) this._poiTiles.set(key, { pending: true });
       try {
-        const r = await this._hass.callWS({ type: "navigator/poi_tile", x, y });
-        this._poiTiles.set(key, { items: r.items || [] });
-        this._renderPois();
+        const r = await this._hass.callWS({ type: "navigator/poi_tiles", tiles: todo.map((k) => k.split(",").map(Number)) });
+        for (const t of r.tiles || []) this._poiTiles.set(`${t.x},${t.y}`, { items: t.items || [] });
       } catch (e) {
-        this._poiTiles.set(key, { failed: Date.now() }); // Overpass carico: si riprova fra un minuto
-        // il motivo, al massimo una volta ogni 5 minuti
-        if (Date.now() - (this._poiErrAt || 0) > 300000) {
-          this._poiErrAt = Date.now();
-          const unknown = /unknown command|unknown_command|Unknown command/i.test(`${e.code || ""} ${e.message || ""}`);
-          this._msg(unknown ? "Punti di interesse: aggiorna l'integrazione Navigator e riavvia Home Assistant"
-            : `Punti di interesse non caricati: ${e.message || e}. Riprovo fra un minuto.`);
-        }
+        for (const key of todo) this._poiTiles.set(key, { failed: Date.now(), error: e }); // si riprova fra un minuto
       }
+      this._renderPois();
     }
+    if (view === this._poiView) this._poiStatusAfter();
+  }
+
+  // dopo il caricamento: errore (con Riprova), "nessun punto" per qualche secondo, oppure niente
+  _poiStatusAfter() {
+    const tiles = (this._poiView || []).map((k) => this._poiTiles.get(k)).filter(Boolean);
+    if (tiles.some((t) => t.pending)) { this._poiStatus("loading"); return; }
+    const failed = tiles.find((t) => t.failed);
+    if (failed && !tiles.some((t) => t.items?.length)) {
+      const e = failed.error || {};
+      const unknown = /unknown command|unknown_command/i.test(`${e.code || ""} ${e.message || ""}`);
+      this._poiStatus("error", unknown ? "aggiorna l'integrazione Navigator e riavvia Home Assistant" : (e.message || String(e)));
+      return;
+    }
+    this._poiStatus(this._poiItems().length ? "" : "empty");
+  }
+
+  // etichetta fissa sulla mappa: cosa succede ai punti di interesse
+  _poiStatus(state, detail = "") {
+    const el = this.$("poistat");
+    if (!el) return;
+    clearTimeout(this._poiStatT);
+    const text = { far: "📍 Avvicina la mappa per vedere i punti di interesse", loading: "📍 Carico i punti di interesse…",
+      empty: "📍 Nessun punto di interesse in questa zona", error: `⚠ Punti di interesse non caricati: ${esc(detail)}` }[state];
+    el.hidden = !text;
+    if (!text) return;
+    el.innerHTML = `<span>${text}</span>${state === "error" ? `<button data-ps="retry">Riprova</button>` : ""}`;
+    el.querySelector('[data-ps="retry"]')?.addEventListener("click", () => {
+      for (const k of this._poiView || []) if (this._poiTiles.get(k)?.failed) this._poiTiles.delete(k);
+      this._loadPois();
+    });
+    if (state === "empty") this._poiStatT = setTimeout(() => { el.hidden = true; }, 4000);
   }
 
   // punti da mostrare: categorie scelte, riquadri visibili, al massimo 150 (i più vicini al centro)

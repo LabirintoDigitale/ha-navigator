@@ -41,7 +41,7 @@ marcia e ti segue. Con **▲ / ▼** scegli la prospettiva, dalla vista dall'alt
 - Mappe gratuite senza chiave: stradale, topografica, scura e satellite (Esri), escursionistica (OpenTopoMap).
 - **Vista 3D** con rilievo del terreno ed edifici, anche in guida, con la prospettiva regolabile ([dettagli](#vista-3d)).
 - **Punti di interesse sulla mappa** (⚙ → *Punti di interesse sulla mappa*): farmacie, ospedali, supermercati, ristoranti, bar,
-  bancomat, hotel, colonnine di ricarica, distributori, polizia, poste, officine, scuole, chiese. Da OpenStreetMap, visibili da
+  bancomat, hotel, colonnine di ricarica, distributori, polizia, poste, officine, scuole, chiese. Da OpenStreetMap (una sola richiesta per la zona visibile), visibili da
   vicino; in 2D un'icona colorata, in 3D l'edificio colorato con la categoria e sopra l'icona che fluttua. Tocca un punto per andarci.
 - Servizio **`navigator.plan_route`** per le automazioni (tempo di viaggio, distanza, pedaggi).
 

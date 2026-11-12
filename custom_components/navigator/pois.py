@@ -331,6 +331,52 @@ class Pois:
 
     # ------------------------------------------------------------------ punti di interesse sulla mappa
 
+    async def poi_tiles(self, tiles: list[tuple[int, int]]) -> dict:
+        """Più riquadri con una sola richiesta a Overpass (quelli mancanti); i punti si dividono per riquadro."""
+        now = time.time()
+        missing = [k for k in tiles if not (self._poi_tiles.get(k) and now - self._poi_tiles[k][0] < POI_TILE_MAX_AGE)]
+        if missing:
+            x0, x1 = min(k[0] for k in missing), max(k[0] for k in missing)
+            y0, y1 = min(k[1] for k in missing), max(k[1] for k in missing)
+            try:
+                items = await self._poi_query(y0 * POI_TILE, x0 * POI_TILE, (y1 + 1) * POI_TILE, (x1 + 1) * POI_TILE)
+            except PoiError as err:
+                _LOGGER.warning("Punti di interesse non scaricati da Overpass: %s", err)
+                raise
+            split: dict[tuple[int, int], list] = {(x, y): [] for x in range(x0, x1 + 1) for y in range(y0, y1 + 1)}
+            for it in items:
+                key = (math.floor(it["lon"] / POI_TILE), math.floor(it["lat"] / POI_TILE))
+                if key in split:
+                    split[key].append(it)
+            for key, its in split.items():
+                self._poi_tiles[key] = (now, its)
+                self._poi_tiles.move_to_end(key)
+            while len(self._poi_tiles) > POI_TILE_CACHE:
+                self._poi_tiles.popitem(last=False)
+        return {"tiles": [{"x": x, "y": y, "items": (self._poi_tiles.get((x, y)) or (0, []))[1]} for x, y in tiles]}
+
+    async def _poi_query(self, s: float, w: float, n: float, e: float) -> list[dict]:
+        bb = f"({s:.4f},{w:.4f},{n:.4f},{e:.4f})"
+        q = ("[out:json][timeout:25];("
+             f'nwr["amenity"~"^({"|".join(_POI_AMENITY)})$"]{bb};'
+             f'nwr["shop"~"^({"|".join(_POI_SHOP)})$"]{bb};'
+             f'nwr["tourism"~"^({"|".join(_POI_TOURISM)})$"]{bb};'
+             ");out center tags;")
+        try:
+            els = await self._overpass_race(q, 25)  # tutti i server insieme: vince la prima risposta valida
+        except PoiError:
+            els = await self._overpass(q, 30)  # nessuno ha risposto in tempo: uno alla volta, con più pazienza
+        items = []
+        for el in els:
+            it = self._osm_item(el)
+            if not it:
+                continue
+            t = it.pop("tags")
+            kind = _poi_kind(t)
+            if kind:
+                items.append({**it, "k": kind, "name": t.get("name") or t.get("brand") or t.get("operator") or ""})
+        return items
+
     async def poi_tile(self, x: int, y: int) -> dict:
         """Punti di interesse di un riquadro (tutte le categorie: il pannello mostra quelle scelte)."""
         key = (x, y)
