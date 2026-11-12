@@ -3,6 +3,10 @@ Required Notice: Copyright (c) 2026 LabirintoDigitale (https://github.com/Labiri
 Versions up to and including 1.9.2 were released under the MIT License and remain available under it.
 Starting from version 1.9.3 the software is licensed under the PolyForm Strict License 1.0.0 below.
 
+Additional permission: in addition to the permitted purposes listed in the license below, the licensor also permits
+use of the software for commercial purposes (for example by companies or professionals). This permission covers use
+only: distributing the software, making changes to it, or making new works based on it remain not allowed.
+
 Third-party components keep their own licenses: custom_components/navigator/frontend/leaflet (BSD-2-Clause, see its LICENSE)
 and custom_components/navigator/frontend/maplibre (BSD-3-Clause, see its LICENSE).
 
