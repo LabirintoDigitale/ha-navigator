@@ -17,6 +17,7 @@ import logging
 import math
 import re
 import time
+from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,9 @@ OVERPASS_URLS = [
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 ]
 FUEL_MAX_AGE = 24 * 3600
+POI_TILE = 0.02          # punti di interesse a riquadri di 0,02° (circa 2 km x 1,5 km)
+POI_TILE_MAX_AGE = 24 * 3600
+POI_TILE_CACHE = 400
 PRICES_MAX_AGE = 12 * 3600
 CAMERAS_MAX_AGE = 7 * 24 * 3600
 RETRY_AFTER = 900  # dopo un errore si riprova fra 15 minuti
@@ -128,6 +132,7 @@ class Pois:
         self._prices_time = 0.0
         self._locks = {k: asyncio.Lock() for k in ("fuel", "prices", "cams", "overpass")}
         self._cache: dict[str, tuple[float, list]] = {}
+        self._poi_tiles: OrderedDict[tuple[int, int], tuple[float, list]] = OrderedDict()
 
     # ------------------------------------------------------------------ file di cache
 
@@ -324,6 +329,37 @@ class Pois:
         items = await self._load_cameras()
         return {"items": await self._exec(_near_line, items, line, radius), "source": "OpenStreetMap", "updated": int(self._cams_time)}
 
+    # ------------------------------------------------------------------ punti di interesse sulla mappa
+
+    async def poi_tile(self, x: int, y: int) -> dict:
+        """Punti di interesse di un riquadro (tutte le categorie: il pannello mostra quelle scelte)."""
+        key = (x, y)
+        hit = self._poi_tiles.get(key)
+        if hit and time.time() - hit[0] < POI_TILE_MAX_AGE:
+            self._poi_tiles.move_to_end(key)
+            return {"x": x, "y": y, "items": hit[1]}
+        s, w = y * POI_TILE, x * POI_TILE
+        bb = f"({s:.4f},{w:.4f},{s + POI_TILE:.4f},{w + POI_TILE:.4f})"
+        q = ("[out:json][timeout:25];("
+             f'nwr["amenity"~"^({"|".join(_POI_AMENITY)})$"]{bb};'
+             f'nwr["shop"~"^({"|".join(_POI_SHOP)})$"]{bb};'
+             f'nwr["tourism"~"^({"|".join(_POI_TOURISM)})$"]{bb};'
+             ");out center tags;")
+        els = await self._overpass(q, 30)  # una richiesta alla volta (regole d'uso dei server pubblici)
+        items = []
+        for e in els:
+            it = self._osm_item(e)
+            if not it:
+                continue
+            t = it.pop("tags")
+            kind = _poi_kind(t)
+            if kind:
+                items.append({**it, "k": kind, "name": t.get("name") or t.get("brand") or t.get("operator") or ""})
+        self._poi_tiles[key] = (time.time(), items)
+        while len(self._poi_tiles) > POI_TILE_CACHE:
+            self._poi_tiles.popitem(last=False)
+        return {"x": x, "y": y, "items": items}
+
     # ------------------------------------------------------------------ parcheggi
 
     async def parking(self, lat: float, lon: float, radius: float) -> dict:
@@ -481,3 +517,31 @@ _OSM_FUELS = [("fuel:octane_95", "Benzina 95", "benzina"), ("fuel:e10", "Benzina
 
 def _osm_fuels(tags: dict) -> list[dict]:
     return [{"n": n, "k": k, "s": None, "v": None, "t": 0} for tag, n, k in _OSM_FUELS if tags.get(tag) == "yes"]
+
+
+# ---------------------------------------------------------------------- punti di interesse: categorie
+
+_POI_AMENITY = ["pharmacy", "hospital", "clinic", "restaurant", "fast_food", "cafe", "bar", "pub", "atm", "bank",
+                "charging_station", "fuel", "police", "post_office", "school", "place_of_worship"]
+_POI_SHOP = ["supermarket", "car_repair", "tyres"]
+_POI_TOURISM = ["hotel", "motel", "guest_house", "hostel"]
+_POI_KINDS = {
+    ("amenity", "pharmacy"): "farmacia", ("amenity", "hospital"): "ospedale", ("amenity", "clinic"): "ospedale",
+    ("amenity", "restaurant"): "ristorante", ("amenity", "fast_food"): "ristorante",
+    ("amenity", "cafe"): "bar", ("amenity", "bar"): "bar", ("amenity", "pub"): "bar",
+    ("amenity", "atm"): "banca", ("amenity", "bank"): "banca",
+    ("amenity", "charging_station"): "ricarica", ("amenity", "fuel"): "carburante",
+    ("amenity", "police"): "polizia", ("amenity", "post_office"): "posta",
+    ("amenity", "school"): "scuola", ("amenity", "place_of_worship"): "chiesa",
+    ("shop", "supermarket"): "supermercato", ("shop", "car_repair"): "officina", ("shop", "tyres"): "officina",
+    ("tourism", "hotel"): "hotel", ("tourism", "motel"): "hotel", ("tourism", "guest_house"): "hotel",
+    ("tourism", "hostel"): "hotel",
+}
+
+
+def _poi_kind(tags: dict) -> str | None:
+    for key in ("amenity", "shop", "tourism"):
+        kind = _POI_KINDS.get((key, tags.get(key, "")))
+        if kind:
+            return kind
+    return None

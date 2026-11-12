@@ -40,6 +40,9 @@ marcia e ti segue. Con **▲ / ▼** scegli la prospettiva, dalla vista dall'alt
 - Apri il percorso in **Google Maps**, **Waze** o **OpenStreetMap**, oppure copia il riepilogo.
 - Mappe gratuite senza chiave: stradale, topografica, scura e satellite (Esri), escursionistica (OpenTopoMap).
 - **Vista 3D** con rilievo del terreno ed edifici, anche in guida, con la prospettiva regolabile ([dettagli](#vista-3d)).
+- **Punti di interesse sulla mappa** (⚙ → *Punti di interesse sulla mappa*): farmacie, ospedali, supermercati, ristoranti, bar,
+  bancomat, hotel, colonnine di ricarica, distributori, polizia, poste, officine, scuole, chiese. Da OpenStreetMap, visibili da
+  vicino; in 2D un'icona colorata, in 3D l'edificio colorato con la categoria e sopra l'icona che fluttua. Tocca un punto per andarci.
 - Servizio **`navigator.plan_route`** per le automazioni (tempo di viaggio, distanza, pedaggi).
 
 | Togli una tratta a pagamento | Ricalcola senza pedaggi |
@@ -74,7 +77,7 @@ Tutte le richieste partono da Home Assistant (nessuna chiave, nessun account):
 | Ricerca e indirizzi (riserva) | [Nominatim](https://nominatim.org) di OpenStreetMap | max 1 richiesta al secondo |
 | Distributori (Italia) | [Anagrafica impianti attivi del MIMIT](https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv) | una volta al giorno, con la marca |
 | Carburanti e prezzi (Italia) | [Prezzi alle 8 del MIMIT](https://www.mimit.gov.it/images/exportCSV/prezzo_alle_8.csv) | due volte al giorno |
-| Autovelox fissi, parcheggi | OpenStreetMap tramite [Overpass](https://overpass-api.de) | autovelox una volta alla settimana, parcheggi su richiesta |
+| Autovelox fissi, parcheggi, punti di interesse | OpenStreetMap tramite [Overpass](https://overpass-api.de) | autovelox una volta alla settimana, parcheggi su richiesta, punti di interesse a riquadri di ~2 km (in memoria per un giorno) |
 | Mappe | Esri (stradale, topografica, scura, satellite), OpenTopoMap | caricate dal browser; i server di OpenStreetMap bloccano le richieste da un Home Assistant in rete locale |
 | Rilievo (vista 3D) | Quote del terreno [Mapzen/Tilezen Terrarium](https://registry.opendata.aws/terrain-tiles/) (AWS Open Data) | caricate dal browser, solo in 3D |
 | Edifici 3D, gallerie | [OpenFreeMap](https://openfreemap.org) (dati OpenStreetMap, schema OpenMapTiles) | caricati dal browser, solo in 3D |

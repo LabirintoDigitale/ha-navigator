@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.6.0";
+const PANEL_VERSION = "1.7.0";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -206,7 +206,8 @@ const VEHICLE_SVG = { auto: CAR_SVG, moto: MOTO_SVG, bici: BICI_SVG, piedi: PIED
 const SETTINGS_KEY = "navigator-panel-settings";
 const DEFAULT_SETTINGS = { voice: false, lang: "it", voiceSel: "f", out: "auto", autoZoom: true, beep: false,
   fuelBrands: [], fuelKind: "", camAlert: true, view3d: false, b3d: true, terrainEx: "1.5", pitch3d: 60, tunnelFx: true, zoom3dOff: 0,
-  voiceStyle: "normale", voiceRate: 1, voicePitch: 1, bldStyle: "colorati" };
+  voiceStyle: "normale", voiceRate: 1, voicePitch: 1, bldStyle: "colorati",
+  poiKinds: ["farmacia", "ospedale", "supermercato"] };
 // marche dei distributori (come nell'anagrafica del MIMIT)
 const FUEL_BRANDS = ["Agip Eni", "Api-Ip", "Q8", "Esso", "Tamoil", "Shell", "Retitalia", "Beyfin", "Costantin", "Europam", "Pompe bianche"];
 const BRAND_COLORS = { "agip eni": "#f7c600", "eni": "#f7c600", "api-ip": "#0057a8", "ip": "#0057a8", "q8": "#0a3a7a", "esso": "#d71920",
@@ -228,6 +229,18 @@ const FS_OFF = `<svg class="fsico" viewBox="0 0 24 24"><path d="M9 4v5H4M20 9h-5
 // stili della voce del browser: velocità e tono (1 = come la voce originale)
 const VOICE_STYLES = { normale: ["Normale", 1, 1], calma: ["Calma", 0.9, 0.95], morbida: ["Morbida (calda, lenta e più bassa)", 0.82, 0.8],
   energica: ["Energica", 1.15, 1.1], pers: ["Personalizzata", null, null] };
+// punti di interesse sulla mappa (OpenStreetMap): chiave -> nome, icona, colore
+const POI_KINDS = {
+  farmacia: ["Farmacie", "💊", "#2e7d32"], ospedale: ["Ospedali e cliniche", "🏥", "#c62828"],
+  supermercato: ["Supermercati", "🛒", "#6a1b9a"], ristorante: ["Ristoranti", "🍽️", "#ef6c00"],
+  bar: ["Bar e caffè", "☕", "#8d6e63"], banca: ["Bancomat e banche", "🏧", "#1565c0"],
+  hotel: ["Hotel e B&B", "🛏️", "#00838f"], ricarica: ["Colonnine di ricarica", "🔌", "#00a152"],
+  carburante: ["Distributori", "⛽", "#f9a825"], polizia: ["Polizia e carabinieri", "🚓", "#283593"],
+  posta: ["Uffici postali", "📮", "#d84315"], officina: ["Officine e gommisti", "🔧", "#455a64"],
+  scuola: ["Scuole", "🏫", "#5d4037"], chiesa: ["Chiese", "⛪", "#757575"],
+};
+const POI_TILE = 0.02; // come nel backend
+const POI_MIN_ZOOM = 15;
 const NEAR_CATS = { fuel: ["⛽", "Distributori"], parking: ["🅿️", "Parcheggi"], cameras: ["📷", "Autovelox"] };
 const LANG_NAMES = { it: "Italiano", en: "English", de: "Deutsch", fr: "Français", es: "Español" };
 const LANG_BCP = { it: "it-IT", en: "en-US", de: "de-DE", fr: "fr-FR", es: "es-ES" };
@@ -314,6 +327,17 @@ function fmtAge(ms) {
 }
 
 const STALE_MS = 10 * 60000; // posizione di una persona più vecchia di così: si avvisa prima di partire
+
+// punto dentro un anello di coordinate [lon, lat] (regola del raggio)
+function pointInRing(x, y, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
 
 function fmtDist(m) {
   if (m < 1000) return `${m < 100 ? Math.round(m / 10) * 10 : Math.round(m / 50) * 50} m`;
@@ -621,6 +645,17 @@ const STYLE = `
   .lanes .ln svg { width: 24px; height: 24px; fill: none; stroke: rgba(255,255,255,.35); stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
   .lanes .ln.on { background: rgba(255,255,255,.18); box-shadow: inset 0 0 0 2px #fff; }
   .lanes .ln.on svg { stroke: #fff; }
+  /* punti di interesse: icona colorata in 2D, icona che fluttua sopra l'edificio in 3D */
+  .poim { width: 26px; height: 26px; border-radius: 50%; border: 2px solid #fff; display: flex; align-items: center; justify-content: center;
+    font-size: 14px; box-shadow: 0 1px 4px rgba(0,0,0,.45); }
+  /* l'animazione sta nell'elemento interno: su quello esterno MapLibre usa transform per posizionare l'icona */
+  .poi3d { cursor: pointer; }
+  .poi3d .pi { display: flex; flex-direction: column; align-items: center; animation: poi-float 2.6s ease-in-out infinite; }
+  .poi3d .pb { width: 32px; height: 32px; border-radius: 50%; border: 2px solid #fff; display: flex; align-items: center; justify-content: center;
+    font-size: 17px; box-shadow: 0 2px 6px rgba(0,0,0,.5); }
+  .poi3d .ps { width: 2px; height: 30px; background: linear-gradient(rgba(255,255,255,.95), rgba(255,255,255,0)); }
+  @keyframes poi-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+  @media (prefers-reduced-motion: reduce) { .poi3d .pi { animation: none; } }
 `;
 
 class NavigatorPanel extends HTMLElement {
@@ -783,6 +818,9 @@ class NavigatorPanel extends HTMLElement {
     this._poiLayer = L.layerGroup().addTo(this._map);
     this._arrowLayer = L.layerGroup().addTo(this._map); // frecce del verso di marcia (solo 2D: in 3D le disegna MapLibre)
     this._map.on("moveend zoomend", () => this._scheduleArrows());
+    this._poiMapLayer = L.layerGroup().addTo(this._map); // punti di interesse scelti in ⚙ (in 3D li disegna MapLibre)
+    this._poiTiles = new Map();
+    this._map.on("moveend zoomend", () => this._schedulePois());
     this._map.on("click", (e) => this._mapClick(e.latlng));
     this._map.on("dragstart", () => this._userMoved());
     this._bindGuidaGestures();
@@ -1876,11 +1914,15 @@ class NavigatorPanel extends HTMLElement {
       if (this._tiles && this._map.hasLayer(this._tiles)) this._map.removeLayer(this._tiles);
       this.$("gattr").hidden = true;
       this._arrowLayer?.clearLayers();
+      this._poiKey = null;
+      this._renderPois();
       this._placePitchCtl();
     } else {
       this.$("map3d").hidden = true;
       this.$("map").classList.remove("under3d");
       this._scheduleArrows();
+      this._poiKey = null;
+      this._renderPois();
       this.$("gattr").hidden = !this._isGuida();
       this._placePitchCtl();
       if (this._tiles && !this._map.hasLayer(this._tiles)) this._tiles.addTo(this._map);
@@ -2066,7 +2108,12 @@ class NavigatorPanel extends HTMLElement {
     });
     g.on("click", (e) => this._mapClick(L.latLng(e.lngLat.lat, e.lngLat.lng)));
     g.on("pitchend", () => this._placePitchCtl());
-    g.on("sourcedata", (e) => { if (e.sourceId === "ofm" && e.isSourceLoaded) this._scheduleTunnels(); });
+    g.on("sourcedata", (e) => {
+      if (e.sourceId !== "ofm" || !e.isSourceLoaded) return;
+      this._scheduleTunnels();
+      clearTimeout(this._poiBldT);
+      this._poiBldT = setTimeout(() => this._poiBuildings(), 500); // edifici dei punti di interesse appena arrivati
+    });
     // quando le quote del terreno sono arrivate si ricontrolla: se la telecamera è finita sotto una collina ci si allontana
     // (solo misura, nessun movimento se è tutto a posto: così "idle" non si ripete all'infinito)
     g.on("idle", () => {
@@ -2126,6 +2173,15 @@ class NavigatorPanel extends HTMLElement {
       g.addLayer({ id: "arrows", type: "symbol", source: "lines", filter: ["==", ["get", "a"], 1],
         layout: { "symbol-placement": "line", "symbol-spacing": 90, "icon-image": "nav-arrow", "icon-allow-overlap": true,
           "icon-ignore-placement": true, "icon-rotation-alignment": "map", "icon-pitch-alignment": "map" } });
+    }
+    // edifici dei punti di interesse: ricolorati con il colore della categoria (poco più alti, così coprono quelli normali)
+    if (!g.getSource("poi-bld")) g.addSource("poi-bld", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+    if (!g.getLayer("poi-bld")) {
+      g.addLayer({ id: "poi-bld", type: "fill-extrusion", source: "poi-bld", minzoom: 14,
+        paint: { "fill-extrusion-color": ["get", "c"], "fill-extrusion-opacity": 0.95, "fill-extrusion-base": 0,
+          "fill-extrusion-height": ["+", ["get", "h"], 0.8], "fill-extrusion-vertical-gradient": true } }, "lines");
+    } else if (g.getLayer("bld")) {
+      g.moveLayer("poi-bld", "lines");
     }
     if (!g.getLayer("tun")) {
       g.addLayer({ id: "tun", type: "line", source: "ofm", "source-layer": "transportation", minzoom: 12,
@@ -3075,6 +3131,11 @@ class NavigatorPanel extends HTMLElement {
         ${sw("beep", "Beep quando superi il limite", "Limiti da OpenStreetMap, per auto e moto; tolleranza di 3 km/h (5% sopra i 60)")}
         <div class="row" style="margin-top:6px"><button data-s="testbeep">▶ Prova il beep</button></div>
       </div>
+      <div class="grp"><h3>Punti di interesse sulla mappa</h3>
+        <div class="note">Da OpenStreetMap, visibili da vicino. In 3D l'edificio prende il colore della categoria e sopra fluttua l'icona.
+          Tocca un punto per andarci.</div>
+        <div class="chips">${Object.entries(POI_KINDS).map(([k, [n, ico]]) => `<span class="chip ${(s.poiKinds || []).includes(k) ? "on" : ""}" data-poi="${k}">${ico} ${esc(n)}</span>`).join("")}</div>
+      </div>
       <div class="grp"><h3>Distributori: marche preferite</h3>
         <div class="note">Nell'elenco dei distributori il filtro "Preferite" mostra solo queste. Nessuna scelta = tutte.</div>
         <div class="chips">${FUEL_BRANDS.map((b) => `<span class="chip ${s.fuelBrands.includes(b) ? "on" : ""}" data-brand="${esc(b)}">${esc(b)}</span>`).join("")}</div>
@@ -3121,6 +3182,15 @@ class NavigatorPanel extends HTMLElement {
       this._speak(PHRASES[s.lang].test, true, true);
     });
     wrap.querySelector('[data-s="testbeep"]').addEventListener("click", () => this._beep());
+    wrap.querySelectorAll("[data-poi]").forEach((el) => el.addEventListener("click", () => {
+      const k = el.dataset.poi;
+      const cur = s.poiKinds || [];
+      s.poiKinds = cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k];
+      this._saveSettings();
+      el.classList.toggle("on");
+      this._poiKey = null;
+      this._loadPois();
+    }));
     wrap.querySelectorAll("[data-brand]").forEach((el) => el.addEventListener("click", () => {
       const b = el.dataset.brand;
       s.fuelBrands = s.fuelBrands.includes(b) ? s.fuelBrands.filter((x) => x !== b) : [...s.fuelBrands, b];
@@ -3347,6 +3417,124 @@ class NavigatorPanel extends HTMLElement {
       nav.drawnAlong = a;
       this._drawRoute();
     }
+  }
+
+  // ----------------------------------------------------------------- punti di interesse sulla mappa
+  // Da OpenStreetMap (Overpass, dal backend) a riquadri di 0,02°: si chiedono solo i riquadri della zona visibile, da vicino,
+  // e restano in memoria. In 2D icone colorate; in 3D l'edificio del punto colorato e sopra l'icona che fluttua.
+
+  _schedulePois() {
+    clearTimeout(this._poiT);
+    this._poiT = setTimeout(() => this._loadPois(), 700);
+  }
+
+  _poiKindsOn() {
+    return new Set((this._settings.poiKinds || []).filter((k) => POI_KINDS[k]));
+  }
+
+  async _loadPois() {
+    const m = this._map;
+    if (!m || !this._poiTiles) return;
+    if (!this._poiKindsOn().size || m.getZoom() < POI_MIN_ZOOM) { this._renderPois(); return; }
+    const b = m.getBounds();
+    const c = m.getCenter();
+    const tiles = [];
+    for (let x = Math.floor(b.getWest() / POI_TILE); x <= Math.floor(b.getEast() / POI_TILE); x++) {
+      for (let y = Math.floor(b.getSouth() / POI_TILE); y <= Math.floor(b.getNorth() / POI_TILE); y++) {
+        tiles.push({ x, y, d: Math.hypot((x + 0.5) * POI_TILE - c.lng, (y + 0.5) * POI_TILE - c.lat) });
+      }
+    }
+    tiles.sort((a, z) => a.d - z.d);
+    this._poiView = tiles.slice(0, 9).map((t) => `${t.x},${t.y}`);
+    this._renderPois();
+    for (const key of this._poiView) {
+      const t = this._poiTiles.get(key);
+      if (t && (t.items || t.pending || Date.now() - (t.failed || 0) < 60000)) continue;
+      const [x, y] = key.split(",").map(Number);
+      this._poiTiles.set(key, { pending: true });
+      try {
+        const r = await this._hass.callWS({ type: "navigator/poi_tile", x, y });
+        this._poiTiles.set(key, { items: r.items || [] });
+        this._renderPois();
+      } catch (e) {
+        this._poiTiles.set(key, { failed: Date.now() }); // Overpass carico: si riprova fra un minuto
+      }
+    }
+  }
+
+  // punti da mostrare: categorie scelte, riquadri visibili, al massimo 150 (i più vicini al centro)
+  _poiItems() {
+    const kinds = this._poiKindsOn();
+    if (!kinds.size || !this._poiView || this._map.getZoom() < POI_MIN_ZOOM) return [];
+    const c = this._map.getCenter();
+    const out = [];
+    for (const key of this._poiView) for (const it of this._poiTiles.get(key)?.items || []) if (kinds.has(it.k)) out.push(it);
+    out.sort((a, z) => Math.hypot(a.lat - c.lat, a.lon - c.lng) - Math.hypot(z.lat - c.lat, z.lon - c.lng));
+    return out.slice(0, 150);
+  }
+
+  _renderPois() {
+    const items = this._poiItems();
+    const key = `${this._3d ? 3 : 2}|${items.map((i) => i.id).join(",")}`;
+    if (key === this._poiKey) return;
+    this._poiKey = key;
+    this._poiMapLayer.clearLayers();
+    this._poi3dMarkers?.forEach((mk) => mk.remove());
+    this._poi3dMarkers = [];
+    this._poiShown = items;
+    const open = (it) => this._showPlace({ name: it.name || POI_KINDS[it.k][0], address: POI_KINDS[it.k][0], lat: it.lat, lon: it.lon }, false);
+    if (this._3d && this._g3 && window.maplibregl) {
+      for (const it of items) {
+        const [label, ico, col] = POI_KINDS[it.k];
+        const el = document.createElement("div");
+        el.className = "poi3d";
+        el.title = `${it.name || label} · ${label}`;
+        el.innerHTML = `<div class="pi"><div class="pb" style="background:${col}">${ico}</div><div class="ps"></div></div>`;
+        el.addEventListener("click", (e) => { e.stopPropagation(); open(it); });
+        this._poi3dMarkers.push(new window.maplibregl.Marker({ element: el, anchor: "bottom" }).setLngLat([it.lon, it.lat]).addTo(this._g3));
+      }
+      this._poiBuildings();
+    } else {
+      for (const it of items) {
+        const [label, ico, col] = POI_KINDS[it.k];
+        L.marker([it.lat, it.lon], { title: `${it.name || label} · ${label}`,
+          icon: L.divIcon({ className: "", html: `<div class="poim" style="background:${col}">${ico}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] }) })
+          .on("click", () => open(it)).addTo(this._poiMapLayer);
+      }
+    }
+  }
+
+  // 3D: l'edificio che contiene ciascun punto, ricolorato con il colore della categoria
+  _poiBuildings() {
+    const g = this._g3;
+    if (!this._3d || !g || !this._g3ok || !g.getSource("poi-bld")) return;
+    const feats = [];
+    const items = this._poiShown || [];
+    if (items.length && this._settings.b3d !== false && g.getSource("ofm")) {
+      let blds = [];
+      try { blds = g.querySourceFeatures("ofm", { sourceLayer: "building" }); } catch (e) { /* edifici non pronti */ }
+      const seen = new Set();
+      for (const it of items) {
+        for (const f of blds) {
+          const geom = f.geometry;
+          const polys = geom.type === "Polygon" ? [geom.coordinates] : geom.type === "MultiPolygon" ? geom.coordinates : [];
+          const hit = polys.find((poly) => pointInRing(it.lon, it.lat, poly[0]));
+          if (!hit) continue;
+          const k = hit[0].slice(0, 3).map((p) => p.join(",")).join(";");
+          if (seen.has(k)) break;
+          seen.add(k);
+          // un poco più largo (3%) dell'edificio normale: con le pareti coincidenti la scheda video mostrerebbe a caso l'uno o l'altro
+          const ring = hit[0];
+          const cx = ring.reduce((a, p) => a + p[0], 0) / ring.length;
+          const cy = ring.reduce((a, p) => a + p[1], 0) / ring.length;
+          const grow = (r) => r.map(([x, y]) => [cx + (x - cx) * 1.03, cy + (y - cy) * 1.03]);
+          feats.push({ type: "Feature", properties: { c: POI_KINDS[it.k][2], h: Number(f.properties?.render_height) || 8 },
+            geometry: { type: "Polygon", coordinates: [grow(ring)] } });
+          break;
+        }
+      }
+    }
+    try { g.getSource("poi-bld").setData({ type: "FeatureCollection", features: feats }); } catch (e) { /* vista 3D ricreata */ }
   }
 
   // frecce del verso di marcia in 2D: una ogni ~90 pixel, solo nella parte visibile (i percorsi lunghi restano leggeri)

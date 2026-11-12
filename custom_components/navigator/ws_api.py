@@ -29,7 +29,8 @@ POINT = vol.Schema(
 def async_setup(hass: HomeAssistant) -> None:
     if hass.data.get(DATA_WS_REGISTERED):
         return
-    for handler in (ws_info, ws_search, ws_reverse, ws_route, ws_place_save, ws_place_delete, ws_recent_clear, ws_nearby):
+    for handler in (ws_info, ws_search, ws_reverse, ws_route, ws_place_save, ws_place_delete, ws_recent_clear, ws_nearby,
+                    ws_poi_tile):
         websocket_api.async_register_command(hass, handler)
     hass.data[DATA_WS_REGISTERED] = True
 
@@ -201,5 +202,19 @@ async def ws_nearby(hass: HomeAssistant, connection: websocket_api.ActiveConnect
         if cat == "fuel":
             return await pois.fuel(line, msg["radius"])
         return await pois.cameras(line, msg["radius"])
+
+    await _run(connection, msg["id"], go())
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "navigator/poi_tile",
+    vol.Required("x"): vol.All(vol.Coerce(int), vol.Range(min=-9000, max=9000)),
+    vol.Required("y"): vol.All(vol.Coerce(int), vol.Range(min=-4500, max=4500)),
+})
+@websocket_api.async_response
+async def ws_poi_tile(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Punti di interesse di un riquadro della mappa (OpenStreetMap via Overpass, in cache per un giorno)."""
+    async def go():
+        return await _data(hass).pois.poi_tile(msg["x"], msg["y"])
 
     await _run(connection, msg["id"], go())
