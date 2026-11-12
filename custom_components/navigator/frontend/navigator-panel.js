@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.8.8";
+const PANEL_VERSION = "1.9.0";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -359,6 +359,93 @@ function wxWarnings(w) {
 
 const fmtClock = (t) => new Date(t * 1000).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
 
+// Lettore minimo dei riquadri vettoriali (formato Mapbox Vector Tile, protobuf): solo i punti di un livello, con le proprietà.
+// Basta per il livello "poi" di OpenFreeMap; nessuna libreria esterna.
+function mvtPoints(buf, layerName, z, tx, ty) {
+  const b = new Uint8Array(buf);
+  let pos = 0;
+  const varint = () => {
+    let r = 0;
+    let s = 0;
+    let c;
+    do { c = b[pos++]; r += (c & 0x7f) * 2 ** s; s += 7; } while (c & 0x80);
+    return r;
+  };
+  // fine di un campo a lunghezza: prima si legge la lunghezza (che fa avanzare pos), poi si somma
+  const end = () => { const len = varint(); return pos + len; };
+  const skip = (wt) => {
+    if (wt === 0) varint();
+    else if (wt === 1) pos += 8;
+    else if (wt === 2) pos = end();
+    else if (wt === 5) pos += 4;
+  };
+  const str = (end) => new TextDecoder().decode(b.subarray(pos, end));
+  const out = [];
+  while (pos < b.length) {
+    const tag = varint();
+    if ((tag >> 3) !== 3 || (tag & 7) !== 2) { skip(tag & 7); continue; }
+    const lend = end();
+    let name = "";
+    let extent = 4096;
+    const keys = [];
+    const values = [];
+    const feats = [];
+    while (pos < lend) {
+      const t = varint();
+      const f = t >> 3;
+      if (f === 1) { const e = end(); name = str(e); pos = e; }
+      else if (f === 3) { const e = end(); keys.push(str(e)); pos = e; }
+      else if (f === 5) extent = varint();
+      else if (f === 4) {
+        const e = end();
+        let v = null;
+        while (pos < e) {
+          const vt = varint();
+          const vf = vt >> 3;
+          if (vf === 1) { const se = end(); v = str(se); pos = se; }
+          else if (vf === 2) { v = new DataView(b.buffer, b.byteOffset + pos, 4).getFloat32(0, true); pos += 4; }
+          else if (vf === 3) { v = new DataView(b.buffer, b.byteOffset + pos, 8).getFloat64(0, true); pos += 8; }
+          else if (vf === 4 || vf === 5) v = varint();
+          else if (vf === 6) { const n = varint(); v = n % 2 ? -(n + 1) / 2 : n / 2; }
+          else if (vf === 7) v = !!varint();
+          else skip(vt & 7);
+        }
+        values.push(v);
+      } else if (f === 2) {
+        const fe = end();
+        const feat = { id: null, tags: [], type: 0, geom: [] };
+        while (pos < fe) {
+          const ft = varint();
+          const ff = ft >> 3;
+          if (ff === 1) feat.id = varint();
+          else if (ff === 3) feat.type = varint();
+          else if (ff === 2 || ff === 4) {
+            const pe = end();
+            const arr = ff === 2 ? feat.tags : feat.geom;
+            while (pos < pe) arr.push(varint());
+          } else skip(ft & 7);
+        }
+        feats.push(feat);
+      } else skip(t & 7);
+    }
+    pos = lend;
+    if (name !== layerName) continue;
+    const n = 2 ** z;
+    for (const ft of feats) {
+      if (ft.type !== 1 || ft.geom.length < 3) continue; // solo punti
+      const zz = (v) => (v >>> 1) ^ -(v & 1);
+      const px = zz(ft.geom[1]);
+      const py = zz(ft.geom[2]);
+      const lon = ((tx + px / extent) / n) * 360 - 180;
+      const lat = (Math.atan(Math.sinh(Math.PI * (1 - (2 * (ty + py / extent)) / n))) * 180) / Math.PI;
+      const props = {};
+      for (let i = 0; i + 1 < ft.tags.length; i += 2) props[keys[ft.tags[i]]] = values[ft.tags[i + 1]];
+      out.push({ id: ft.id, lat, lon, props });
+    }
+  }
+  return out;
+}
+
 // punto dentro un anello di coordinate [lon, lat] (regola del raggio)
 function pointInRing(x, y, ring) {
   let inside = false;
@@ -712,9 +799,11 @@ const STYLE = `
   .month span { font-weight: 400; color: var(--secondary-text-color); }
   /* stato dei punti di interesse, in basso a sinistra sulla mappa */
   .poistat { position: absolute; z-index: 1000; left: 10px; bottom: 26px; max-width: calc(100% - 80px); display: flex; gap: 8px; align-items: center;
+    white-space: nowrap;
     background: rgba(32,33,36,.88); color: #fff; font-size: 13px; padding: 6px 12px; border-radius: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
   .poistat[hidden] { display: none; }
-  .poistat button { font-size: 12px; padding: 2px 10px; height: auto; background: #fff; color: #222; border: none; }
+  .poistat span { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .poistat button { font-size: 12px; padding: 2px 10px; height: auto; background: #fff; color: #222; border: none; flex: none; }
   .main.guida .poistat { bottom: auto; top: 50%; }
 `;
 
@@ -4013,6 +4102,10 @@ class NavigatorPanel extends HTMLElement {
     const m = this._map;
     if (!m || !this._poiTiles) return;
     if (!this._poiKindsOn().size) { this._poiStatus(""); this._renderPois(); return; }
+    // in 2D: i riquadri z14 di OpenFreeMap (gli stessi del 3D) letti dal browser; Overpass solo se OpenFreeMap non risponde
+    if (!this._3d && !this._ofmDown) {
+      if (await this._loadOfmPois()) return;
+    }
     // in 3D i punti arrivano con le mappe di OpenFreeMap (subito, dal browser): niente Overpass
     if (this._3d && this._g3ok && this._g3?.getSource("ofm")) {
       this._poiStatus("");
@@ -4054,6 +4147,7 @@ class NavigatorPanel extends HTMLElement {
           new Promise((_, ko) => setTimeout(() => ko({ message: "nessuna risposta da Home Assistant in 45 s" }), 45000)),
         ]);
         for (const t of r.tiles || []) this._poiTiles.set(`${t.x},${t.y}`, { items: t.items || [], partial: !!t.partial, at: Date.now() });
+        for (const key of todo) if (this._poiTiles.get(key)?.pending) this._poiTiles.set(key, { items: [], at: Date.now() }); // non restituita
         this._poiReason = r.partial ? r.reason : "";
         const per = {};
         for (const t of r.tiles || []) for (const it of t.items || []) per[it.k] = (per[it.k] || 0) + 1;
@@ -4100,7 +4194,7 @@ class NavigatorPanel extends HTMLElement {
     }
     const text = { far: "📍 Avvicina la mappa per vedere i punti di interesse", loading: "📍 Carico i punti di interesse…",
       empty: "📍 Nessun punto di interesse in questa zona", error: `⚠ Punti di interesse non caricati: ${esc(detail)}`,
-      partial: "⚠ Overpass non risponde: punti parziali (solo quelli trovati con la ricerca)" }[state];
+      partial: "⚠ Punti parziali: Overpass non risponde" }[state];
     el.hidden = !text;
     if (!text) return;
     el.innerHTML = `<span title="${esc(detail)}">${text}</span>${state === "error" || state === "partial" ? `<button data-ps="retry">Riprova</button>` : ""}`;
@@ -4109,6 +4203,60 @@ class NavigatorPanel extends HTMLElement {
       this._loadPois();
     });
     if (state === "empty") this._poiStatT = setTimeout(() => { el.hidden = true; }, 4000);
+  }
+
+  // 2D: riquadri z14 di OpenFreeMap della zona visibile (al massimo 12), letti e tenuti in memoria. false = OpenFreeMap non va
+  async _loadOfmPois() {
+    const m = this._map;
+    const z = 14;
+    const n = 2 ** z;
+    const b = m.getBounds();
+    const tx = (lon) => Math.floor(((lon + 180) / 360) * n);
+    const ty = (lat) => Math.floor(((1 - Math.asinh(Math.tan((lat * Math.PI) / 180)) / Math.PI) / 2) * n);
+    const c = m.getCenter();
+    const cx = tx(c.lng);
+    const cy = ty(c.lat);
+    const tiles = [];
+    for (let x = tx(b.getWest()); x <= tx(b.getEast()); x++) for (let y = ty(b.getNorth()); y <= ty(b.getSouth()); y++) tiles.push([x, y]);
+    tiles.sort((a, q) => Math.hypot(a[0] - cx, a[1] - cy) - Math.hypot(q[0] - cx, q[1] - cy));
+    const want = tiles.slice(0, 12).map(([x, y]) => `${z}/${x}/${y}`);
+    this._ofmTiles ??= new Map();
+    this._ofmView = want;
+    const todo = want.filter((k) => !this._ofmTiles.has(k));
+    if (!todo.length) { this._poiStatus(""); this._renderPois(); return true; }
+    this._poiReqStart = Date.now();
+    this._poiStatus("loading");
+    try {
+      if (!this._ofmTpl) {
+        const tj = await (await fetch(OFM_URL)).json();
+        this._ofmTpl = (tj.tiles || [])[0];
+        if (!this._ofmTpl) throw new Error("TileJSON senza riquadri");
+      }
+      for (const k of todo) this._ofmTiles.set(k, null); // in corso
+      await Promise.all(todo.map(async (k) => {
+        const [tz, x, y] = k.split("/").map(Number);
+        const r = await fetch(this._ofmTpl.replace("{z}", tz).replace("{x}", x).replace("{y}", y));
+        if (!r.ok) throw new Error(`OpenFreeMap: errore ${r.status}`);
+        const items = [];
+        for (const p of mvtPoints(await r.arrayBuffer(), "poi", tz, x, y)) {
+          const kind = OFM_POI[p.props.subclass] || OFM_POI[p.props.class];
+          if (kind) items.push({ id: `o${p.id ?? `${p.lon.toFixed(5)},${p.lat.toFixed(5)}`}`, lat: p.lat, lon: p.lon, k: kind, name: p.props.name || "" });
+        }
+        this._ofmTiles.set(k, items);
+      }));
+      console.info(`[Navigator POI] 2D: OpenFreeMap in ${Date.now() - this._poiReqStart} ms`, { riquadri: todo.length,
+        punti: todo.reduce((a, k) => a + (this._ofmTiles.get(k)?.length || 0), 0) });
+    } catch (e) {
+      for (const k of todo) if (this._ofmTiles.get(k) === null) this._ofmTiles.delete(k);
+      console.warn("[Navigator POI] 2D: OpenFreeMap non disponibile, uso Overpass", e);
+      this._ofmDown = Date.now();
+      setTimeout(() => { this._ofmDown = 0; }, 300000); // riprova OpenFreeMap fra 5 minuti
+      return false;
+    }
+    this._poiKey = null;
+    this._renderPois();
+    this._poiStatus(this._poiItems().length ? "" : "empty");
+    return true;
   }
 
   // punti da mostrare: categorie scelte, riquadri visibili, al massimo 150 (i più vicini al centro)
@@ -4134,7 +4282,15 @@ class NavigatorPanel extends HTMLElement {
         out.push({ id, lat, lon, k, name: p.name || p["name:it"] || p.name_int || "" });
       }
     }
-    for (const key of this._poiView || []) {
+    if (!this._3d && this._ofmView) {
+      const b = this._map.getBounds().pad(0.1);
+      for (const k of this._ofmView) {
+        for (const it of this._ofmTiles?.get(k) || []) {
+          if (kinds.has(it.k) && !seen.has(it.id) && b.contains([it.lat, it.lon])) { seen.add(it.id); out.push(it); }
+        }
+      }
+    }
+    for (const key of this._ofmDown || this._3d ? this._poiView || [] : []) {
       for (const it of this._poiTiles.get(key)?.items || []) {
         if (kinds.has(it.k) && !seen.has(it.id)) { seen.add(it.id); out.push(it); }
       }
