@@ -81,6 +81,7 @@ Tutte le richieste partono da Home Assistant (nessuna chiave, nessun account):
 | Mappe | Esri (stradale, topografica, scura, satellite), OpenTopoMap | caricate dal browser; i server di OpenStreetMap bloccano le richieste da un Home Assistant in rete locale |
 | Rilievo (vista 3D) | Quote del terreno [Mapzen/Tilezen Terrarium](https://registry.opendata.aws/terrain-tiles/) (AWS Open Data) | caricate dal browser, solo in 3D |
 | Edifici 3D, gallerie | [OpenFreeMap](https://openfreemap.org) (dati OpenStreetMap, schema OpenMapTiles) | caricati dal browser, solo in 3D |
+| Meteo lungo il percorso | [Open-Meteo](https://open-meteo.com) | previsioni orarie nei punti del percorso, all'ora di passaggio |
 
 Sono servizi gratuiti offerti dalla comunità con limiti d'uso "ragionevole": Navigator è pensato per l'uso personale.
 Nelle **opzioni dell'integrazione** puoi indicare i tuoi server Valhalla, OSRM, Photon o Nominatim.
@@ -166,6 +167,28 @@ vicina alla macchina; quando la valle si apre torna quella scelta); **◎** rime
 - In ⚙ si sceglie quanto accentuare il rilievo e lo **stile degli edifici**: *Colorati* (bassi chiari, alti azzurri, con chiari e scuri
   sulle facciate), *Con finestre* (facciate chiare con finestre distanziate, tetti pieni) o *Semplici*; gli edifici si possono anche togliere.
 - La libreria 3D ([MapLibre GL JS](https://maplibre.org)) è inclusa in `frontend/maplibre` e si carica solo alla prima pressione di **3D**.
+
+### Home Assistant: sensori, pulsanti all'arrivo, archivio e garage
+
+- **Sensori per ogni utente** (nascono la prima volta che l'utente usa la guida): `sensor.navigator_<nome>_arrivo` (orario di arrivo,
+  con destinazione, indirizzo e mezzo negli attributi), `sensor.navigator_<nome>_tempo_rimanente` (minuti) e
+  `sensor.navigator_<nome>_distanza_rimanente` (km). Si aggiornano durante la guida e tornano "sconosciuto" con **Esci** (o dopo
+  15 minuti senza aggiornamenti). Esempio: accendere il riscaldamento quando mancano 15 minuti a casa, o aprire il cancello a 2.
+- **Pulsanti all'arrivo** (⚙): entità a scelta (cancello, garage, serratura, luci, script…) che in guida, a meno di 500 m dalla
+  destinazione, diventano tasti grandi nella barra in basso (di serie solo arrivando a Casa).
+- **Archivio** (scheda *🗂️ Archivio* del pannello): ogni guida finita viene salvata per il tuo utente con data, partenza e arrivo,
+  veicolo, km, tempo, velocità media e massima e la traccia; viaggi raggruppati per mese con i totali, e si possono mostrare sulla
+  mappa (più viaggi insieme, colori diversi).
+- **Garage** (⚙): i tuoi veicoli con nome, targa e tipo (auto, moto, scooter, furgone, camper, bici); alla partenza si sceglie il
+  veicolo usato, che resta nell'archivio. Senza veicoli si usa un veicolo predefinito.
+
+### Meteo lungo il percorso e modalità notte
+
+- Dopo il calcolo, il **meteo previsto lungo il percorso all'ora in cui passerai** (Open-Meteo, gratuito e senza chiave): temperature
+  e avvisi per neve, pioggia, ghiaccio, gelo, vento forte, nebbia e temporali, con le icone sulla mappa; in guida un avviso (anche a
+  voce) quando uno di questi punti è a meno di 10 km (disattivabile in ⚙).
+- **Modalità notte** (⚙ → Mappa): automatica al tramonto (sole di Home Assistant), sempre o mai. Mappa stradale e topografica scure,
+  satellite attenuato, in 3D cielo notturno, edifici scuri e finestre accese.
 
 ### Gallerie
 

@@ -29,8 +29,13 @@ from .const import (
     STATIC_URL,
     VERSION,
 )
+from .live import Live
 from .places import Places
 from .pois import Pois
+from .trips import Trips
+from .weather import Weather
+
+PLATFORMS = ["sensor"]
 
 
 @dataclass
@@ -38,6 +43,9 @@ class NavigatorData:
     maps: MapServices
     places: Places
     pois: Pois
+    live: Live
+    trips: Trips
+    weather: Weather
 
 
 type NavigatorConfigEntry = ConfigEntry[NavigatorData]
@@ -57,7 +65,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: NavigatorConfigEntry) ->
     await places.async_load()
     pois = Pois(async_get_clientsession(hass), Path(hass.config.path("navigator_cache")), hass.config.country,
                 hass.async_add_executor_job, opts[CONF_PHOTON_URL])
-    entry.runtime_data = NavigatorData(maps, places, pois)
+    live = Live(hass)
+    await live.async_load()
+    trips = Trips(hass)
+    await trips.async_load()
+    entry.runtime_data = NavigatorData(maps, places, pois, live, trips, Weather(async_get_clientsession(hass)))
     hass.data[DOMAIN] = entry
 
     # "servizio" nella scheda dell'integrazione: mostra la versione installata
@@ -91,6 +103,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: NavigatorConfigEntry) ->
     )
     ws_api.async_setup(hass)
     services.async_setup(hass)
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_reload))
     return True
 
@@ -100,7 +113,9 @@ async def _async_reload(hass: HomeAssistant, entry: NavigatorConfigEntry) -> Non
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: NavigatorConfigEntry) -> bool:
-    """Rimuove il pannello."""
+    """Rimuove il pannello e i sensori."""
+    ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    entry.runtime_data.live.async_unload()
     frontend.async_remove_panel(hass, PANEL_URL)
     hass.data.pop(DOMAIN, None)
-    return True
+    return ok

@@ -12,6 +12,7 @@ import homeassistant.helpers.config_validation as cv
 
 from .api import NavigatorError
 from .pois import PoiError
+from .weather import WeatherError
 from .const import DATA_WS_REGISTERED, DOMAIN, LANGUAGES, MAX_EXCLUDE, MAX_POINTS, MODES, VERSION
 
 POINT = vol.Schema(
@@ -30,7 +31,8 @@ def async_setup(hass: HomeAssistant) -> None:
     if hass.data.get(DATA_WS_REGISTERED):
         return
     for handler in (ws_info, ws_search, ws_reverse, ws_route, ws_place_save, ws_place_delete, ws_recent_clear, ws_nearby,
-                    ws_poi_tile):
+                    ws_poi_tile, ws_live, ws_weather, ws_trip_save, ws_trips, ws_trip, ws_trip_delete, ws_garage,
+                    ws_garage_save):
         websocket_api.async_register_command(hass, handler)
     hass.data[DATA_WS_REGISTERED] = True
 
@@ -45,7 +47,7 @@ def _data(hass: HomeAssistant):
 async def _run(connection, msg_id: int, coro) -> None:
     try:
         connection.send_result(msg_id, await coro)
-    except (NavigatorError, PoiError) as err:
+    except (NavigatorError, PoiError, WeatherError) as err:
         connection.send_error(msg_id, "navigator_error", str(err))
 
 
@@ -216,5 +218,123 @@ async def ws_poi_tile(hass: HomeAssistant, connection: websocket_api.ActiveConne
     """Punti di interesse di un riquadro della mappa (OpenStreetMap via Overpass, in cache per un giorno)."""
     async def go():
         return await _data(hass).pois.poi_tile(msg["x"], msg["y"])
+
+    await _run(connection, msg["id"], go())
+
+
+def _user(connection) -> tuple[str, str]:
+    user = connection.user
+    if user is None:
+        raise NavigatorError("Utente non riconosciuto")
+    return user.id, user.name or "utente"
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "navigator/live",
+    vol.Required("active"): bool,
+    vol.Optional("eta"): vol.Coerce(float),
+    vol.Optional("minutes"): vol.Coerce(int),
+    vol.Optional("km"): vol.Coerce(float),
+    vol.Optional("dest", default=""): str,
+    vol.Optional("address", default=""): str,
+    vol.Optional("mode", default=""): str,
+    vol.Optional("lat"): vol.Coerce(float),
+    vol.Optional("lon"): vol.Coerce(float),
+    vol.Optional("arrived", default=False): bool,
+})
+@websocket_api.async_response
+async def ws_live(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Stato della guida dell'utente collegato: aggiorna i suoi sensori (arrivo, tempo e distanza rimanenti)."""
+    async def go():
+        uid, name = _user(connection)
+        data = {k: msg[k] for k in ("active", "eta", "minutes", "km", "dest", "address", "mode", "lat", "lon", "arrived") if k in msg}
+        await _data(hass).live.update(uid, name, data)
+        return {"ok": True}
+
+    await _run(connection, msg["id"], go())
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "navigator/weather",
+    vol.Required("points"): vol.All([vol.All(vol.Length(min=3, max=3), [vol.Coerce(float)])], vol.Length(min=1, max=40)),
+})
+@websocket_api.async_response
+async def ws_weather(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Meteo previsto nei punti del percorso all'ora di passaggio (Open-Meteo)."""
+    async def go():
+        return {"points": await _data(hass).weather.along(msg["points"])}
+
+    await _run(connection, msg["id"], go())
+
+
+@websocket_api.websocket_command({vol.Required("type"): "navigator/trip_save", vol.Required("trip"): dict})
+@websocket_api.async_response
+async def ws_trip_save(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Salva nel diario dell'utente collegato un viaggio appena finito."""
+    async def go():
+        uid, _name = _user(connection)
+        t = msg["trip"]
+        trip = {k: t.get(k) for k in ("start", "end", "from", "to", "mode", "km", "duration", "avg", "max")}
+        veh = t.get("vehicle") if isinstance(t.get("vehicle"), dict) else {}
+        trip["vehicle"] = {k: str(veh.get(k) or "")[:40] for k in ("id", "name", "plate", "type")}
+        trip["track"] = [[round(float(p[0]), 5), round(float(p[1]), 5)] for p in (t.get("track") or []) if len(p) >= 2][:20000]
+        item = _data(hass).trips.add(uid, trip)
+        return {"id": item["id"]}
+
+    await _run(connection, msg["id"], go())
+
+
+@websocket_api.websocket_command({vol.Required("type"): "navigator/trips"})
+@websocket_api.async_response
+async def ws_trips(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Diario dei viaggi dell'utente collegato (senza le tracce)."""
+    async def go():
+        uid, _name = _user(connection)
+        return {"trips": _data(hass).trips.summaries(uid)}
+
+    await _run(connection, msg["id"], go())
+
+
+@websocket_api.websocket_command({vol.Required("type"): "navigator/trip", vol.Required("trip_id"): str})
+@websocket_api.async_response
+async def ws_trip(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    async def go():
+        uid, _name = _user(connection)
+        trip = _data(hass).trips.get(uid, msg["trip_id"])
+        if trip is None:
+            raise NavigatorError("Viaggio non trovato")
+        return trip
+
+    await _run(connection, msg["id"], go())
+
+
+@websocket_api.websocket_command({vol.Required("type"): "navigator/trip_delete", vol.Required("trip_id"): str})
+@websocket_api.async_response
+async def ws_trip_delete(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    async def go():
+        uid, _name = _user(connection)
+        _data(hass).trips.delete(uid, msg["trip_id"])
+        return {"trips": _data(hass).trips.summaries(uid)}
+
+    await _run(connection, msg["id"], go())
+
+
+@websocket_api.websocket_command({vol.Required("type"): "navigator/garage"})
+@websocket_api.async_response
+async def ws_garage(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Veicoli del garage dell'utente collegato."""
+    async def go():
+        uid, _name = _user(connection)
+        return {"vehicles": _data(hass).trips.vehicles(uid)}
+
+    await _run(connection, msg["id"], go())
+
+
+@websocket_api.websocket_command({vol.Required("type"): "navigator/garage_save", vol.Required("vehicles"): [dict]})
+@websocket_api.async_response
+async def ws_garage_save(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    async def go():
+        uid, _name = _user(connection)
+        return {"vehicles": _data(hass).trips.set_vehicles(uid, msg["vehicles"])}
 
     await _run(connection, msg["id"], go())

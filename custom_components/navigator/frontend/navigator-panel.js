@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.7.0";
+const PANEL_VERSION = "1.8.0";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -207,7 +207,7 @@ const SETTINGS_KEY = "navigator-panel-settings";
 const DEFAULT_SETTINGS = { voice: false, lang: "it", voiceSel: "f", out: "auto", autoZoom: true, beep: false,
   fuelBrands: [], fuelKind: "", camAlert: true, view3d: false, b3d: true, terrainEx: "1.5", pitch3d: 60, tunnelFx: true, zoom3dOff: 0,
   voiceStyle: "normale", voiceRate: 1, voicePitch: 1, bldStyle: "colorati",
-  poiKinds: ["farmacia", "ospedale", "supermercato"] };
+  poiKinds: ["farmacia", "ospedale", "supermercato"], arrEntities: [], arrHomeOnly: true, nightMode: "auto", wxAlert: true };
 // marche dei distributori (come nell'anagrafica del MIMIT)
 const FUEL_BRANDS = ["Agip Eni", "Api-Ip", "Q8", "Esso", "Tamoil", "Shell", "Retitalia", "Beyfin", "Costantin", "Europam", "Pompe bianche"];
 const BRAND_COLORS = { "agip eni": "#f7c600", "eni": "#f7c600", "api-ip": "#0057a8", "ip": "#0057a8", "q8": "#0a3a7a", "esso": "#d71920",
@@ -240,6 +240,14 @@ const POI_KINDS = {
   scuola: ["Scuole", "🏫", "#5d4037"], chiesa: ["Chiese", "⛪", "#757575"],
 };
 const POI_TILE = 0.02; // come nel backend
+// pulsanti all'arrivo: domini ammessi e servizio da chiamare
+const ARR_DOMAINS = ["cover", "lock", "switch", "light", "button", "input_button", "script", "scene", "input_boolean", "fan"];
+const ARR_ICONS = { cover: "🚪", lock: "🔒", switch: "⏻", light: "💡", button: "🔘", input_button: "🔘", script: "📜", scene: "🎬", input_boolean: "⏻", fan: "🌀" };
+// tipi di veicolo del garage
+const VEHICLE_TYPES = [["auto", "🚗", "Auto"], ["moto", "🏍️", "Moto"], ["scooter", "🛵", "Scooter"], ["furgone", "🚐", "Furgone"],
+  ["camper", "🚌", "Camper"], ["bici", "🚲", "Bici"], ["altro", "🚙", "Altro"]];
+const vehIcon = (t) => (VEHICLE_TYPES.find((v) => v[0] === t) || VEHICLE_TYPES[0])[1];
+const NIGHT_MODES = [["auto", "Automatica (al tramonto)"], ["on", "Sempre"], ["off", "Mai"]];
 const POI_MIN_ZOOM = 15;
 const NEAR_CATS = { fuel: ["⛽", "Distributori"], parking: ["🅿️", "Parcheggi"], cameras: ["📷", "Autovelox"] };
 const LANG_NAMES = { it: "Italiano", en: "English", de: "Deutsch", fr: "Français", es: "Español" };
@@ -327,6 +335,24 @@ function fmtAge(ms) {
 }
 
 const STALE_MS = 10 * 60000; // posizione di una persona più vecchia di così: si avvisa prima di partire
+
+// avvisi del meteo in un punto (Open-Meteo: mm/h, cm/h, °C, km/h, codici WMO)
+function wxWarnings(w) {
+  const out = [];
+  const c = w.code ?? -1;
+  if (c >= 95) out.push({ ico: "⛈️", txt: "Temporale" });
+  if ((w.snow || 0) >= 0.1 || [71, 73, 75, 77, 85, 86].includes(c)) out.push({ ico: "🌨️", txt: (w.snow || 0) >= 1 ? "Neve forte" : "Neve" });
+  else if ((w.prec || 0) >= 0.3 || (c >= 51 && c <= 67) || (c >= 80 && c <= 82)) {
+    out.push({ ico: "🌧️", txt: (w.prec || 0) >= 4 ? "Pioggia forte" : "Pioggia" });
+  }
+  if (w.temp != null && w.temp <= 1 && ((w.prec || 0) > 0 || [56, 57, 66, 67].includes(c))) out.push({ ico: "🧊", txt: "Rischio ghiaccio" });
+  else if (w.temp != null && w.temp <= 0) out.push({ ico: "🥶", txt: "Gelo" });
+  if ((w.gust || 0) >= 60) out.push({ ico: "💨", txt: "Vento forte" });
+  if (c === 45 || c === 48) out.push({ ico: "🌫️", txt: "Nebbia" });
+  return out;
+}
+
+const fmtClock = (t) => new Date(t * 1000).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
 
 // punto dentro un anello di coordinate [lon, lat] (regola del raggio)
 function pointInRing(x, y, ring) {
@@ -656,6 +682,29 @@ const STYLE = `
   .poi3d .ps { width: 2px; height: 30px; background: linear-gradient(rgba(255,255,255,.95), rgba(255,255,255,0)); }
   @keyframes poi-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
   @media (prefers-reduced-motion: reduce) { .poi3d .pi { animation: none; } }
+  /* pulsanti all'arrivo, in cima alla barra della guida */
+  .navbot .arr { flex-basis: 100%; display: flex; gap: 8px; flex-wrap: wrap; }
+  .navbot .arr[hidden] { display: none; }
+  .navbot .arr button { flex: 1 1 140px; height: 48px; font-size: 16px; font-weight: 600; background: #0b6e3a; color: #fff; border-color: #0b6e3a; }
+  /* meteo lungo il percorso */
+  .wxm { font-size: 20px; line-height: 1; filter: drop-shadow(0 1px 2px rgba(0,0,0,.6)); }
+  .wxlist { margin: 4px 0 0; padding: 0; list-style: none; font-size: 13px; }
+  .wxlist li { padding: 3px 0; }
+  /* diario dei viaggi */
+  .trip { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--divider-color); font-size: 13px; }
+  .trip .nm { flex: 1; min-width: 0; cursor: pointer; } .trip .nm small { display: block; color: var(--secondary-text-color); }
+  /* notte: satellite ed escursionistica più scuri */
+  #map.night .leaflet-tile-pane { filter: brightness(.6) contrast(1.1) saturate(.8); }
+  /* schede del pannello laterale: Viaggio e Archivio */
+  .sidetabs { display: flex; gap: 0; position: sticky; top: 0; z-index: 5; background: var(--card-background-color, var(--primary-background-color));
+    border-bottom: 1px solid var(--divider-color); }
+  .sidetabs button { flex: 1; border: none; border-radius: 0; background: transparent; padding: 12px 8px; font-size: 15px; font-weight: 600;
+    color: var(--secondary-text-color); border-bottom: 3px solid transparent; }
+  .sidetabs button.on { color: var(--primary-color); border-bottom-color: var(--primary-color); }
+  .trip input[type=checkbox] { width: 18px; height: 18px; flex: none; accent-color: var(--tc, var(--primary-color)); }
+  .trip .sw { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .month { margin: 12px 0 2px; font-weight: 600; font-size: 13px; display: flex; justify-content: space-between; }
+  .month span { font-weight: 400; color: var(--secondary-text-color); }
 `;
 
 class NavigatorPanel extends HTMLElement {
@@ -682,6 +731,8 @@ class NavigatorPanel extends HTMLElement {
     this._hass = hass;
     if (this._menuBtn) this._menuBtn.hass = hass;
     if (this._nav && this._nav.source !== "gps") this._entityFix();
+    const sun = hass.states?.["sun.sun"]?.state;
+    if (sun !== this._sunState) { this._sunState = sun; if (this._map) this._applyNight(); }
     // punto blu legato a una persona o a un dispositivo: segue le sue posizioni nuove
     const ms = this._me?.src && this._me.src !== "gps" ? hass.states?.[this._me.src] : null;
     if (ms && ms.last_updated !== this._me.upd && ms.attributes.latitude != null && this._markerLayer) {
@@ -749,6 +800,9 @@ class NavigatorPanel extends HTMLElement {
       <div id="verwarn"></div>
       <div class="main" id="mainbox">
         <div class="side">
+          <div class="sidetabs" id="sidetabs">
+            <button data-tab="viaggio" class="on">🧭 Viaggio</button><button data-tab="archivio">🗂️ Archivio</button></div>
+          <div id="tabViaggio">
           <div class="sec">
             <h3>Cerca un luogo</h3>
             <div class="field search"><input type="text" id="q" placeholder="Indirizzo, città, attività…" autocomplete="off"></div>
@@ -773,6 +827,8 @@ class NavigatorPanel extends HTMLElement {
             Servizi gratuiti con limiti d'uso: le richieste passano da Home Assistant.
             <div class="footver"><img src="${ICON}" alt=""> Navigator versione ${PANEL_VERSION} ·
               <a href="https://github.com/LabirintoDigitale/ha-navigator" target="_blank" rel="noopener">LabirintoDigitale/ha-navigator</a></div></div>
+          </div>
+          <div id="tabArchivio" hidden><div class="sec" id="tripsec"></div></div>
         </div>
         <div class="mapwrap" id="mapwrap">
           <div id="map"></div>
@@ -819,6 +875,12 @@ class NavigatorPanel extends HTMLElement {
     this._arrowLayer = L.layerGroup().addTo(this._map); // frecce del verso di marcia (solo 2D: in 3D le disegna MapLibre)
     this._map.on("moveend zoomend", () => this._scheduleArrows());
     this._poiMapLayer = L.layerGroup().addTo(this._map); // punti di interesse scelti in ⚙ (in 3D li disegna MapLibre)
+    this._wxLayer = L.layerGroup().addTo(this._map);     // meteo lungo il percorso
+    this._tripLayer = L.layerGroup().addTo(this._map);   // traccia di un viaggio del diario
+    this._applyNight();
+    this._loadTrips();
+    this._loadGarage();
+    $("sidetabs").querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => this._showTab(b.dataset.tab)));
     this._poiTiles = new Map();
     this._map.on("moveend zoomend", () => this._schedulePois());
     this._map.on("click", (e) => this._mapClick(e.latlng));
@@ -885,7 +947,7 @@ class NavigatorPanel extends HTMLElement {
   }
 
   _setLayer(key) {
-    const [, url, maxZoom, attribution] = LAYERS[key];
+    const [, url, maxZoom, attribution] = LAYERS[this._effLayer(key)];
     if (this._tiles) this._map.removeLayer(this._tiles);
     this._tiles = L.tileLayer(url, { maxZoom, attribution, subdomains: "abc" });
     if (!this._3d) this._tiles.addTo(this._map); // in 3D le mappe le scarica solo MapLibre
@@ -1294,6 +1356,9 @@ class NavigatorPanel extends HTMLElement {
     return `<div class="sec"><h3>Navigazione</h3>
       <label class="muted" style="display:block;margin-bottom:4px">Segui la posizione di</label>
       <select class="inp" id="navsrc">${opts}</select>
+      <label class="muted" style="display:block;margin:8px 0 4px">Veicolo</label>
+      <select class="inp" id="navveh">${this._vehicles().map((v) => `<option value="${esc(v.id)}" ${v.id === this._vehicleId() ? "selected" : ""}>${
+        vehIcon(v.type)} ${esc(v.name || "Veicolo")}${v.plate ? ` · ${esc(v.plate)}` : ""}</option>`).join("")}</select>
       <div class="row" style="margin-top:8px"><button class="primary" data-a="navstart" style="flex:1">▶ Parti</button></div>${hint}
       <button class="link" data-a="devpos" style="margin-top:6px;padding-left:0;display:block">📱 Mostra la posizione di questo dispositivo</button>
       <button class="link" data-a="gpshelp" style="margin-top:2px;padding-left:0">📡 Problemi con il GPS? Posizione negata?</button></div>`;
@@ -1313,6 +1378,8 @@ class NavigatorPanel extends HTMLElement {
     }
     try { localStorage.setItem(`${STORE_KEY}-navsrc`, source); } catch (e) { /* storage non disponibile */ }
     this._sel = 0;
+    this._tripFrom = this._points[0]?.name || "";
+    this._tripVehicle = this._vehicles().find((v) => v.id === (this.shadowRoot.getElementById("navveh")?.value || this._vehicleId())) || this._vehicles()[0];
     this._nav = { source, follow: true, idx: 0, passed: 0, offSince: null, offCount: 0, rerouting: false, lastReroute: 0,
       lastKey: null, fix: null, arrived: false, view: "guida", dir: null };
     this.$("ctltr").hidden = true;
@@ -1342,6 +1409,8 @@ class NavigatorPanel extends HTMLElement {
     const nav = this._nav;
     if (!nav) return;
     this._tunnelExit();
+    this._tripSave(nav);
+    this._hass.callWS({ type: "navigator/live", active: false }).catch(() => { /* sensori non aggiornati */ });
     if (nav.watch != null) window.navigator.geolocation.clearWatch(nav.watch);
     clearTimeout(nav.popTimer);
     this._nav = null;
@@ -1420,6 +1489,7 @@ class NavigatorPanel extends HTMLElement {
     if (speed == null && prev && now - prev.time > 800) speed = distM([prev.lat, prev.lon], [fix.lat, fix.lon]) / ((now - prev.time) / 1000);
     if (speed != null) nav.speed = nav.speed == null ? speed : nav.speed * 0.4 + speed * 0.6;
     nav.fix = { ...fix, time: now };
+    this._tripPoint(fix);
 
     const rt = this._geom(this._result.routes[this._sel]);
     const snap = this._snap(rt, fix, nav.idx);
@@ -2019,7 +2089,7 @@ class NavigatorPanel extends HTMLElement {
   }
 
   _baseSource() {
-    const [, url, maxZoom, attribution] = LAYERS[this._layer] || LAYERS.strade;
+    const [, url, maxZoom, attribution] = LAYERS[this._effLayer(this._layer)] || LAYERS.strade;
     const tiles = url.includes("{s}") ? ["a", "b", "c"].map((x) => url.replace("{s}", x)) : [url];
     return { type: "raster", tiles, tileSize: 256, maxzoom: maxZoom, attribution };
   }
@@ -2050,7 +2120,7 @@ class NavigatorPanel extends HTMLElement {
           lines: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
         },
         layers: [
-          { id: "base", type: "raster", source: "base" },
+          { id: "base", type: "raster", source: "base", paint: this._basePaint() },
           { id: "hs", type: "hillshade", source: "hs", paint: { "hillshade-exaggeration": 0.3, "hillshade-shadow-color": "#3e3a36" } },
           { id: "lines", type: "line", source: "lines", filter: ["!=", ["get", "d"], 1],
             layout: { "line-join": "round", "line-cap": "round", "line-sort-key": ["get", "i"] },
@@ -2059,8 +2129,7 @@ class NavigatorPanel extends HTMLElement {
             paint: { "line-color": ["get", "c"], "line-width": ["get", "w"], "line-opacity": ["get", "o"], "line-dasharray": [1.4, 1.4] } },
         ],
         terrain: { source: "dem", exaggeration: +this._settings.terrainEx || 1.5 },
-        sky: { "sky-color": "#8cc3f0", "horizon-color": "#dcebf7", "fog-color": "#f2f2f2", "sky-horizon-blend": 0.6,
-          "horizon-fog-blend": 0.5, "fog-ground-blend": 0.85, "atmosphere-blend": 0.6 },
+        sky: this._skySpec(),
       },
     });
     this._g3 = g;
@@ -2204,8 +2273,10 @@ class NavigatorPanel extends HTMLElement {
       this._bldApplied = style;
     }
     // luce: più radente e un po' più forte con gli stili colorati, così le facciate hanno chiari e scuri come nei navigatori
-    g.setLight(style === "semplici" ? { anchor: "viewport", color: "#ffffff", intensity: 0.5, position: [1.15, 210, 30] }
+    g.setLight(this._nightOn ? { anchor: "viewport", color: "#9fb4ff", intensity: 0.25, position: [1.3, 230, 45] }
+      : style === "semplici" ? { anchor: "viewport", color: "#ffffff", intensity: 0.5, position: [1.15, 210, 30] }
       : { anchor: "viewport", color: "#fff8ee", intensity: 0.45, position: [1.3, 230, 45] });
+    try { g.setSky(this._skySpec()); } catch (e) { /* cielo non supportato */ }
   }
 
   // aspetto degli edifici: semplici (grigio chiaro), colorati secondo l'altezza (bassi chiari, alti azzurri) o con finestre
@@ -2214,34 +2285,36 @@ class NavigatorPanel extends HTMLElement {
     const h = ["coalesce", ["get", "render_height"], 8];
     const base = { "fill-extrusion-height": h, "fill-extrusion-base": ["coalesce", ["get", "render_min_height"], 0],
       "fill-extrusion-vertical-gradient": true };
-    if (style === "semplici") return { ...base, "fill-extrusion-color": "#d9d4cb", "fill-extrusion-opacity": 0.85 };
+    const night = this._nightOn;
+    if (style === "semplici") return { ...base, "fill-extrusion-color": night ? "#4d535c" : "#d9d4cb", "fill-extrusion-opacity": 0.85 };
     if (style === "finestre") {
       if (g.hasImage("bld-win")) g.removeImage("bld-win");
-      g.addImage("bld-win", this._windowPattern(), { pixelRatio: 1 });
+      g.addImage("bld-win", this._windowPattern(night), { pixelRatio: 1 });
       return { ...base, "fill-extrusion-pattern": "bld-win", "fill-extrusion-opacity": 0.95 };
     }
-    return { ...base, "fill-extrusion-opacity": 0.92,
-      "fill-extrusion-color": ["interpolate", ["linear"], h, 0, "#eef1f4", 10, "#dfe7ef", 25, "#c7d7ea", 50, "#a9c3e3", 100, "#86a9d6", 200, "#6e93c8"] };
+    return { ...base, "fill-extrusion-opacity": 0.92, "fill-extrusion-color": night
+      ? ["interpolate", ["linear"], h, 0, "#3a4250", 25, "#334866", 100, "#2c4f80", 200, "#2a5a9a"]
+      : ["interpolate", ["linear"], h, 0, "#eef1f4", 10, "#dfe7ef", 25, "#c7d7ea", 50, "#a9c3e3", 100, "#86a9d6", 200, "#6e93c8"] };
   }
 
   // tetto pieno per lo stile con finestre: lastra di 30 cm sopra l'edificio
   _roofPaint() {
     const h = ["coalesce", ["get", "render_height"], 8];
-    return { "fill-extrusion-color": "#d3d9e0", "fill-extrusion-opacity": 0.95, "fill-extrusion-vertical-gradient": false,
+    return { "fill-extrusion-color": this._nightOn ? "#30363f" : "#d3d9e0", "fill-extrusion-opacity": 0.95, "fill-extrusion-vertical-gradient": false,
       "fill-extrusion-base": h, "fill-extrusion-height": ["+", h, 0.3] };
   }
 
   // facciata chiara con finestre azzurre (si ripete sui lati degli edifici): poche, distanziate, non un retino fitto
-  _windowPattern() {
+  _windowPattern(night = false) {
     const c = document.createElement("canvas");
     c.width = c.height = 64;
     const x = c.getContext("2d");
-    x.fillStyle = "#e8edf3";
+    x.fillStyle = night ? "#2a313b" : "#e8edf3";
     x.fillRect(0, 0, 64, 64);
-    // una finestra per riquadro, con tanto muro intorno: poche e distanziate
-    x.fillStyle = "#7d9cc4";
+    // una finestra per riquadro, con tanto muro intorno: poche e distanziate; di notte accese (gialle)
+    x.fillStyle = night ? "#ffcf6e" : "#7d9cc4";
     x.fillRect(23, 22, 18, 16);
-    x.fillStyle = "#b9cde6"; // riflesso
+    x.fillStyle = night ? "#fff0c2" : "#b9cde6"; // riflesso
     x.fillRect(23, 22, 18, 4);
     return x.getImageData(0, 0, 64, 64);
   }
@@ -2252,7 +2325,7 @@ class NavigatorPanel extends HTMLElement {
     g.removeLayer("base");
     g.removeSource("base");
     g.addSource("base", this._baseSource());
-    g.addLayer({ id: "base", type: "raster", source: "base" }, "hs");
+    g.addLayer({ id: "base", type: "raster", source: "base", paint: this._basePaint() }, "hs");
   }
 
   // percorso e segnaposto ricopiati da Leaflet (una volta per fotogramma, anche se cambiano più cose insieme)
@@ -2271,7 +2344,10 @@ class NavigatorPanel extends HTMLElement {
     if (!this._3d || !g || !this._g3ok) return;
     const feats = [];
     let i = 0;
-    this._routeLayer.eachLayer((l) => {
+    const lines = [];
+    this._routeLayer.eachLayer((l) => lines.push(l));
+    this._tripLayer?.eachLayer((l) => lines.push(l));
+    lines.forEach((l) => {
       if (!(l instanceof L.Polyline)) return;
       const o = l.options;
       feats.push({ type: "Feature", properties: { c: o.color, w: o.weight, o: o.opacity ?? 1, i: i++, d: o.dashArray ? 1 : 0, a: o.arrows ? 1 : 0 },
@@ -2280,7 +2356,7 @@ class NavigatorPanel extends HTMLElement {
     g.getSource("lines").setData({ type: "FeatureCollection", features: feats });
     for (const m of this._g3markers) m.remove();
     this._g3markers = [];
-    for (const grp of [this._markerLayer, this._poiLayer]) {
+    for (const grp of [this._markerLayer, this._poiLayer, this._wxLayer].filter(Boolean)) {
       grp.eachLayer((l) => {
         const ic = l.options?.icon?.options;
         if (!(l instanceof L.Marker) || !ic?.html) return;
@@ -3116,6 +3192,8 @@ class NavigatorPanel extends HTMLElement {
       <div class="grp"><h3>Mappa</h3>
         ${sw("autoZoom", "Zoom automatico in base alla velocità (mappa 2D)", "In guida: più vicino in città, più largo in autostrada. Dopo + o − resta il tuo zoom per 20 secondi")}
         ${sw("autoZoom3d", "Zoom automatico in base alla velocità (vista 3D)", "In guida la distanza dalla macchina cambia con la velocità, partendo da quella che hai scelto. Spento: la distanza resta sempre quella scelta")}
+        <label class="line"><span>Modalità notte</span><select data-s="nightMode">${NIGHT_MODES.map(([v, n]) => `<option value="${v}" ${(s.nightMode || "auto") === v ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+        ${sw("wxAlert", "Avvisi meteo in guida", "Pioggia, neve, gelo, vento o nebbia a meno di 10 km davanti (meteo lungo il percorso, Open-Meteo)")}
         ${sw("tunnelFx", "Animazione in galleria", "In guida, dentro le gallerie riconosciute (con la vista 3D attiva), al posto della mappa un tunnel stilizzato che scorre")}
       </div>
       <div class="grp"><h3>Vista 3D</h3>
@@ -3130,6 +3208,18 @@ class NavigatorPanel extends HTMLElement {
         ${sw("camAlert", "Avviso autovelox fissi", "Cartello nella barra della guida e, con le indicazioni vocali o il beep attivi, avviso a 600 metri (da 1 km in autostrada)")}
         ${sw("beep", "Beep quando superi il limite", "Limiti da OpenStreetMap, per auto e moto; tolleranza di 3 km/h (5% sopra i 60)")}
         <div class="row" style="margin-top:6px"><button data-s="testbeep">▶ Prova il beep</button></div>
+      </div>
+      ${this._garageHtml()}
+      <div class="grp"><h3>Pulsanti all'arrivo</h3>
+        <div class="note">In guida, a meno di 500 m dalla destinazione, tasti grandi nella barra in basso per azionare queste entità
+          (cancello, garage, serratura, luci, script…).</div>
+        <div class="chips">${(s.arrEntities || []).map((id) => `<span class="chip on" data-arrdel="${esc(id)}">${ARR_ICONS[id.split(".")[0]] || "⏻"} ${
+          esc(this._hass.states[id]?.attributes?.friendly_name || id)} ✕</span>`).join("")}</div>
+        <div class="row" style="margin:6px 0"><select data-arradd style="flex:1"><option value="">＋ Aggiungi un'entità…</option>${
+          Object.values(this._hass.states).filter((st) => ARR_DOMAINS.includes(st.entity_id.split(".")[0]) && !(s.arrEntities || []).includes(st.entity_id))
+            .sort((a, b) => (a.attributes.friendly_name || a.entity_id).localeCompare(b.attributes.friendly_name || b.entity_id))
+            .map((st) => `<option value="${esc(st.entity_id)}">${ARR_ICONS[st.entity_id.split(".")[0]] || ""} ${esc(st.attributes.friendly_name || st.entity_id)}</option>`).join("")}</select></div>
+        ${sw("arrHomeOnly", "Solo arrivando a Casa", "Spento: i tasti compaiono arrivando a qualsiasi destinazione")}
       </div>
       <div class="grp"><h3>Punti di interesse sulla mappa</h3>
         <div class="note">Da OpenStreetMap, visibili da vicino. In 3D l'edificio prende il colore della categoria e sopra fluttua l'icona.
@@ -3166,6 +3256,7 @@ class NavigatorPanel extends HTMLElement {
       this._saveSettings();
       if (k === "voiceStyle") { this._unlockAudio(); this._speak(PHRASES[s.lang].test, true, true); }
       if (k === "terrainEx" || k === "bldStyle") this._apply3dSettings();
+      if (k === "nightMode") this._applyNight();
       if (k === "lang" && this._result && !this._nav) this._compute(false); // indicazioni nella nuova lingua
       this._openSettings();
     }));
@@ -3182,6 +3273,18 @@ class NavigatorPanel extends HTMLElement {
       this._speak(PHRASES[s.lang].test, true, true);
     });
     wrap.querySelector('[data-s="testbeep"]').addEventListener("click", () => this._beep());
+    this._bindGarage(wrap);
+    wrap.querySelector("[data-arradd]")?.addEventListener("change", (e) => {
+      if (!e.target.value) return;
+      s.arrEntities = [...(s.arrEntities || []), e.target.value];
+      this._saveSettings();
+      this._openSettings();
+    });
+    wrap.querySelectorAll("[data-arrdel]").forEach((el) => el.addEventListener("click", () => {
+      s.arrEntities = (s.arrEntities || []).filter((x) => x !== el.dataset.arrdel);
+      this._saveSettings();
+      this._openSettings();
+    }));
     wrap.querySelectorAll("[data-poi]").forEach((el) => el.addEventListener("click", () => {
       const k = el.dataset.poi;
       const cur = s.poiKinds || [];
@@ -3263,6 +3366,9 @@ class NavigatorPanel extends HTMLElement {
       remTime = (len > 0 ? cur.time * Math.max(0, rt._cum[cur.end] - along) / len : 0) + ms.slice(k + 1).reduce((a, m) => a + m.time, 0);
     }
     if (!bot.querySelector(".info")) this._buildNavBar();
+    this._liveSend(remTime, remM);
+    this._arrivalButtons();
+    this._wxAhead(along);
     const kmh = nav.speed != null && nav.fix ? Math.round(nav.speed * 3.6) : null;
     const modeIco = (MODES.find((m) => m[0] === this._mode) || MODES[0])[1];
     bot.querySelector(".info").innerHTML = `<span title="Mezzo del percorso">${modeIco}</span><span class="rem">${fmtTime(remTime)}</span><span>${fmtKm(remM / 1000)} · arrivo ${arrival(remTime)}</span>
@@ -3278,7 +3384,7 @@ class NavigatorPanel extends HTMLElement {
   _buildNavBar() {
     const bot = this.$("navbot");
     const opts = Object.entries(LAYERS).map(([k, v]) => `<option value="${k}" ${k === this._layer ? "selected" : ""}>${esc(v[0])}</option>`).join("");
-    bot.innerHTML = `<div class="info"></div>
+    bot.innerHTML = `<div class="arr" hidden></div><div class="info"></div>
       <div class="tools">
         <button data-n="out" title="Riduci">−</button>
         <button data-n="in" title="Ingrandisci">+</button>
@@ -3343,6 +3449,7 @@ class NavigatorPanel extends HTMLElement {
       this._sel = 0;
       if (this._info && r.recent) this._info.recent = r.recent;
       this._drawRoute();
+      this._loadWeather();
       if (fit) this._fit();
     } catch (err) {
       if (my !== this._reqId) return;
@@ -3416,6 +3523,378 @@ class NavigatorPanel extends HTMLElement {
     if (nav.drawnAlong == null || Math.abs(a - nav.drawnAlong) >= 15) {
       nav.drawnAlong = a;
       this._drawRoute();
+    }
+  }
+
+  // ----------------------------------------------------------------- sensori di Home Assistant (arrivo, tempo, distanza)
+
+  // stato della guida per i sensori dell'utente collegato: a ogni cambio di minuto, o almeno ogni 30 secondi
+  _liveSend(remTime, remM) {
+    const nav = this._nav;
+    if (!nav || !this._hass) return;
+    const min = Math.round(remTime / 60);
+    const now = Date.now();
+    if (nav.liveMin === min && nav.liveArr === !!nav.arrived && now - (nav.liveAt || 0) < 30000) return;
+    Object.assign(nav, { liveMin: min, liveArr: !!nav.arrived, liveAt: now });
+    const dest = this._points[this._points.length - 1] || {};
+    this._hass.callWS({ type: "navigator/live", active: true, eta: (now + remTime * 1000) / 1000, minutes: min,
+      km: Math.round(remM / 100) / 10, dest: dest.name || "", address: dest.address || "", mode: this._mode,
+      lat: dest.lat, lon: dest.lon, arrived: !!nav.arrived }).catch(() => { /* versione dell'integrazione vecchia */ });
+  }
+
+  // ----------------------------------------------------------------- pulsanti all'arrivo
+  // entità scelte in ⚙ (cancello, garage, serratura, luci…): grandi tasti nella barra della guida a meno di 500 m dall'arrivo
+
+  _arrivalButtons() {
+    const box = this.$("navbot")?.querySelector(".arr");
+    if (!box) return;
+    const nav = this._nav;
+    const s = this._settings;
+    const dest = this._points[this._points.length - 1];
+    const ids = (s.arrEntities || []).filter((id) => this._hass.states[id]);
+    let show = !!(nav?.fix && dest && ids.length) && distM([nav.fix.lat, nav.fix.lon], [dest.lat, dest.lon]) < 500;
+    if (show && s.arrHomeOnly) {
+      const h = this._homePoint();
+      show = distM([dest.lat, dest.lon], [h.lat, h.lon]) < 250;
+    }
+    const key = show ? ids.join(",") : "";
+    if (box.dataset.k === key) return;
+    box.dataset.k = key;
+    box.hidden = !show;
+    box.innerHTML = show ? ids.map((id) => {
+      const st = this._hass.states[id];
+      return `<button data-arr="${esc(id)}">${ARR_ICONS[id.split(".")[0]] || "⏻"} ${esc(st.attributes.friendly_name || id)}</button>`;
+    }).join("") : "";
+    box.querySelectorAll("[data-arr]").forEach((b) => b.addEventListener("click", () => this._pressEntity(b.dataset.arr)));
+  }
+
+  async _pressEntity(id) {
+    const [domain] = id.split(".");
+    const st = this._hass.states[id];
+    let call;
+    if (domain === "cover") call = ["cover", "toggle"];
+    else if (domain === "lock") call = ["lock", st?.state === "locked" ? "unlock" : "lock"];
+    else if (domain === "button" || domain === "input_button") call = [domain, "press"];
+    else if (domain === "script" || domain === "scene") call = [domain, "turn_on"];
+    else call = ["homeassistant", "toggle"];
+    try {
+      await this._hass.callService(call[0], call[1], { entity_id: id });
+      this._msg(`✓ ${st?.attributes?.friendly_name || id}`);
+    } catch (e) {
+      this._msg(`Comando non riuscito: ${e.message || e}`);
+    }
+  }
+
+  // ----------------------------------------------------------------- meteo lungo il percorso (Open-Meteo)
+  // punti ogni ~10 km (al massimo 30), ognuno con l'ora in cui ci passerai; avvisi per neve, pioggia, gelo, vento e nebbia
+
+  async _loadWeather() {
+    const r = this._result;
+    this._wx = null;
+    this._wxLayer?.clearLayers();
+    if (!r) return;
+    const rt = this._geom(r.routes[this._sel]);
+    const total = rt._cum[rt._cum.length - 1];
+    if (total < 1000) return;
+    const step = Math.max(10000, total / 30);
+    const pts = [];
+    for (let a = Math.min(step / 2, total); a <= total; a += step) pts.push(a);
+    if (total - pts[pts.length - 1] > step / 3) pts.push(total);
+    const start = Date.now() / 1000;
+    const items = pts.map((a) => ({ along: a, ll: this._pointAt(rt, a).ll, t: start + rt.summary.time * (a / total) }));
+    this._wx = { rt, items, loading: true };
+    this._renderResults();
+    try {
+      const res = await this._hass.callWS({ type: "navigator/weather", points: items.map((p) => [p.ll[0], p.ll[1], p.t]) });
+      if (!this._wx || this._wx.rt !== rt) return;
+      res.points.forEach((w, k) => Object.assign(items[k], w, { warn: wxWarnings(w) }));
+      this._wx = { rt, items, done: true };
+    } catch (e) {
+      if (!this._wx || this._wx.rt !== rt) return;
+      this._wx = { rt, items, error: e.message || String(e) };
+    }
+    this._drawWeather();
+    this._renderResults();
+  }
+
+  _drawWeather() {
+    const lay = this._wxLayer;
+    if (!lay) return;
+    lay.clearLayers();
+    for (const p of this._wx?.items || []) {
+      if (!p.warn?.length) continue;
+      const w = p.warn[0];
+      L.marker(p.ll, { title: `${w.txt} · ${fmtClock(p.t)}${p.temp != null ? ` · ${Math.round(p.temp)} °C` : ""}`,
+        icon: L.divIcon({ className: "", html: `<div class="wxm">${w.ico}</div>`, iconSize: [24, 24], iconAnchor: [12, 12] }) }).addTo(lay);
+    }
+    this._schedule3d();
+  }
+
+  _wxHtml() {
+    const wx = this._wx;
+    if (!wx || !this._result || wx.rt !== this._result.routes[this._sel]) return "";
+    if (wx.loading) return `<div class="sec"><h3>Meteo lungo il percorso</h3><div class="muted"><span class="loading"></span> Previsioni…</div></div>`;
+    if (wx.error) return `<div class="sec"><h3>Meteo lungo il percorso</h3><div class="muted">${esc(wx.error)}</div></div>`;
+    const temps = wx.items.map((p) => p.temp).filter((t) => t != null);
+    const warns = wx.items.flatMap((p) => (p.warn || []).map((w) => ({ ...w, p })));
+    const range = temps.length ? `${Math.round(Math.min(...temps))}–${Math.round(Math.max(...temps))} °C` : "";
+    const list = warns.slice(0, 8).map(({ ico, txt, p }) => `<li>${ico} <b>${esc(txt)}</b> · km ${Math.round(p.along / 1000)} · ${fmtClock(p.t)}${
+      p.temp != null ? ` · ${Math.round(p.temp)} °C` : ""}</li>`).join("");
+    return `<div class="sec"><h3>Meteo lungo il percorso <span class="muted" style="text-transform:none">Open-Meteo</span></h3>
+      <div>${warns.length ? `⚠ ${warns.length} ${warns.length === 1 ? "avviso" : "avvisi"}` : "☀️ Nessun problema previsto"}${range ? ` · ${range}` : ""}</div>
+      ${list ? `<ul class="wxlist">${list}</ul>` : ""}
+      <div class="muted" style="font-size:11px;margin-top:4px">All'ora in cui passerai, partendo adesso.</div></div>`;
+  }
+
+  // guida: avviso quando un punto con meteo brutto è a meno di 10 km davanti
+  _wxAhead(along) {
+    const nav = this._nav;
+    if (!nav?.fix || !this._wx?.done || this._settings.wxAlert === false) return;
+    nav.wxSaid ??= new Set();
+    for (const p of this._wx.items) {
+      const to = p.along - along;
+      if (!p.warn?.length || to < 0 || to > 10000 || nav.wxSaid.has(p.along)) continue;
+      nav.wxSaid.add(p.along);
+      const w = p.warn[0];
+      this._navPopup("warn", w.ico, `${esc(w.txt)} tra ${fmtDist(to)}${p.temp != null ? `<br><b>${Math.round(p.temp)} °C</b>` : ""}`, 6000);
+      this._speak(`Attenzione: ${w.txt.toLowerCase()} tra ${fmtDist(to).replace("km", "chilometri").replace(" m", " metri")}`);
+      break;
+    }
+  }
+
+  // ----------------------------------------------------------------- diario dei viaggi
+
+  _tripPoint(f) {
+    const nav = this._nav;
+    if (!nav || f.est) return;
+    nav.trip ??= { start: Date.now(), track: [], km: 0, max: 0 };
+    const t = nav.trip;
+    const last = t.track[t.track.length - 1];
+    const here = [+f.lat.toFixed(5), +f.lon.toFixed(5)];
+    if (!last || distM(last, here) >= 25) {
+      if (last) t.km += distM(last, here) / 1000;
+      t.track.push(here);
+    }
+    if (typeof f.speed === "number" && f.speed >= 0 && (f.acc || 0) < 50) t.max = Math.max(t.max, f.speed * 3.6);
+  }
+
+  async _tripSave(nav) {
+    const t = nav.trip;
+    if (!t || t.km < 0.3 || t.track.length < 2) return;
+    const end = Date.now();
+    const duration = Math.round((end - t.start) / 1000);
+    const dest = this._points[this._points.length - 1] || {};
+    try {
+      await this._hass.callWS({ type: "navigator/trip_save", trip: { start: t.start / 1000, end: end / 1000, from: this._tripFrom || "",
+        to: dest.name || "", mode: this._mode, km: Math.round(t.km * 10) / 10, duration,
+        avg: duration > 0 ? Math.round((t.km / (duration / 3600)) * 10) / 10 : 0, max: Math.round(t.max), track: t.track,
+        vehicle: this._tripVehicle || {} } });
+      this._loadTrips();
+    } catch (e) { /* integrazione vecchia: viaggio non salvato */ }
+  }
+
+  async _loadTrips() {
+    try {
+      this._trips = (await this._hass.callWS({ type: "navigator/trips" })).trips || [];
+    } catch (e) {
+      this._trips = null;
+    }
+    this._renderTrips();
+  }
+
+  _showTab(tab) {
+    this.$("sidetabs").querySelectorAll("[data-tab]").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
+    this.$("tabViaggio").hidden = tab !== "viaggio";
+    this.$("tabArchivio").hidden = tab !== "archivio";
+    if (tab === "archivio") this._loadTrips();
+  }
+
+  // Archivio: tutti i viaggi per mese, con i totali; la casella mostra la traccia sulla mappa (più viaggi insieme, colori diversi)
+  _renderTrips() {
+    const box = this.$("tripsec");
+    if (!box) return;
+    const trips = this._trips;
+    if (!trips) { box.innerHTML = `<div class="muted">Archivio non disponibile: aggiorna l'integrazione Navigator e riavvia Home Assistant.</div>`; return; }
+    this._tripSel ??= new Map(); // id -> colore
+    const kmAll = trips.reduce((a, t) => a + (t.km || 0), 0);
+    let html = `<h3>Archivio viaggi ${this._tripSel.size ? `<button class="link" data-t="none">Nascondi tutte</button>` : ""}</h3>`;
+    if (!trips.length) {
+      html += `<div class="muted">Ogni guida finita con Esci viene salvata qui: data, veicolo, km, tempo, velocità e traccia.</div>`;
+    } else {
+      html += `<div class="muted">${trips.length} ${trips.length === 1 ? "viaggio" : "viaggi"} · ${fmtKm(kmAll)} in tutto. Spunta un viaggio per vederlo sulla mappa.</div>`;
+      const monthOf = (t) => new Date(t.start * 1000).toLocaleDateString("it-IT", { month: "long", year: "numeric" });
+      let month = "";
+      trips.forEach((t, k) => {
+        const d = new Date(t.start * 1000);
+        const m = monthOf(t);
+        if (m !== month) {
+          month = m;
+          const inM = trips.filter((x) => monthOf(x) === m);
+          html += `<div class="month">${m.charAt(0).toUpperCase() + m.slice(1)}<span>${inM.length} · ${fmtKm(inM.reduce((a, x) => a + (x.km || 0), 0))} · ${
+            fmtTime(inM.reduce((a, x) => a + (x.duration || 0), 0))}</span></div>`;
+        }
+        const when = `${d.toLocaleDateString("it-IT", { weekday: "short", day: "numeric" })} ${d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}`;
+        const v = t.vehicle || {};
+        const veh = v.type ? ` · ${vehIcon(v.type)} ${esc(v.name || "")}${v.plate ? ` ${esc(v.plate)}` : ""}` : "";
+        const col = this._tripSel.get(t.id);
+        html += `<div class="trip"><input type="checkbox" data-tc="${k}" ${col ? "checked" : ""} style="--tc:${col || ""}" title="Mostra sulla mappa">
+          ${col ? `<span class="sw" style="background:${col}"></span>` : ""}
+          <div class="nm" data-tv="${k}">${esc(t.from || "?")} → ${esc(t.to || "?")}
+          <small>${when}${veh} · ${fmtKm(t.km || 0)} · ${fmtTime(t.duration || 0)} · media ${Math.round(t.avg || 0)} · max ${Math.round(t.max || 0)} km/h</small></div>
+          <button class="icon" data-td="${k}" title="Elimina">🗑</button></div>`;
+      });
+    }
+    box.innerHTML = html;
+    box.querySelector('[data-t="none"]')?.addEventListener("click", () => { this._tripSel.clear(); this._drawTrips(); this._renderTrips(); });
+    box.querySelectorAll("[data-tc]").forEach((el) => el.addEventListener("change", () => this._toggleTrip(trips[+el.dataset.tc], el.checked)));
+    box.querySelectorAll("[data-tv]").forEach((el) => el.addEventListener("click", () => this._toggleTrip(trips[+el.dataset.tv], true, true)));
+    box.querySelectorAll("[data-td]").forEach((el) => el.addEventListener("click", async () => {
+      const t = trips[+el.dataset.td];
+      if (!window.confirm(`Eliminare il viaggio ${t.from || ""} → ${t.to || ""}?`)) return;
+      this._tripSel.delete(t.id);
+      this._trips = (await this._hass.callWS({ type: "navigator/trip_delete", trip_id: t.id })).trips;
+      this._drawTrips();
+      this._renderTrips();
+    }));
+  }
+
+  // mostra o nasconde la traccia di un viaggio; toccando il nome la mappa si centra sul viaggio
+  async _toggleTrip(t, on, fit = false) {
+    const colors = ["#8e24aa", "#e65100", "#00897b", "#3949ab", "#c2185b", "#6d4c41", "#7cb342", "#5e35b1"];
+    this._tripTracks ??= new Map();
+    if (!on) {
+      this._tripSel.delete(t.id);
+    } else {
+      if (!this._tripTracks.has(t.id)) {
+        try {
+          this._tripTracks.set(t.id, (await this._hass.callWS({ type: "navigator/trip", trip_id: t.id })).track || []);
+        } catch (e) { this._msg(e.message || String(e)); return; }
+      }
+      if (!this._tripSel.has(t.id)) {
+        const used = [...this._tripSel.values()];
+        this._tripSel.set(t.id, colors.find((c) => !used.includes(c)) || colors[this._tripSel.size % colors.length]);
+      }
+    }
+    this._drawTrips();
+    const tr = this._tripTracks.get(t.id);
+    if (on && tr?.length > 1 && (fit || this._tripSel.size === 1)) this._map.fitBounds(L.latLngBounds(tr), { padding: [30, 30] });
+    this._renderTrips();
+  }
+
+  _drawTrips() {
+    this._tripLayer.clearLayers();
+    for (const [id, col] of this._tripSel || []) {
+      const tr = this._tripTracks?.get(id);
+      if (tr?.length > 1) L.polyline(tr, { color: col, weight: 5, opacity: 0.9, interactive: false }).addTo(this._tripLayer);
+    }
+    this._schedule3d();
+  }
+
+  // ----------------------------------------------------------------- garage
+
+  async _loadGarage() {
+    try { this._garage = (await this._hass.callWS({ type: "navigator/garage" })).vehicles || []; } catch (e) { this._garage = []; }
+    if (this._result) this._renderResults();
+  }
+
+  // veicoli dell'utente; se il garage è vuoto, un veicolo predefinito del tipo del mezzo scelto
+  _vehicles() {
+    if (this._garage?.length) return this._garage;
+    const type = this._mode === "moto" ? "moto" : this._mode === "bici" ? "bici" : "auto";
+    return [{ id: "default", name: "Veicolo predefinito", plate: "", type }];
+  }
+
+  _vehicleId() {
+    let id = null;
+    try { id = localStorage.getItem(`${STORE_KEY}-veh`); } catch (e) { /* storage non disponibile */ }
+    const list = this._vehicles();
+    return list.some((v) => v.id === id) ? id : list[0].id;
+  }
+
+  async _saveGarage(list) {
+    try {
+      this._garage = (await this._hass.callWS({ type: "navigator/garage_save", vehicles: list })).vehicles;
+    } catch (e) {
+      this._msg(`Garage non salvato: ${e.message || e}`);
+    }
+    if (this._result) this._renderResults();
+  }
+
+  _garageHtml() {
+    const rows = (this._garage || []).map((v, k) => `<div class="row" style="gap:6px;margin-bottom:6px;align-items:center">
+        <select data-g="type" data-k="${k}" style="width:auto">${VEHICLE_TYPES.map(([t, ico, n]) => `<option value="${t}" ${v.type === t ? "selected" : ""}>${ico} ${n}</option>`).join("")}</select>
+        <input class="inp" data-g="name" data-k="${k}" placeholder="Nome (es. Panda)" value="${esc(v.name)}" style="flex:1;min-width:90px">
+        <input class="inp" data-g="plate" data-k="${k}" placeholder="Targa" value="${esc(v.plate)}" style="width:100px;text-transform:uppercase">
+        <button class="icon" data-g="del" data-k="${k}" title="Elimina">✕</button></div>`).join("");
+    return `<div class="grp"><h3>Garage</h3>
+      <div class="note">I tuoi veicoli (salvati per il tuo utente): alla partenza scegli quello usato, e il diario dei viaggi lo ricorda.
+        Senza veicoli si usa un "veicolo predefinito".</div>
+      ${rows}<button data-g="add">＋ Aggiungi veicolo</button></div>`;
+  }
+
+  _bindGarage(wrap) {
+    const list = () => (this._garage || []).map((v) => ({ ...v }));
+    wrap.querySelectorAll("[data-g]").forEach((el) => {
+      const g = el.dataset.g;
+      if (g === "add") {
+        el.addEventListener("click", async () => {
+          await this._saveGarage([...list(), { name: `Veicolo ${(this._garage || []).length + 1}`, plate: "", type: this._mode === "moto" ? "moto" : "auto" }]);
+          this._openSettings();
+        });
+      } else if (g === "del") {
+        el.addEventListener("click", async () => {
+          const l = list();
+          l.splice(+el.dataset.k, 1);
+          await this._saveGarage(l);
+          this._openSettings();
+        });
+      } else {
+        el.addEventListener("change", () => {
+          const l = list();
+          l[+el.dataset.k][g] = el.value;
+          this._saveGarage(l);
+        });
+      }
+    });
+  }
+
+  // ----------------------------------------------------------------- modalità notte
+  // automatica col sole di Home Assistant (sotto l'orizzonte), sempre o mai: mappa scura, satellite attenuato, 3D notturno
+
+  _isNight() {
+    const m = this._settings.nightMode || "auto";
+    if (m === "on") return true;
+    if (m === "off") return false;
+    return this._hass?.states?.["sun.sun"]?.state === "below_horizon";
+  }
+
+  // mappa da mostrare: di notte stradale e topografica diventano la scura (la scelta salvata non cambia)
+  _effLayer(key) {
+    return this._nightOn && (key === "strade" || key === "topo") ? "scura" : key;
+  }
+
+  _basePaint() {
+    return this._nightOn && (this._layer === "sat" || this._layer === "otm") ? { "raster-brightness-max": 0.6, "raster-saturation": -0.2 } : {};
+  }
+
+  _skySpec() {
+    return this._nightOn
+      ? { "sky-color": "#0b1630", "horizon-color": "#1d2b4f", "fog-color": "#0e1526", "sky-horizon-blend": 0.6,
+        "horizon-fog-blend": 0.5, "fog-ground-blend": 0.85, "atmosphere-blend": 0.4 }
+      : { "sky-color": "#8cc3f0", "horizon-color": "#dcebf7", "fog-color": "#f2f2f2", "sky-horizon-blend": 0.6,
+        "horizon-fog-blend": 0.5, "fog-ground-blend": 0.85, "atmosphere-blend": 0.6 };
+  }
+
+  _applyNight() {
+    if (!this._map) return;
+    const n = this._isNight();
+    if (n === this._nightOn) return;
+    this._nightOn = n;
+    this.$("map").classList.toggle("night", n);
+    if (this._layer) this._setLayer(this._layer);
+    if (this._g3 && this._g3ok) {
+      this._bldApplied = null; // edifici e finestre di nuovo, con i colori della notte
+      this._apply3dSettings();
     }
   }
 
@@ -3570,6 +4049,7 @@ class NavigatorPanel extends HTMLElement {
 
   _select(i) {
     this._sel = i;
+    setTimeout(() => this._loadWeather(), 0);
     this._drawRoute();
     this._renderResults();
   }
@@ -3647,6 +4127,7 @@ class NavigatorPanel extends HTMLElement {
     this._updateModeBtn();
     if (r) {
       html += this._navSectionHtml();
+      html += this._wxHtml();
       html += `<div class="sec"><h3>Nelle vicinanze</h3><div class="row">
         <button data-a="near-fuel">⛽ Distributori sul percorso</button>
         <button data-a="near-parking">🅿️ Parcheggi all'arrivo</button>
@@ -3695,6 +4176,9 @@ class NavigatorPanel extends HTMLElement {
     }
     box.innerHTML = html;
     // cambiando la fonte in "Segui la posizione di", il punto blu passa subito alla nuova fonte
+    box.querySelector("#navveh")?.addEventListener("change", (e) => {
+      try { localStorage.setItem(`${STORE_KEY}-veh`, e.target.value); } catch (err) { /* storage non disponibile */ }
+    });
     box.querySelector("#navsrc")?.addEventListener("change", (e) => {
       try { localStorage.setItem(`${STORE_KEY}-navsrc`, e.target.value); } catch (err) { /* storage non disponibile */ }
       if (this._me) this._locate(false, e.target.value);
