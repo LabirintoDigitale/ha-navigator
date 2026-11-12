@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.5.13";
+const PANEL_VERSION = "1.5.14";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -2099,10 +2099,19 @@ class NavigatorPanel extends HTMLElement {
         filter: ["==", ["get", "brunnel"], "tunnel"], paint: { "line-opacity": 0 } });
     }
     const style = this._settings.bldStyle || "colorati";
-    if (g.getLayer("bld") && (!want || this._bldApplied !== style)) g.removeLayer("bld");
+    if (g.getLayer("bld") && (!want || this._bldApplied !== style)) {
+      g.removeLayer("bld");
+      if (g.getLayer("bld-roof")) g.removeLayer("bld-roof");
+    }
     if (want && !g.getLayer("bld")) {
       g.addLayer({ id: "bld", type: "fill-extrusion", source: "ofm", "source-layer": "building", minzoom: 14,
         paint: this._bldPaint(style) }, "lines");
+      // il disegno delle finestre finirebbe anche sui tetti (MapLibre usa lo stesso per pareti e tetto):
+      // una lastra sottile di colore pieno sopra ogni edificio copre il tetto
+      if (style === "finestre") {
+        g.addLayer({ id: "bld-roof", type: "fill-extrusion", source: "ofm", "source-layer": "building", minzoom: 14,
+          paint: this._roofPaint() }, "lines");
+      }
       this._bldApplied = style;
     }
     // luce: più radente e un po' più forte con gli stili colorati, così le facciate hanno chiari e scuri come nei navigatori
@@ -2118,27 +2127,34 @@ class NavigatorPanel extends HTMLElement {
       "fill-extrusion-vertical-gradient": true };
     if (style === "semplici") return { ...base, "fill-extrusion-color": "#d9d4cb", "fill-extrusion-opacity": 0.85 };
     if (style === "finestre") {
-      if (!g.hasImage("bld-win")) g.addImage("bld-win", this._windowPattern(), { pixelRatio: 2 });
+      if (g.hasImage("bld-win")) g.removeImage("bld-win");
+      g.addImage("bld-win", this._windowPattern(), { pixelRatio: 1 });
       return { ...base, "fill-extrusion-pattern": "bld-win", "fill-extrusion-opacity": 0.95 };
     }
     return { ...base, "fill-extrusion-opacity": 0.92,
       "fill-extrusion-color": ["interpolate", ["linear"], h, 0, "#eef1f4", 10, "#dfe7ef", 25, "#c7d7ea", 50, "#a9c3e3", 100, "#86a9d6", 200, "#6e93c8"] };
   }
 
-  // facciata chiara con file di finestre azzurre (si ripete sui lati degli edifici)
+  // tetto pieno per lo stile con finestre: lastra di 30 cm sopra l'edificio
+  _roofPaint() {
+    const h = ["coalesce", ["get", "render_height"], 8];
+    return { "fill-extrusion-color": "#d3d9e0", "fill-extrusion-opacity": 0.95, "fill-extrusion-vertical-gradient": false,
+      "fill-extrusion-base": h, "fill-extrusion-height": ["+", h, 0.3] };
+  }
+
+  // facciata chiara con finestre azzurre (si ripete sui lati degli edifici): poche, distanziate, non un retino fitto
   _windowPattern() {
     const c = document.createElement("canvas");
-    c.width = c.height = 32;
+    c.width = c.height = 64;
     const x = c.getContext("2d");
     x.fillStyle = "#e8edf3";
-    x.fillRect(0, 0, 32, 32);
-    for (const [wx, wy] of [[4, 5], [18, 5], [4, 19], [18, 19]]) {
-      x.fillStyle = "#7d9cc4";
-      x.fillRect(wx, wy, 10, 8);
-      x.fillStyle = "#b9cde6"; // riflesso
-      x.fillRect(wx, wy, 10, 2);
-    }
-    return x.getImageData(0, 0, 32, 32);
+    x.fillRect(0, 0, 64, 64);
+    // una finestra per riquadro, con tanto muro intorno: poche e distanziate
+    x.fillStyle = "#7d9cc4";
+    x.fillRect(23, 22, 18, 16);
+    x.fillStyle = "#b9cde6"; // riflesso
+    x.fillRect(23, 22, 18, 4);
+    return x.getImageData(0, 0, 64, 64);
   }
 
   _set3dBase() {
