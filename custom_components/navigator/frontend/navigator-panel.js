@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.8.5";
+const PANEL_VERSION = "1.8.6";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -4026,6 +4026,7 @@ class NavigatorPanel extends HTMLElement {
     if (todo.length) {
       // una sola richiesta per tutti i riquadri mancanti (il backend li divide e li tiene in memoria)
       for (const key of todo) this._poiTiles.set(key, { pending: true });
+      this._poiReqStart = Date.now();
       try {
         // al massimo 45 s: oltre, errore e Riprova (il backend si arrende prima, con la riserva di Photon)
         const r = await Promise.race([
@@ -4039,7 +4040,7 @@ class NavigatorPanel extends HTMLElement {
       }
       this._renderPois();
     }
-    if (view === this._poiView) this._poiStatusAfter();
+    this._poiStatusAfter(); // sempre: prima, dopo un movimento della mappa, l'etichetta restava su "Carico…"
   }
 
   // dopo il caricamento: errore (con Riprova), "nessun punto" per qualche secondo, oppure niente
@@ -4065,6 +4066,13 @@ class NavigatorPanel extends HTMLElement {
     const el = this.$("poistat");
     if (!el) return;
     clearTimeout(this._poiStatT);
+    clearInterval(this._poiTick);
+    if (state === "loading") { // i secondi che passano: si vede che sta lavorando
+      this._poiTick = setInterval(() => {
+        const sp = el.querySelector("span");
+        if (sp && this._poiReqStart) sp.textContent = `📍 Carico i punti di interesse… ${Math.round((Date.now() - this._poiReqStart) / 1000)} s`;
+      }, 1000);
+    }
     const text = { far: "📍 Avvicina la mappa per vedere i punti di interesse", loading: "📍 Carico i punti di interesse…",
       empty: "📍 Nessun punto di interesse in questa zona", error: `⚠ Punti di interesse non caricati: ${esc(detail)}`,
       partial: "⚠ Overpass non risponde: punti parziali (solo quelli trovati con la ricerca)" }[state];
