@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.5.5";
+const PANEL_VERSION = "1.5.6";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1968,8 +1968,11 @@ class NavigatorPanel extends HTMLElement {
       if (!this._3d || this._g3 !== g) return;
       // in guida l'inclinazione è stata ridotta (da MapLibre, con le quote ancora in arrivo): si riallinea, al massimo ogni 3 s
       const nav = this._nav;
-      if (nav?.fix && nav.follow && this._isGuida() && Math.abs(g.getPitch() - this._pitch3d()) > 2
-        && Date.now() - (this._g3realign || 0) > 3000) {
+      // (si confronta con l'inclinazione possibile lì, non con quella scelta: nelle valli strette è più bassa apposta)
+      const want = nav?.fix && nav.follow && this._isGuida()
+        ? this._clearCamera({ center: [nav.fix.lon, nav.fix.lat], zoom: g.getZoom(), bearing: g.getBearing(), pitch: this._pitch3d(), padding: g.getPadding() }).pitch
+        : null;
+      if (want != null && Math.abs(g.getPitch() - want) > 2 && Date.now() - (this._g3realign || 0) > 3000) {
         this._g3realign = Date.now();
         this._g3key = null;
         this._sync3d();
@@ -2109,7 +2112,10 @@ class NavigatorPanel extends HTMLElement {
     // la prova si fa su una copia della telecamera: spostare la vista vera interromperebbe l'animazione in corso
     // (zoom e inclinazione restavano a metà strada, e Ricentra sembrava non avvicinare)
     if (!g || !ml || !g.getTerrain() || typeof g.transform?.clone !== "function") return opts;
+    // Prima si abbassa l'inclinazione (5° alla volta, fino a 20°): la telecamera sale e si avvicina, la distanza scelta resta.
+    // Allontanarsi (zoom indietro) in una valle stretta la portava sopra le montagne dietro, sempre più lontano.
     let z = opts.zoom;
+    let pitch = opts.pitch ?? g.getPitch();
     try {
       const center = ml.LngLat.convert(opts.center);
       let elev = null;
@@ -2118,18 +2124,20 @@ class NavigatorPanel extends HTMLElement {
         const tr = g.transform.clone();
         if (opts.padding) tr.setPadding(opts.padding);
         if (opts.bearing != null) tr.setBearing(opts.bearing);
-        if (opts.pitch != null) tr.setPitch(opts.pitch);
+        tr.setPitch(pitch);
         tr.setZoom(z);
         tr.setCenter(center);
         if (elev != null && Number.isFinite(elev)) tr.setElevation(elev);
         const cl = this._camClearance(tr, min);
         if (cl == null || cl >= 0) break;
-        z -= 0.25;
+        if (pitch > 20) pitch = Math.max(20, pitch - 5);
+        else z -= 0.25; // pareti ripidissime: anche a 20° non basta
       }
     } catch (e) {
       z = opts.zoom; // controllo non riuscito: si va dove richiesto
+      pitch = opts.pitch ?? g.getPitch();
     }
-    return { ...opts, zoom: z };
+    return { ...opts, zoom: z, pitch };
   }
 
   // margine (metri) fra la telecamera e il terreno, già tolto il minimo richiesto: negativo = troppo bassa.

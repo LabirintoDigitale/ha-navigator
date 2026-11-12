@@ -148,8 +148,9 @@ I tasti **▲ / ▼** in alto a destra cambiano la prospettiva a passi di 15°: 
 una telecamera sul cruscotto; l'inclinazione scelta resta anche per le volte successive.
 In guida anche la **distanza** dalla macchina si regola e resta memorizzata: con le dita, con la rotella o con **+ / −**
 (anche il gesto con due dita per inclinare viene ricordato); lo zoom con le dita non smette di seguirti, solo il trascinamento
-sì. **◎** torna sulla posizione mantenendo la distanza scelta; premuto **due volte di seguito** rimette quella predefinita. Se una collina finirebbe davanti
-alla telecamera, Navigator la allontana quanto basta (la vista resta sopra il terreno); **◎** rimette lo zoom automatico. Premuto di nuovo,
+sì. **◎** torna sulla posizione mantenendo la distanza scelta; premuto **due volte di seguito** rimette quella predefinita. Se una collina o la montagna alle
+spalle finirebbe davanti alla telecamera, Navigator abbassa l'inclinazione quanto basta (la vista resta sopra il terreno e
+vicina alla macchina; quando la valle si apre torna quella scelta); **◎** rimette lo zoom automatico. Premuto di nuovo,
 **3D** torna alla mappa piatta; la scelta resta per le volte successive.
 
 - Usa la grafica del telefono (WebGL) e scarica anche le quote del terreno: consuma più batteria e dati della mappa piatta.
