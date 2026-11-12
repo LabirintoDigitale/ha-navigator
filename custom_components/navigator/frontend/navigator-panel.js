@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.5.11";
+const PANEL_VERSION = "1.5.12";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -178,7 +178,8 @@ const VEHICLE_SVG = { auto: CAR_SVG, moto: MOTO_SVG, bici: BICI_SVG, piedi: PIED
 // impostazioni salvate su questo dispositivo
 const SETTINGS_KEY = "navigator-panel-settings";
 const DEFAULT_SETTINGS = { voice: false, lang: "it", voiceSel: "f", out: "auto", autoZoom: true, beep: false,
-  fuelBrands: [], fuelKind: "", camAlert: true, view3d: false, b3d: true, terrainEx: "1.5", pitch3d: 60, tunnelFx: true, zoom3dOff: 0 };
+  fuelBrands: [], fuelKind: "", camAlert: true, view3d: false, b3d: true, terrainEx: "1.5", pitch3d: 60, tunnelFx: true, zoom3dOff: 0,
+  voiceStyle: "normale", voiceRate: 1, voicePitch: 1 };
 // marche dei distributori (come nell'anagrafica del MIMIT)
 const FUEL_BRANDS = ["Agip Eni", "Api-Ip", "Q8", "Esso", "Tamoil", "Shell", "Retitalia", "Beyfin", "Costantin", "Europam", "Pompe bianche"];
 const BRAND_COLORS = { "agip eni": "#f7c600", "eni": "#f7c600", "api-ip": "#0057a8", "ip": "#0057a8", "q8": "#0a3a7a", "esso": "#d71920",
@@ -197,6 +198,9 @@ const NOSLEEP_MP4 = "data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjM
 // icone dello schermo intero (i simboli ⛶ e 🗗 mancano nei caratteri di molti telefoni)
 const FS_ON = `<svg class="fsico" viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>`;
 const FS_OFF = `<svg class="fsico" viewBox="0 0 24 24"><path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5"/></svg>`;
+// stili della voce del browser: velocità e tono (1 = come la voce originale)
+const VOICE_STYLES = { normale: ["Normale", 1, 1], calma: ["Calma", 0.9, 0.95], morbida: ["Morbida (calda, lenta e più bassa)", 0.82, 0.8],
+  energica: ["Energica", 1.15, 1.1], pers: ["Personalizzata", null, null] };
 const NEAR_CATS = { fuel: ["⛽", "Distributori"], parking: ["🅿️", "Parcheggi"], cameras: ["📷", "Autovelox"] };
 const LANG_NAMES = { it: "Italiano", en: "English", de: "Deutsch", fr: "Français", es: "Español" };
 const LANG_BCP = { it: "it-IT", en: "en-US", de: "de-DE", fr: "fr-FR", es: "es-ES" };
@@ -2855,6 +2859,15 @@ class NavigatorPanel extends HTMLElement {
     return svc ? { kind: "notify", service: svc } : { kind: "none" };
   }
 
+  // velocità e tono della voce del browser, secondo lo stile scelto
+  _voiceTone() {
+    const s = this._settings;
+    const st = VOICE_STYLES[s.voiceStyle] || VOICE_STYLES.normale;
+    const rate = st[1] ?? Number(s.voiceRate);
+    const pitch = st[2] ?? Number(s.voicePitch);
+    return [Math.max(0.5, Math.min(2, rate || 1)), Math.max(0, Math.min(2, Number.isFinite(pitch) ? pitch : 1))];
+  }
+
   _voices() {
     try { return (window.speechSynthesis?.getVoices() || []).filter((v) => (v.lang || "").toLowerCase().startsWith(this._settings.lang)); } catch (e) { return []; }
   }
@@ -2882,6 +2895,9 @@ class NavigatorPanel extends HTMLElement {
         const v = this._pickVoice();
         if (v) u.voice = v;
         u.lang = LANG_BCP[this._settings.lang];
+        const [rate, pitch] = this._voiceTone();
+        u.rate = rate;
+        u.pitch = pitch;
         if (urgent) window.speechSynthesis.cancel();
         window.speechSynthesis.speak(u);
       } catch (e) { /* sintesi vocale non disponibile */ }
@@ -2944,8 +2960,17 @@ class NavigatorPanel extends HTMLElement {
         ${sw("voice", "Indicazioni vocali", "Avvisi in anticipo e al momento della manovra, ricalcolo e arrivo")}
         <label class="line"><span>Lingua delle indicazioni e della voce</span><select data-s="lang">${langs}</select></label>
         <label class="line"><span>Voce</span><select data-s="voiceSel" ${out.kind === "browser" ? "" : "disabled"}>${vopts}</select></label>
+        <label class="line"><span>Stile della voce</span><select data-s="voiceStyle" ${out.kind === "browser" ? "" : "disabled"}>${
+          Object.entries(VOICE_STYLES).map(([k, v]) => `<option value="${k}" ${s.voiceStyle === k ? "selected" : ""}>${esc(v[0])}</option>`).join("")}</select></label>
+        ${s.voiceStyle === "pers" && out.kind === "browser" ? `
+        <label class="line"><span>Velocità <b data-rv="voiceRate">${Number(s.voiceRate).toFixed(2)}×</b></span>
+          <input type="range" data-r="voiceRate" min="0.6" max="1.5" step="0.05" value="${s.voiceRate}"></label>
+        <label class="line"><span>Tono <b data-rv="voicePitch">${Number(s.voicePitch).toFixed(2)}</b></span>
+          <input type="range" data-r="voicePitch" min="0.5" max="1.5" step="0.05" value="${s.voicePitch}"></label>` : ""}
         <label class="line"><span>Riproduci su</span><select data-s="out">${outs}</select></label>
         ${outNote ? `<div class="note">${outNote}</div>` : ""}
+        ${out.kind === "notify" ? `<div class="note">Stile, velocità e tono valgono per la voce del browser: nell'app Android si regolano in Impostazioni di Android →
+          Sintesi vocale (velocità e tono), e con il motore Google si possono scaricare altre voci italiane.</div>` : ""}
         <div class="row" style="margin-top:6px"><button data-s="testvoice">▶ Prova la voce</button></div>
       </div>
       <div class="grp"><h3>Mappa</h3>
@@ -2988,13 +3013,22 @@ class NavigatorPanel extends HTMLElement {
     }));
     wrap.querySelectorAll("select[data-s]").forEach((el) => el.addEventListener("change", () => {
       const k = el.dataset.s;
+      if (k === "voiceStyle" && el.value === "pers") [s.voiceRate, s.voicePitch] = this._voiceTone(); // si parte dallo stile di prima
       s[k] = el.value;
       if (k === "lang") s.voiceSel = s.voiceSel === "m" ? "m" : "f"; // le voci cambiano con la lingua
       this._saveSettings();
+      if (k === "voiceStyle") { this._unlockAudio(); this._speak(PHRASES[s.lang].test, true, true); }
       if (k === "terrainEx") this._apply3dSettings();
       if (k === "lang" && this._result && !this._nav) this._compute(false); // indicazioni nella nuova lingua
       this._openSettings();
     }));
+    wrap.querySelectorAll("input[data-r]").forEach((el) => el.addEventListener("input", () => {
+      s[el.dataset.r] = Number(el.value);
+      const lab = wrap.querySelector(`[data-rv="${el.dataset.r}"]`);
+      if (lab) lab.textContent = el.dataset.r === "voiceRate" ? `${Number(el.value).toFixed(2)}×` : Number(el.value).toFixed(2);
+      this._saveSettings();
+    }));
+    wrap.querySelectorAll("input[data-r]").forEach((el) => el.addEventListener("change", () => this._speak(PHRASES[s.lang].test, true, true)));
     wrap.querySelector('[data-s="testvoice"]').addEventListener("click", () => {
       this._unlockAudio();
       if (this._voiceOut().kind === "none") { this._msg("Nessuna voce disponibile su questo dispositivo"); return; }

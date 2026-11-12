@@ -180,7 +180,10 @@ Valgono per il dispositivo che stai usando:
 
 - **Indicazioni vocali**: avviso in anticipo ("Tra 300 metri, svolta a destra", da più lontano quando vai veloce), avviso al momento della manovra, ricalcolo e arrivo.
 - **Lingua delle indicazioni e della voce**: italiano, inglese, tedesco, francese o spagnolo (anche il testo delle indicazioni cambia lingua).
-- **Voce**: donna, uomo o una voce precisa fra quelle del browser.
+- **Voce**: donna, uomo o una voce precisa fra quelle del browser (con Edge su Windows ci sono le voci "Natural", molto realistiche).
+- **Stile della voce**: Normale, Calma, **Morbida** (calda, più lenta e più bassa), Energica o **Personalizzata** con i cursori di
+  **velocità** e **tono**; scegliendo uno stile la voce si fa sentire subito. Vale per la voce del browser: nell'app Android velocità
+  e tono si regolano nelle impostazioni di sintesi vocale di Android.
 - **Riproduci su**: il browser (computer, iPhone, Chrome) oppure il telefono con l'**app Companion**. Nell'app Android la pagina non sa parlare: Navigator manda il testo al telefono (comando `TTS` del servizio `notify.mobile_app_…`) e la voce è quella della sintesi vocale di Android.
 - **Zoom automatico in base alla velocità**, con due interruttori separati:
   - **mappa 2D**: in guida più vicino in città e più largo in autostrada; dopo **+**, **−** o il pinch resta il tuo zoom per 20 secondi;
