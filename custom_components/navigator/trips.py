@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from typing import Any
@@ -36,8 +37,14 @@ class Trips:
     def set_vehicles(self, user_id: str, vehicles: list[dict]) -> list[dict]:
         clean = []
         for v in vehicles[:30]:
-            clean.append({"id": str(v.get("id") or uuid.uuid4().hex[:8])[:16], "name": str(v.get("name") or "")[:40],
-                          "plate": str(v.get("plate") or "").upper()[:12], "type": str(v.get("type") or "auto")[:12]})
+            item = {"id": str(v.get("id") or uuid.uuid4().hex[:8])[:16], "name": str(v.get("name") or "")[:40],
+                    "plate": str(v.get("plate") or "").upper()[:12], "type": str(v.get("type") or "auto")[:12]}
+            # disegno sulla mappa e colore (#rrggbb), facoltativi
+            if v.get("icon"):
+                item["icon"] = str(v["icon"])[:16]
+            if re.fullmatch(r"#[0-9a-fA-F]{6}", str(v.get("color") or "")):
+                item["color"] = str(v["color"]).lower()
+            clean.append(item)
         self.garage[user_id] = clean
         self._save()
         return clean

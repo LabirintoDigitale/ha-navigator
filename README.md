@@ -189,8 +189,10 @@ vicina alla macchina; quando la valle si apre torna quella scelta); **◎** rime
 - **Garage** (⚙): i tuoi veicoli con nome, targa e tipo (auto, moto, scooter, furgone, camper, bici, altro). Nel menu **Veicolo**
   (sopra l'itinerario) c'è in cima **Base**, con i bottoni Auto / Moto / Bici / A piedi per scegliere il mezzo; scegliendo un
   veicolo del garage i bottoni spariscono: il mezzo del percorso viene dal tipo (moto e scooter → moto, bici → bici, gli altri →
-  auto) e sulla mappa compare il suo disegno visto dall'alto (camper, furgone, fuoristrada per "altro"…). Il veicolo usato resta
-  nell'archivio.
+  auto) e sulla mappa compare il suo disegno visto dall'alto. Per ogni veicolo scegli il **disegno** (SUV, berlina, utilitaria,
+  station wagon, sportiva, fuoristrada, pick-up, furgone, camper; moto e scooter; bici) e accanto il **colore**: cambia tutta la
+  carrozzeria, tranne nel SUV blu e grigio originale dove cambia solo il blu. L'anteprima colorata si vede nel garage e accanto al
+  menu Veicolo. Il veicolo usato resta nell'archivio.
 
 ### Meteo lungo il percorso e modalità notte
 

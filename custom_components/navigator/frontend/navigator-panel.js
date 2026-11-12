@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.1";
+const PANEL_VERSION = "1.9.2";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -134,22 +134,39 @@ function laneSvg(dirs) {
   return `<svg viewBox="0 0 24 24">${(ds.length ? ds : ["none"]).map((d) => `<path d="${LANE_PATHS[d]}"/>`).join("")}</svg>`;
 }
 
-// il veicolo in navigazione: fuoristrada blu scuro visto dall'alto, tetto in due pannelli e hardtop posteriore grigio;
-// il muso è in alto (direzione di marcia)
-const CAR_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 80" width="26" height="47">
-  <defs>
-    <linearGradient id="nvb" x1="0" x2="1"><stop offset="0" stop-color="#0a2150"/><stop offset=".5" stop-color="#173a7a"/><stop offset="1" stop-color="#0a2150"/></linearGradient>
+// colore più scuro (f < 0) o più chiaro (f > 0) di un colore #rrggbb
+function shade(hex, f) {
+  const n = parseInt(String(hex).slice(1), 16) || 0;
+  const t = f < 0 ? 0 : 255, p = Math.abs(f);
+  const ch = (v) => Math.round(v + (t - v) * p);
+  return `#${((1 << 24) | (ch(n >> 16) << 16) | (ch((n >> 8) & 255) << 8) | ch(n & 255)).toString(16).slice(1)}`;
+}
+const okColor = (c) => /^#[0-9a-f]{6}$/i.test(c || "");
+// pezzi comuni dei veicoli visti dall'alto (il muso è in alto, la direzione di marcia)
+const svgOpen = (vw, vh, w) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${vw} ${vh}" width="${w}" height="${Math.round(w * vh / vw)}">`;
+const wheels = (ys, h = 13, x1 = 1, x2 = 38, w = 5) => ys.map((y) => `<rect x="${x1}" y="${y}" width="${w}" height="${h}" rx="2" fill="#151515"/><rect x="${x2}" y="${y}" width="${w}" height="${h}" rx="2" fill="#151515"/>`).join("");
+const lights = (yb, x1 = 7, x2 = 30) => `<rect x="${x1}" y="3.2" width="7" height="2.6" rx="1.2" fill="#ffe28a"/><rect x="${x2}" y="3.2" width="7" height="2.6" rx="1.2" fill="#ffe28a"/>
+  <rect x="${x1}" y="${yb}" width="6" height="2.4" rx="1" fill="#e53935"/><rect x="${x2 + 1}" y="${yb}" width="6" height="2.4" rx="1" fill="#e53935"/>`;
+const bodyGrad = (id, c) => `<linearGradient id="${id}" x1="0" x2="1"><stop offset="0" stop-color="${shade(c, -0.4)}"/><stop offset=".5" stop-color="${c}"/><stop offset="1" stop-color="${shade(c, -0.4)}"/></linearGradient>`;
+const GLASS = `<linearGradient id="nvgl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6d8fbf"/><stop offset="1" stop-color="#1b2c45"/></linearGradient>`;
+const mirrors = (y, c) => `<ellipse cx="3" cy="${y}" rx="3" ry="1.8" fill="${shade(c, -0.3)}" stroke="#fff" stroke-width=".8"/><ellipse cx="41" cy="${y}" rx="3" ry="1.8" fill="${shade(c, -0.3)}" stroke="#fff" stroke-width=".8"/>`;
+// contorno: bianco fuori e grigio dentro, si vede sia sui colori chiari sia su quelli scuri
+const outline = (x, y, w, h, rx) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${rx}" fill="none" stroke="#5f6368" stroke-width=".7"/>`;
+
+// SUV (il disegno originale): cambia solo il blu della carrozzeria, il tetto grigio resta
+function suvSvg(c = "#173a7a") {
+  const id = c.slice(1);
+  return `${svgOpen(44, 80, 26)}
+  <defs>${bodyGrad(`nvb${id}`, c)}
     <linearGradient id="nvg" x1="0" x2="1"><stop offset="0" stop-color="#7d8792"/><stop offset=".5" stop-color="#aeb6bf"/><stop offset="1" stop-color="#7d8792"/></linearGradient>
     <linearGradient id="nvv" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5c7fb8"/><stop offset="1" stop-color="#1c355f"/></linearGradient>
   </defs>
-  <rect x="1" y="12" width="5" height="13" rx="2" fill="#151515"/><rect x="38" y="12" width="5" height="13" rx="2" fill="#151515"/>
-  <rect x="1" y="54" width="5" height="13" rx="2" fill="#151515"/><rect x="38" y="54" width="5" height="13" rx="2" fill="#151515"/>
-  <rect x="4" y="2" width="36" height="76" rx="8" fill="url(#nvb)" stroke="#fff" stroke-width="1.6"/>
-  <rect x="7" y="3.2" width="7" height="2.6" rx="1.2" fill="#ffe28a"/><rect x="30" y="3.2" width="7" height="2.6" rx="1.2" fill="#ffe28a"/>
-  <rect x="7" y="74.4" width="6" height="2.4" rx="1" fill="#e53935"/><rect x="31" y="74.4" width="6" height="2.4" rx="1" fill="#e53935"/>
-  <path d="M15 6 L15 18 M29 6 L29 18" stroke="#2b5299" stroke-width="1.2" stroke-linecap="round"/>
-  <ellipse cx="3" cy="27" rx="3" ry="1.8" fill="#0a2150" stroke="#fff" stroke-width=".8"/>
-  <ellipse cx="41" cy="27" rx="3" ry="1.8" fill="#0a2150" stroke="#fff" stroke-width=".8"/>
+  ${wheels([12, 54])}
+  <rect x="4" y="2" width="36" height="76" rx="8" fill="url(#nvb${id})" stroke="#fff" stroke-width="1.6"/>
+  ${outline(4, 2, 36, 76, 8)}
+  ${lights(74.4)}
+  <path d="M15 6 L15 18 M29 6 L29 18" stroke="${shade(c, 0.25)}" stroke-width="1.2" stroke-linecap="round"/>
+  ${mirrors(27, c)}
   <path d="M8 29 Q22 20 36 29 L34 33 Q22 27 10 33 Z" fill="url(#nvv)"/>
   <rect x="10" y="33.5" width="11.3" height="14" rx="2" fill="#123372" stroke="#06142f" stroke-width=".8"/>
   <rect x="22.7" y="33.5" width="11.3" height="14" rx="2" fill="#123372" stroke="#06142f" stroke-width=".8"/>
@@ -157,37 +174,228 @@ const CAR_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 80" wid
   <path d="M15 51 L15 68 M19.7 51 L19.7 68 M24.3 51 L24.3 68 M29 51 L29 68" stroke="#6c757e" stroke-width="1" stroke-linecap="round"/>
   <rect x="11" y="70.8" width="22" height="2.6" rx="1" fill="#1c355f"/>
 </svg>`;
+}
 
-// moto vista dall'alto: ruote, manubrio con specchietti, serbatoio blu, sella grigia e motociclista col casco
-const MOTO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 80" width="18" height="47">
+// berlina: cofano lungo, tetto, lunotto e bagagliaio
+function berlinaSvg(c = "#b71c1c") {
+  const id = c.slice(1);
+  return `${svgOpen(44, 86, 26)}<defs>${bodyGrad(`nvb${id}`, c)}${GLASS}</defs>
+  ${wheels([13, 61])}
+  <rect x="4" y="2" width="36" height="82" rx="11" fill="url(#nvb${id})" stroke="#fff" stroke-width="1.6"/>${outline(4, 2, 36, 82, 11)}
+  ${lights(80.4)}
+  <path d="M14 8 Q22 6 30 8 M12 14 L12 26 M32 14 L32 26" stroke="${shade(c, -0.3)}" stroke-width="1" fill="none" stroke-linecap="round"/>
+  ${mirrors(31, c)}
+  <path d="M8 34 Q22 23 36 34 L34 38.5 Q22 32 10 38.5 Z" fill="url(#nvgl)"/>
+  <rect x="10" y="39" width="24" height="23" rx="3" fill="${shade(c, 0.1)}" stroke="${shade(c, -0.45)}" stroke-width=".8"/>
+  <path d="M10 62.5 Q22 66 34 62.5 L35 68 Q22 72 9 68 Z" fill="url(#nvgl)"/>
+  <path d="M12 75 Q22 77 32 75" stroke="${shade(c, -0.3)}" stroke-width="1" fill="none"/>
+</svg>`;
+}
+
+// utilitaria: corta e tonda
+function utilitariaSvg(c = "#f9a825") {
+  const id = c.slice(1);
+  return `${svgOpen(44, 66, 24)}<defs>${bodyGrad(`nvb${id}`, c)}${GLASS}</defs>
+  ${wheels([8, 44], 12)}
+  <rect x="4" y="2" width="36" height="62" rx="14" fill="url(#nvb${id})" stroke="#fff" stroke-width="1.6"/>${outline(4, 2, 36, 62, 14)}
+  ${lights(60.4)}
+  ${mirrors(20, c)}
+  <path d="M8 22 Q22 12 36 22 L34 26.5 Q22 20 10 26.5 Z" fill="url(#nvgl)"/>
+  <rect x="10" y="27" width="24" height="21" rx="4" fill="${shade(c, 0.12)}" stroke="${shade(c, -0.45)}" stroke-width=".8"/>
+  <path d="M10 48.5 Q22 52 34 48.5 L34.5 54 Q22 57.5 9.5 54 Z" fill="url(#nvgl)"/>
+</svg>`;
+}
+
+// station wagon: tetto lungo fino in fondo, con le barre portapacchi
+function stationSvg(c = "#546e7a") {
+  const id = c.slice(1);
+  return `${svgOpen(44, 86, 26)}<defs>${bodyGrad(`nvb${id}`, c)}${GLASS}</defs>
+  ${wheels([13, 61])}
+  <rect x="4" y="2" width="36" height="82" rx="10" fill="url(#nvb${id})" stroke="#fff" stroke-width="1.6"/>${outline(4, 2, 36, 82, 10)}
+  ${lights(80.4)}
+  <path d="M12 12 L12 24 M32 12 L32 24" stroke="${shade(c, -0.3)}" stroke-width="1" stroke-linecap="round"/>
+  ${mirrors(29, c)}
+  <path d="M8 32 Q22 21 36 32 L34 36.5 Q22 30 10 36.5 Z" fill="url(#nvgl)"/>
+  <rect x="10" y="37" width="24" height="37" rx="3" fill="${shade(c, 0.1)}" stroke="${shade(c, -0.45)}" stroke-width=".8"/>
+  <path d="M12.5 39 L12.5 72 M31.5 39 L31.5 72" stroke="#cfd8dc" stroke-width="1.6" stroke-linecap="round"/>
+  <path d="M10 74.5 Q22 77 34 74.5 L34.5 79 Q22 81 9.5 79 Z" fill="url(#nvgl)"/>
+</svg>`;
+}
+
+// sportiva: muso affusolato, abitacolo basso, due strisce bianche e alettone
+function sportivaSvg(c = "#d32f2f") {
+  const id = c.slice(1);
+  return `${svgOpen(44, 84, 26)}<defs>${bodyGrad(`nvb${id}`, c)}${GLASS}</defs>
+  ${wheels([12, 58], 15, 0.5, 37.5, 6)}
+  <path d="M11 3 Q22 0 33 3 L40 22 L40 76 Q40 82 34 82 L10 82 Q4 82 4 76 L4 22 Z" fill="url(#nvb${id})" stroke="#fff" stroke-width="1.6"/>
+  <path d="M11 3 Q22 0 33 3 L40 22 L40 76 Q40 82 34 82 L10 82 Q4 82 4 76 L4 22 Z" fill="none" stroke="#5f6368" stroke-width=".7"/>
+  <rect x="11" y="4" width="6" height="2.2" rx="1" fill="#ffe28a"/><rect x="27" y="4" width="6" height="2.2" rx="1" fill="#ffe28a"/>
+  <rect x="17.8" y="1.5" width="2.6" height="79" fill="#fff" opacity=".85"/><rect x="23.6" y="1.5" width="2.6" height="79" fill="#fff" opacity=".85"/>
+  ${mirrors(34, c)}
+  <path d="M9 37 Q22 27 35 37 L33.5 42 Q22 36 10.5 42 Z" fill="url(#nvgl)"/>
+  <rect x="11" y="42.5" width="22" height="13" rx="3" fill="${shade(c, -0.15)}" stroke="${shade(c, -0.5)}" stroke-width=".8"/>
+  <path d="M12 59 H32 M12 63 H32 M12 67 H32" stroke="${shade(c, -0.5)}" stroke-width="1.2" stroke-linecap="round"/>
+  <rect x="5" y="77.5" width="34" height="3.4" rx="1.2" fill="#202020"/>
+  <rect x="8" y="80.8" width="6" height="1.6" rx=".8" fill="#e53935"/><rect x="30" y="80.8" width="6" height="1.6" rx=".8" fill="#e53935"/>
+</svg>`;
+}
+
+// fuoristrada: squadrato, ruota di scorta dietro
+function jeepSvg(c = "#5f6b52") {
+  const id = c.slice(1);
+  return `${svgOpen(44, 84, 26)}<defs>${bodyGrad(`nvb${id}`, c)}${GLASS}</defs>
+  ${wheels([12, 54])}
+  <rect x="15" y="76" width="14" height="6.5" rx="2.5" fill="#151515" stroke="#fff" stroke-width=".8"/>
+  <rect x="4" y="2" width="36" height="76" rx="5" fill="url(#nvb${id})" stroke="#fff" stroke-width="1.6"/>${outline(4, 2, 36, 76, 5)}
+  ${lights(74.4)}
+  <path d="M13 8 H31 M13 12 H31 M13 16 H31" stroke="${shade(c, -0.35)}" stroke-width="1.1" stroke-linecap="round"/>
+  ${mirrors(26, c)}
+  <path d="M8 27 L36 27 L34.5 32 L9.5 32 Z" fill="url(#nvgl)"/>
+  <rect x="10" y="33" width="24" height="34" rx="2" fill="${shade(c, -0.15)}" stroke="${shade(c, -0.5)}" stroke-width=".8"/>
+  <path d="M12 38 H32 M12 62 H32" stroke="${shade(c, -0.5)}" stroke-width="1.4" stroke-linecap="round"/>
+  <path d="M10 68 L34 68 L33 72.5 L11 72.5 Z" fill="url(#nvgl)"/>
+</svg>`;
+}
+
+// pick-up: cabina e cassone aperto
+function pickupSvg(c = "#37474f") {
+  const id = c.slice(1);
+  return `${svgOpen(44, 88, 26)}<defs>${bodyGrad(`nvb${id}`, c)}${GLASS}</defs>
+  ${wheels([13, 63])}
+  <rect x="4" y="2" width="36" height="84" rx="7" fill="url(#nvb${id})" stroke="#fff" stroke-width="1.6"/>${outline(4, 2, 36, 84, 7)}
+  ${lights(82.4)}
+  <path d="M13 9 H31 M12 14 L12 24 M32 14 L32 24" stroke="${shade(c, -0.35)}" stroke-width="1" stroke-linecap="round"/>
+  ${mirrors(29, c)}
+  <path d="M8 31 Q22 23 36 31 L34.5 35.5 Q22 30 9.5 35.5 Z" fill="url(#nvgl)"/>
+  <rect x="10" y="36" width="24" height="12" rx="2.5" fill="${shade(c, 0.1)}" stroke="${shade(c, -0.45)}" stroke-width=".8"/>
+  <rect x="11" y="48.5" width="22" height="2.4" rx="1" fill="url(#nvgl)"/>
+  <rect x="8" y="53" width="28" height="29" rx="1.5" fill="${shade(c, -0.45)}" stroke="${shade(c, 0.2)}" stroke-width="1"/>
+  <path d="M14 55 V80 M20 55 V80 M26 55 V80 M32 55 V80" stroke="${shade(c, -0.25)}" stroke-width="1"/>
+</svg>`;
+}
+
+// furgone: cabina col parabrezza e nervature sul tetto
+function furgoneSvg(c = "#f5f5f5") {
+  return `${svgOpen(44, 84, 25)}<defs>${GLASS}</defs>
+  ${wheels([12, 60], 12)}
+  <rect x="4" y="2" width="36" height="80" rx="7" fill="${c}" stroke="#fff" stroke-width="1.6"/>${outline(4, 2, 36, 80, 7)}
+  ${lights(78.6)}
+  <path d="M8 9 Q22 4 36 9 L34.5 18 Q22 14 9.5 18 Z" fill="url(#nvgl)"/>
+  <rect x="9" y="22" width="26" height="56" rx="2.5" fill="${shade(c, -0.06)}" stroke="${shade(c, -0.22)}" stroke-width=".8"/>
+  <path d="M9 30 H35 M9 38 H35 M9 46 H35 M9 54 H35 M9 62 H35 M9 70 H35" stroke="${shade(c, -0.17)}" stroke-width="1.1"/>
+</svg>`;
+}
+
+// camper: lungo, cabina col parabrezza, oblò e pannello solare sul tetto, riga rossa sui fianchi
+function camperSvg(c = "#f3f2ec") {
+  return `${svgOpen(44, 92, 25)}<defs>${GLASS}</defs>
+  ${wheels([12, 66], 12)}
+  <rect x="4" y="2" width="36" height="88" rx="6" fill="${c}" stroke="#fff" stroke-width="1.6"/>${outline(4, 2, 36, 88, 6)}
+  ${lights(86.6)}
+  <path d="M8 8 Q22 4 36 8 L34.5 15 Q22 12 9.5 15 Z" fill="url(#nvgl)"/>
+  <rect x="4.2" y="20" width="2" height="62" fill="#c62828"/><rect x="37.8" y="20" width="2" height="62" fill="#c62828"/>
+  <rect x="8.5" y="19" width="27" height="66" rx="3" fill="${shade(c, -0.04)}" stroke="${shade(c, -0.2)}" stroke-width=".8"/>
+  <rect x="14" y="24" width="16" height="9" rx="2" fill="#a9bcd2" stroke="#7d8fa6" stroke-width=".8"/>
+  <rect x="11" y="39" width="22" height="14" rx="1.2" fill="#24365c" stroke="#101a30" stroke-width=".8"/>
+  <path d="M16.5 39 V53 M22 39 V53 M27.5 39 V53 M11 46 H33" stroke="#4b6596" stroke-width=".7"/>
+  <rect x="16" y="60" width="12" height="9" rx="2" fill="#a9bcd2" stroke="#7d8fa6" stroke-width=".8"/>
+  <rect x="13" y="74" width="18" height="6" rx="1.5" fill="${shade(c, -0.12)}"/>
+</svg>`;
+}
+
+// moto: ruote, manubrio con specchietti, serbatoio e motociclista col casco
+function motoSvg(c = "#173a7a") {
+  const d = shade(c, -0.25), h = shade(c, -0.45);
+  return `${svgOpen(30, 80, 18)}
   <rect x="12" y="1.5" width="6" height="17" rx="3" fill="#151515"/>
   <rect x="11.5" y="60" width="7" height="18.5" rx="3.5" fill="#151515"/>
-  <path d="M9 14 Q15 8 21 14 L20 24 L10 24 Z" fill="#173a7a" stroke="#fff" stroke-width="1.2"/>
+  <path d="M9 14 Q15 8 21 14 L20 24 L10 24 Z" fill="${c}" stroke="#fff" stroke-width="1.2"/>
   <rect x="12.5" y="9.5" width="5" height="2.4" rx="1.2" fill="#ffe28a"/>
   <rect x="2" y="21" width="26" height="2.6" rx="1.3" fill="#222" stroke="#fff" stroke-width=".7"/>
-  <ellipse cx="3.5" cy="18.5" rx="2.6" ry="1.6" fill="#0a2150" stroke="#fff" stroke-width=".7"/>
-  <ellipse cx="26.5" cy="18.5" rx="2.6" ry="1.6" fill="#0a2150" stroke="#fff" stroke-width=".7"/>
-  <ellipse cx="15" cy="31" rx="7" ry="8" fill="#173a7a" stroke="#fff" stroke-width="1.2"/>
+  <ellipse cx="3.5" cy="18.5" rx="2.6" ry="1.6" fill="${h}" stroke="#fff" stroke-width=".7"/>
+  <ellipse cx="26.5" cy="18.5" rx="2.6" ry="1.6" fill="${h}" stroke="#fff" stroke-width=".7"/>
+  <ellipse cx="15" cy="31" rx="7" ry="8" fill="${c}" stroke="#fff" stroke-width="1.2"/>
   <rect x="10.5" y="45" width="9" height="14" rx="3.5" fill="#9aa3ad" stroke="#5a636c" stroke-width=".8"/>
   <rect x="12" y="58.6" width="6" height="2" rx="1" fill="#e53935"/>
-  <path d="M7 41 L4.5 23.5 M23 41 L25.5 23.5" stroke="#0e2a5c" stroke-width="3.2" stroke-linecap="round"/>
-  <ellipse cx="15" cy="42" rx="10.5" ry="6" fill="#0e2a5c" stroke="#fff" stroke-width="1.2"/>
-  <circle cx="15" cy="38" r="6.2" fill="#0a2150" stroke="#fff" stroke-width="1.2"/>
+  <path d="M7 41 L4.5 23.5 M23 41 L25.5 23.5" stroke="${d}" stroke-width="3.2" stroke-linecap="round"/>
+  <ellipse cx="15" cy="42" rx="10.5" ry="6" fill="${d}" stroke="#fff" stroke-width="1.2"/>
+  <circle cx="15" cy="38" r="6.2" fill="${h}" stroke="#fff" stroke-width="1.2"/>
   <path d="M10.3 35.5 Q15 30.6 19.7 35.5 Q15 33.4 10.3 35.5 Z" fill="#5c7fb8"/>
 </svg>`;
+}
 
-// bicicletta vista dall'alto: ruote sottili, telaio, manubrio e ciclista col caschetto
-const BICI_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 80" width="18" height="47">
+// scooter: ruote piccole, scudo davanti, pedana e sella
+function scooterSvg(c = "#26a69a") {
+  const d = shade(c, -0.3);
+  return `${svgOpen(30, 74, 17)}
+  <rect x="12.2" y="1.5" width="5.6" height="12" rx="2.8" fill="#151515"/>
+  <rect x="12" y="60" width="6" height="12.5" rx="3" fill="#151515"/>
+  <rect x="3" y="12" width="24" height="2.4" rx="1.2" fill="#222" stroke="#fff" stroke-width=".7"/>
+  <ellipse cx="4" cy="10" rx="2.4" ry="1.5" fill="${d}" stroke="#fff" stroke-width=".7"/><ellipse cx="26" cy="10" rx="2.4" ry="1.5" fill="${d}" stroke="#fff" stroke-width=".7"/>
+  <path d="M6 18 Q15 10 24 18 L22 26 Q15 23 8 26 Z" fill="${c}" stroke="#fff" stroke-width="1.2"/>
+  <rect x="12.5" y="14.5" width="5" height="2.2" rx="1.1" fill="#ffe28a"/>
+  <rect x="9.5" y="26" width="11" height="14" rx="2" fill="#3a3a3a" stroke="#fff" stroke-width=".8"/>
+  <path d="M8 40 Q15 37 22 40 L22.5 60 Q15 64 7.5 60 Z" fill="${c}" stroke="#fff" stroke-width="1.2"/>
+  <rect x="11" y="45" width="8" height="12" rx="3" fill="#2b2b2b"/>
+  <rect x="12" y="61" width="6" height="1.8" rx=".9" fill="#e53935"/>
+  <path d="M7.5 41 L6 15 M22.5 41 L24 15" stroke="${shade(c, -0.45)}" stroke-width="3" stroke-linecap="round"/>
+  <ellipse cx="15" cy="42" rx="9.5" ry="5.6" fill="${shade(c, -0.45)}" stroke="#fff" stroke-width="1.2"/>
+  <circle cx="15" cy="38.5" r="5.8" fill="#eceff1" stroke="#fff" stroke-width="1.2"/>
+  <path d="M10.6 36 Q15 31.5 19.4 36 Q15 34 10.6 36 Z" fill="#37474f"/>
+</svg>`;
+}
+
+// bicicletta: ruote sottili, telaio, manubrio e ciclista col caschetto
+function biciSvg(c = "#173a7a") {
+  const h = shade(c, -0.4);
+  return `${svgOpen(30, 80, 18)}
   <rect x="13.4" y="1" width="3.2" height="22" rx="1.6" fill="#151515"/>
   <rect x="13.4" y="57" width="3.2" height="22" rx="1.6" fill="#151515"/>
   <path d="M15 21 L15 60" stroke="#8a939c" stroke-width="2.2" stroke-linecap="round"/>
   <rect x="4" y="18.5" width="22" height="2.2" rx="1.1" fill="#333" stroke="#fff" stroke-width=".6"/>
   <ellipse cx="15" cy="52" rx="2.8" ry="4.2" fill="#222"/>
-  <path d="M7.5 40 L5.5 20.5 M22.5 40 L24.5 20.5" stroke="#173a7a" stroke-width="3" stroke-linecap="round"/>
-  <ellipse cx="15" cy="41" rx="10" ry="5.6" fill="#173a7a" stroke="#fff" stroke-width="1.2"/>
-  <ellipse cx="15" cy="37" rx="5" ry="6.6" fill="#0a2150" stroke="#fff" stroke-width="1.2"/>
+  <path d="M7.5 40 L5.5 20.5 M22.5 40 L24.5 20.5" stroke="${c}" stroke-width="3" stroke-linecap="round"/>
+  <ellipse cx="15" cy="41" rx="10" ry="5.6" fill="${c}" stroke="#fff" stroke-width="1.2"/>
+  <ellipse cx="15" cy="37" rx="5" ry="6.6" fill="${h}" stroke="#fff" stroke-width="1.2"/>
   <path d="M13 32.5 L13 41.5 M17 32.5 L17 41.5" stroke="#9aa3ad" stroke-width="1" stroke-linecap="round"/>
 </svg>`;
+}
+
+// disegni scelti nel garage: [nome, disegno(colore), colore predefinito, mezzo]
+const VEH_ICONS = {
+  suv: ["SUV (blu e grigio)", suvSvg, "#173a7a", "auto"],
+  berlina: ["Berlina", berlinaSvg, "#b71c1c", "auto"],
+  utilitaria: ["Utilitaria", utilitariaSvg, "#f9a825", "auto"],
+  station: ["Station wagon", stationSvg, "#546e7a", "auto"],
+  sportiva: ["Sportiva", sportivaSvg, "#d32f2f", "auto"],
+  jeep: ["Fuoristrada", jeepSvg, "#5f6b52", "auto"],
+  pickup: ["Pick-up", pickupSvg, "#37474f", "auto"],
+  furgone: ["Furgone", furgoneSvg, "#f5f5f5", "auto"],
+  camper: ["Camper", camperSvg, "#f3f2ec", "auto"],
+  moto: ["Moto", motoSvg, "#173a7a", "moto"],
+  scooter: ["Scooter", scooterSvg, "#26a69a", "moto"],
+  bici: ["Bici", biciSvg, "#173a7a", "bici"],
+};
+// disegno predefinito per tipo di veicolo
+const VEH_TYPE_ICON = { auto: "suv", furgone: "furgone", camper: "camper", altro: "jeep", moto: "moto", scooter: "scooter", bici: "bici" };
+// mezzo del percorso per tipo di veicolo
+const VEH_TYPE_MODE = { auto: "auto", furgone: "auto", camper: "auto", altro: "auto", moto: "moto", scooter: "moto", bici: "bici" };
+// disegni adatti al tipo (auto e affini: tutte le auto; moto e scooter: moto e scooter; bici: bici)
+const vehIconsFor = (type) => Object.keys(VEH_ICONS).filter((k) => VEH_ICONS[k][3] === (VEH_TYPE_MODE[type] || "auto"));
+// id dei gradienti unici per ogni disegno: se lo stesso id c'è anche in un disegno nascosto (es. l'anteprima nelle
+// impostazioni chiuse) il browser non colora quello visibile
+let svgSeq = 0;
+function uniqSvg(svg) {
+  const n = ++svgSeq;
+  return svg.replace(/id="([\w-]+)"/g, `id="$1_${n}"`).replace(/url\(#([\w-]+)\)/g, `url(#$1_${n})`);
+}
+// disegno di un veicolo del garage col suo colore
+function vehicleSvg(v) {
+  const k = vehIconsFor(v.type).includes(v.icon) ? v.icon : VEH_TYPE_ICON[v.type] || "suv";
+  const [, fn, def] = VEH_ICONS[k];
+  return uniqSvg(fn(okColor(v.color) ? v.color.toLowerCase() : def));
+}
+const CAR_SVG = suvSvg();
 
 // persona a piedi vista dall'alto: piedi nel passo, braccia, spalle, testa col cappellino rivolto in avanti
 const PIEDI_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="30" height="30">
@@ -200,55 +408,7 @@ const PIEDI_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" w
   <path d="M15.6 16.8 Q20 11 24.4 16.8 Q20 15.2 15.6 16.8 Z" fill="#0a2150" stroke="#fff" stroke-width=".6"/>
 </svg>`;
 
-// camper visto dall'alto: lungo e bianco, cabina col parabrezza, oblò e pannello solare sul tetto, riga rossa sui fianchi
-const CAMPER_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 92" width="25" height="53">
-  <rect x="1" y="12" width="5" height="12" rx="2" fill="#151515"/><rect x="38" y="12" width="5" height="12" rx="2" fill="#151515"/>
-  <rect x="1" y="66" width="5" height="12" rx="2" fill="#151515"/><rect x="38" y="66" width="5" height="12" rx="2" fill="#151515"/>
-  <rect x="4" y="2" width="36" height="88" rx="6" fill="#f3f2ec" stroke="#fff" stroke-width="1.6"/>
-  <rect x="4" y="2" width="36" height="88" rx="6" fill="none" stroke="#7a7a74" stroke-width=".8"/>
-  <rect x="7" y="3" width="7" height="2.4" rx="1.1" fill="#ffe28a"/><rect x="30" y="3" width="7" height="2.4" rx="1.1" fill="#ffe28a"/>
-  <rect x="7" y="86.6" width="6" height="2.2" rx="1" fill="#e53935"/><rect x="31" y="86.6" width="6" height="2.2" rx="1" fill="#e53935"/>
-  <path d="M8 8 Q22 4 36 8 L34.5 15 Q22 12 9.5 15 Z" fill="#2f4f7f"/>
-  <rect x="4.2" y="20" width="2" height="62" fill="#c62828"/><rect x="37.8" y="20" width="2" height="62" fill="#c62828"/>
-  <rect x="8.5" y="19" width="27" height="66" rx="3" fill="#e9e8e1" stroke="#c8c7bf" stroke-width=".8"/>
-  <rect x="14" y="24" width="16" height="9" rx="2" fill="#a9bcd2" stroke="#7d8fa6" stroke-width=".8"/>
-  <rect x="11" y="39" width="22" height="14" rx="1.2" fill="#24365c" stroke="#101a30" stroke-width=".8"/>
-  <path d="M16.5 39 V53 M22 39 V53 M27.5 39 V53 M11 46 H33" stroke="#4b6596" stroke-width=".7"/>
-  <rect x="16" y="60" width="12" height="9" rx="2" fill="#a9bcd2" stroke="#7d8fa6" stroke-width=".8"/>
-  <rect x="13" y="74" width="18" height="6" rx="1.5" fill="#d6d5cd"/>
-</svg>`;
-
-// furgone visto dall'alto: bianco, parabrezza, nervature sul tetto
-const FURGONE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 84" width="25" height="48">
-  <rect x="1" y="12" width="5" height="12" rx="2" fill="#151515"/><rect x="38" y="12" width="5" height="12" rx="2" fill="#151515"/>
-  <rect x="1" y="60" width="5" height="12" rx="2" fill="#151515"/><rect x="38" y="60" width="5" height="12" rx="2" fill="#151515"/>
-  <rect x="4" y="2" width="36" height="80" rx="7" fill="#f5f5f5" stroke="#fff" stroke-width="1.6"/>
-  <rect x="4" y="2" width="36" height="80" rx="7" fill="none" stroke="#7a7a7a" stroke-width=".8"/>
-  <rect x="7" y="3" width="7" height="2.4" rx="1.1" fill="#ffe28a"/><rect x="30" y="3" width="7" height="2.4" rx="1.1" fill="#ffe28a"/>
-  <rect x="7" y="78.6" width="6" height="2.2" rx="1" fill="#e53935"/><rect x="31" y="78.6" width="6" height="2.2" rx="1" fill="#e53935"/>
-  <path d="M8 9 Q22 4 36 9 L34.5 18 Q22 14 9.5 18 Z" fill="#2f4f7f"/>
-  <rect x="9" y="22" width="26" height="56" rx="2.5" fill="#e6e6e6" stroke="#c4c4c4" stroke-width=".8"/>
-  <path d="M9 30 H35 M9 38 H35 M9 46 H35 M9 54 H35 M9 62 H35 M9 70 H35" stroke="#cdcdcd" stroke-width="1.1"/>
-</svg>`;
-
-// "altro": fuoristrada grigio-verde visto dall'alto
-const ALTRO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 80" width="26" height="47">
-  <rect x="1" y="12" width="5" height="13" rx="2" fill="#151515"/><rect x="38" y="12" width="5" height="13" rx="2" fill="#151515"/>
-  <rect x="1" y="54" width="5" height="13" rx="2" fill="#151515"/><rect x="38" y="54" width="5" height="13" rx="2" fill="#151515"/>
-  <rect x="4" y="2" width="36" height="76" rx="9" fill="#5f6b52" stroke="#fff" stroke-width="1.6"/>
-  <rect x="7" y="3.2" width="7" height="2.6" rx="1.2" fill="#ffe28a"/><rect x="30" y="3.2" width="7" height="2.6" rx="1.2" fill="#ffe28a"/>
-  <rect x="7" y="74.4" width="6" height="2.4" rx="1" fill="#e53935"/><rect x="31" y="74.4" width="6" height="2.4" rx="1" fill="#e53935"/>
-  <path d="M8 27 Q22 19 36 27 L34 32 Q22 26 10 32 Z" fill="#33402b"/>
-  <rect x="10" y="33" width="24" height="34" rx="3" fill="#4d5843" stroke="#2f3828" stroke-width=".8"/>
-  <path d="M12 38 H32 M12 62 H32" stroke="#2b3324" stroke-width="1.4" stroke-linecap="round"/>
-  <path d="M10 68 Q22 72 34 68 L33 72 Q22 75 11 72 Z" fill="#33402b"/>
-</svg>`;
-
-const VEHICLE_SVG = { auto: CAR_SVG, moto: MOTO_SVG, bici: BICI_SVG, piedi: PIEDI_SVG };
-// disegno per tipo di veicolo del garage
-const VEH_TYPE_SVG = { auto: CAR_SVG, moto: MOTO_SVG, scooter: MOTO_SVG, furgone: FURGONE_SVG, camper: CAMPER_SVG, bici: BICI_SVG, altro: ALTRO_SVG };
-// mezzo del percorso per tipo di veicolo
-const VEH_TYPE_MODE = { auto: "auto", furgone: "auto", camper: "auto", altro: "auto", moto: "moto", scooter: "moto", bici: "bici" };
+const VEHICLE_SVG = { auto: CAR_SVG, moto: motoSvg(), bici: biciSvg(), piedi: PIEDI_SVG };
 
 // impostazioni salvate su questo dispositivo
 const SETTINGS_KEY = "navigator-panel-settings";
@@ -713,6 +873,16 @@ const STYLE = `
   .setdlg select { font: inherit; font-size: 14px; padding: 7px; border-radius: 8px; border: 1px solid var(--divider-color);
     background: var(--secondary-background-color, #f5f5f5); color: var(--primary-text-color); max-width: 60%; }
   .setdlg .note { font-size: 12px; color: var(--secondary-text-color); margin: 4px 0 6px; }
+  .garv { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; padding: 6px; border-radius: 10px;
+    background: rgba(127,127,127,.08); }
+  .garv .gf { flex: 1; min-width: 0; }
+  .gprev { width: 46px; height: 60px; flex: none; display: flex; align-items: center; justify-content: center; border-radius: 8px;
+    background: #9e9e9e; }
+  .gprev svg { max-height: 54px; width: auto; filter: drop-shadow(0 1px 2px rgba(0,0,0,.4)); }
+  .garv input[type=color] { width: 38px; height: 32px; padding: 0 2px; border: 1px solid var(--divider-color); border-radius: 6px;
+    background: none; flex: none; cursor: pointer; }
+  #vehsec h3 { display: flex; align-items: center; gap: 8px; }
+  #vehsec h3 .vprev svg { height: 28px; width: auto; display: block; filter: drop-shadow(0 1px 1px rgba(0,0,0,.4)); }
   .sw { position: relative; width: 42px; height: 24px; flex: none; }
   .sw input { opacity: 0; width: 0; height: 0; }
   .sw i { position: absolute; inset: 0; border-radius: 12px; background: #9e9e9e; transition: background .2s; cursor: pointer; }
@@ -1493,7 +1663,7 @@ class NavigatorPanel extends HTMLElement {
     const sb = this.$("srcbox");
     if (!vb || !sb) return;
     const curV = vb.querySelector("#navveh")?.value || this._vehicleId();
-    vb.innerHTML = `<h3>Veicolo</h3><select class="inp" id="navveh">${this._vehicles().map((v) => `<option value="${esc(v.id)}" ${v.id === curV ? "selected" : ""}>${
+    vb.innerHTML = `<h3>Veicolo <span class="vprev"></span></h3><select class="inp" id="navveh">${this._vehicles().map((v) => `<option value="${esc(v.id)}" ${v.id === curV ? "selected" : ""}>${
       v.type ? vehIcon(v.type) : "🧭"} ${esc(v.name || "Veicolo")}${v.plate ? ` · ${esc(v.plate)}` : ""}</option>`).join("")}</select>`;
     const list = this._navSources();
     const curS = sb.querySelector("#navsrc")?.value;
@@ -4047,7 +4217,7 @@ class NavigatorPanel extends HTMLElement {
   // disegno del veicolo sulla mappa: quello del veicolo del garage, altrimenti quello del mezzo
   _vehSvg() {
     const v = this._curVehicle();
-    return (v.type && VEH_TYPE_SVG[v.type]) || VEHICLE_SVG[this._mode] || CAR_SVG;
+    return v.type ? vehicleSvg(v) : uniqSvg(VEHICLE_SVG[this._mode] || CAR_SVG);
   }
 
   // veicolo scelto: con uno del garage i bottoni del mezzo spariscono e il mezzo viene dal tipo di veicolo
@@ -4055,6 +4225,8 @@ class NavigatorPanel extends HTMLElement {
     const v = this._curVehicle();
     const modes = this.$("modes");
     if (modes) modes.hidden = !!v.type;
+    const prev = this.$("vehsec")?.querySelector(".vprev");
+    if (prev) prev.innerHTML = v.type ? vehicleSvg(v) : "";
     if (v.type) {
       const mode = VEH_TYPE_MODE[v.type] || "auto";
       if (mode !== this._mode) {
@@ -4085,14 +4257,28 @@ class NavigatorPanel extends HTMLElement {
   }
 
   _garageHtml() {
-    const rows = (this._garage || []).map((v, k) => `<div class="row" style="gap:6px;margin-bottom:6px;align-items:center">
-        <select data-g="type" data-k="${k}" style="width:auto">${VEHICLE_TYPES.map(([t, ico, n]) => `<option value="${t}" ${v.type === t ? "selected" : ""}>${ico} ${n}</option>`).join("")}</select>
-        <input class="inp" data-g="name" data-k="${k}" placeholder="Nome (es. Panda)" value="${esc(v.name)}" style="flex:1;min-width:90px">
-        <input class="inp" data-g="plate" data-k="${k}" placeholder="Targa" value="${esc(v.plate)}" style="width:100px;text-transform:uppercase">
-        <button class="icon" data-g="del" data-k="${k}" title="Elimina">✕</button></div>`).join("");
+    const rows = (this._garage || []).map((v, k) => {
+      const icons = vehIconsFor(v.type);
+      const ic = icons.includes(v.icon) ? v.icon : VEH_TYPE_ICON[v.type] || "suv";
+      const col = okColor(v.color) ? v.color : VEH_ICONS[ic][2];
+      return `<div class="garv">
+        <div class="gprev" data-gp="${k}" title="Anteprima sulla mappa">${vehicleSvg({ ...v, icon: ic, color: col })}</div>
+        <div class="gf">
+          <div class="row" style="gap:6px;align-items:center">
+            <select data-g="type" data-k="${k}" style="width:auto">${VEHICLE_TYPES.map(([t, ico, n]) => `<option value="${t}" ${v.type === t ? "selected" : ""}>${ico} ${n}</option>`).join("")}</select>
+            <select data-g="icon" data-k="${k}" style="flex:1;min-width:110px" title="Disegno sulla mappa">${icons.map((i) => `<option value="${i}" ${i === ic ? "selected" : ""}>${VEH_ICONS[i][0]}</option>`).join("")}</select>
+            <input type="color" data-g="color" data-k="${k}" value="${col}" title="Colore${ic === "suv" ? " (cambia solo il blu)" : ""}">
+          </div>
+          <div class="row" style="gap:6px;align-items:center;margin-top:6px">
+            <input class="inp" data-g="name" data-k="${k}" placeholder="Nome (es. Panda)" value="${esc(v.name)}" style="flex:1;min-width:90px">
+            <input class="inp" data-g="plate" data-k="${k}" placeholder="Targa" value="${esc(v.plate)}" style="width:100px;text-transform:uppercase">
+            <button class="icon" data-g="del" data-k="${k}" title="Elimina">✕</button>
+          </div>
+        </div></div>`;
+    }).join("");
     return `<div class="grp"><h3>Garage</h3>
-      <div class="note">I tuoi veicoli (salvati per il tuo utente): alla partenza scegli quello usato, e il diario dei viaggi lo ricorda.
-        Senza veicoli si usa un "veicolo predefinito".</div>
+      <div class="note">I tuoi veicoli (salvati per il tuo utente): scegli disegno e colore che vedrai sulla mappa; alla partenza scegli
+        quello usato nel menu Veicolo, e il diario dei viaggi lo ricorda. Con "Base" il mezzo si sceglie con i bottoni.</div>
       ${rows}<button data-g="add">＋ Aggiungi veicolo</button></div>`;
   }
 
@@ -4113,10 +4299,21 @@ class NavigatorPanel extends HTMLElement {
           this._openSettings();
         });
       } else {
-        el.addEventListener("change", () => {
+        const k = +el.dataset.k;
+        // anteprima colorata subito, mentre si sceglie il colore
+        if (g === "color") el.addEventListener("input", () => {
+          const prev = wrap.querySelector(`[data-gp="${k}"]`);
+          const v = (this._garage || [])[k];
+          if (prev && v) prev.innerHTML = vehicleSvg({ ...v, icon: wrap.querySelector(`[data-g="icon"][data-k="${k}"]`)?.value, color: el.value });
+        });
+        el.addEventListener("change", async () => {
           const l = list();
-          l[+el.dataset.k][g] = el.value;
-          this._saveGarage(l);
+          l[k][g] = el.value;
+          // cambiando tipo o disegno si riparte dal disegno e dal colore predefiniti
+          if (g === "type") { delete l[k].icon; delete l[k].color; }
+          if (g === "icon") l[k].color = VEH_ICONS[el.value]?.[2];
+          await this._saveGarage(l);
+          if (g === "type" || g === "icon") this._openSettings();
         });
       }
     });
