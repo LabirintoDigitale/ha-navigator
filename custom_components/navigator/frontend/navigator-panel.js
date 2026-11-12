@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.5.7";
+const PANEL_VERSION = "1.5.8";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1073,7 +1073,9 @@ class NavigatorPanel extends HTMLElement {
           title: `Esclusa: ${ex.name}` }).addTo(this._markerLayer);
       }
     }
-    if (this._me) {
+    // "La mia posizione" (punto blu, il GPS o la stima del browser di questo dispositivo): non in guida, dove la posizione
+    // è quella seguita (il veicolo) e un secondo punto confonderebbe (es. la stima del PC accanto alla persona seguita)
+    if (this._me && !this._nav) {
       L.marker([this._me.lat, this._me.lon], { icon: L.divIcon({ className: "", html: '<div class="me"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }),
         title: "La mia posizione", interactive: false }).addTo(this._markerLayer);
     }
