@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.5.6";
+const PANEL_VERSION = "1.5.7";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -271,6 +271,18 @@ function bearing(a, b) {
   const kx = Math.cos((a[0] * Math.PI) / 180);
   return ((Math.atan2((b[1] - a[1]) * kx, b[0] - a[0]) * 180) / Math.PI + 360) % 360;
 }
+
+// da quanto tempo: "ora", "5 min fa", "3 h fa", "2 g fa"
+function fmtAge(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  const min = Math.floor(ms / 60000);
+  if (min < 1) return "ora";
+  if (min < 60) return `${min} min fa`;
+  const h = Math.floor(min / 60);
+  return h < 48 ? `${h} h fa` : `${Math.floor(h / 24)} g fa`;
+}
+
+const STALE_MS = 10 * 60000; // posizione di una persona più vecchia di così: si avvisa prima di partire
 
 function fmtDist(m) {
   if (m < 1000) return `${m < 100 ? Math.round(m / 10) * 10 : Math.round(m / 50) * 50} m`;
@@ -1114,7 +1126,9 @@ class NavigatorPanel extends HTMLElement {
     for (const [id, st] of Object.entries(this._hass?.states || {})) {
       if (!id.startsWith("person.") && !id.startsWith("device_tracker.")) continue;
       if (st.attributes.latitude == null || st.attributes.longitude == null) continue;
-      out.push({ id, name: `${id.startsWith("person.") ? "👤" : "📡"} ${st.attributes.friendly_name || id}`, ok: true });
+      const age = Date.now() - Date.parse(st.last_updated);
+      out.push({ id, name: `${id.startsWith("person.") ? "👤" : "📡"} ${st.attributes.friendly_name || id}`, ok: true,
+        age, ageText: fmtAge(age) });
     }
     return out;
   }
@@ -1147,7 +1161,9 @@ class NavigatorPanel extends HTMLElement {
     }
     const list = this._navSources();
     const def = this._defaultNavSource(list);
-    const opts = list.map((s) => `<option value="${esc(s.id)}" ${s.id === def ? "selected" : ""} ${s.ok ? "" : "disabled"}>${esc(s.name)}</option>`).join("");
+    // accanto a persone e dispositivi: da quanto è aggiornata la loro posizione (⚠ se vecchia)
+    const opts = list.map((s) => `<option value="${esc(s.id)}" ${s.id === def ? "selected" : ""} ${s.ok ? "" : "disabled"}>${esc(s.name)}${
+      s.ageText ? ` · ${s.age > STALE_MS ? "⚠ " : ""}${esc(s.ageText)}` : ""}</option>`).join("");
     const hint = this._companion() === "android"
       ? `<div class="muted" style="margin-top:6px">Nell'app Android puoi provare il GPS del dispositivo; se l'app non lo passa alla pagina
          scegli la tua persona. Per seguirti bene in auto con la persona attiva
@@ -1164,8 +1180,14 @@ class NavigatorPanel extends HTMLElement {
       <button class="link" data-a="gpshelp" style="margin-top:6px;padding-left:0">📡 Problemi con il GPS? Posizione negata?</button></div>`;
   }
 
-  async _startNav(source) {
+  async _startNav(source, force = false) {
     if (!this._result) return;
+    // persona o dispositivo con una posizione vecchia: la guida partirebbe da lì (es. app Companion chiusa)
+    if (source !== "gps" && !force) {
+      const st = this._hass?.states?.[source];
+      const age = st ? Date.now() - Date.parse(st.last_updated) : 0;
+      if (age > STALE_MS) { this._staleHelp(source, age); return; }
+    }
     if (source === "gps" && !(window.isSecureContext && window.navigator.geolocation)) {
       this._msg("Il GPS del browser richiede Home Assistant in HTTPS: scegli la posizione dell'app Companion");
       return;
@@ -2431,6 +2453,32 @@ class NavigatorPanel extends HTMLElement {
 
   // app Companion Android: spesso la sua WebView non passa il GPS alle pagine, anche con tutte le autorizzazioni concesse.
   // La posizione arriva a Home Assistant dal sensore dell'app, nella propria persona.
+  _staleHelp(source, age) {
+    const st = this._hass.states[source];
+    const name = st?.attributes?.friendly_name || source;
+    const gps = window.isSecureContext && !!window.navigator.geolocation;
+    const el = this.$("navpop");
+    clearTimeout(this._nav?.popTimer);
+    el.className = "navpop help";
+    el.innerHTML = `<div class="big">🕘</div><h4>Posizione vecchia</h4>
+      <div>L'ultima posizione di <b>${esc(name)}</b> è arrivata <b>${esc(fmtAge(age))}</b>: Home Assistant non ne riceve di nuove
+        (di solito l'app Companion è chiusa o ha la posizione in background disattivata). La guida partirebbe da lì e si
+        muoverebbe solo quando arriva una posizione nuova.</div>
+      <ol>
+        <li>Apri l'app Companion sul telefono (manda subito la posizione) o riattiva la <b>Posizione in background</b>.</li>
+        <li>Oppure usa il <b>GPS di questo dispositivo</b> (nel browser serve Home Assistant in HTTPS).</li>
+      </ol>
+      <div class="acts">
+        ${gps ? `<button class="pri" data-h="gps">📱 Usa il GPS di questo dispositivo</button>` : ""}
+        <button data-h="go">▶ Parti lo stesso</button>
+        <button class="close" data-h="close">Annulla</button>
+      </div>`;
+    el.hidden = false;
+    el.querySelector('[data-h="close"]').addEventListener("click", () => { el.hidden = true; });
+    el.querySelector('[data-h="go"]').addEventListener("click", () => { el.hidden = true; this._startNav(source, true); });
+    el.querySelector('[data-h="gps"]')?.addEventListener("click", () => { el.hidden = true; this._startNav("gps"); });
+  }
+
   _androidHelp() {
     const person = this._myPerson();
     const el = this.$("navpop");
