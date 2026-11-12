@@ -312,6 +312,11 @@ class MapServices:
         if costing in ("auto", "motorcycle"):
             options["use_tolls"] = 0.0 if avoid_tolls else 0.5
             options["use_highways"] = 0.0 if avoid_highways else 1.0
+        if costing == "pedestrian":
+            # a piedi: preferire marciapiedi, percorsi pedonali e attraversamenti (strisce) quando in OpenStreetMap sono
+            # disegnati a parte; dove ci sono solo le strade il percorso resta quello di prima
+            options["walkway_factor"] = 0.6
+            options["sidewalk_factor"] = 0.6
         body: dict[str, Any] = {
             "locations": [{"lat": p["lat"], "lon": p["lon"], "type": "break"} for p in points],
             "costing": costing,

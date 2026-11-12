@@ -23,6 +23,8 @@ marcia e ti segue. Con **▲ / ▼** scegli la prospettiva, dalla vista dall'alt
 - Punti rapidi: **Casa** (posizione di Home Assistant), **la mia posizione** (GPS del dispositivo), zone e persone di Home Assistant, **preferiti** e **destinazioni recenti**.
 - Clic sulla mappa: *Parti da qui*, *Aggiungi tappa*, *Arriva qui*, *Salva nei preferiti*.
 - Mezzo: **auto, moto, bici, a piedi**. Opzioni: evita pedaggi, autostrade, traghetti.
+  A piedi e in bici sensi unici e rotonde delle auto non valgono (lo ricorda una nota sopra i percorsi); a piedi Navigator
+  preferisce marciapiedi, percorsi pedonali e strisce quando in OpenStreetMap sono disegnati a parte.
 - Fino a **3 percorsi alternativi** con durata, distanza, orario di arrivo stimato e chilometri a pagamento.
 - **Frecce del verso di marcia** sul percorso scelto (in 2D e in 3D): nelle rotonde e nei sensi unici si vede subito da che parte si va.
   In guida la parte già percorsa diventa **grigia e chiara** (senza frecce): davanti resta solo la strada da fare.

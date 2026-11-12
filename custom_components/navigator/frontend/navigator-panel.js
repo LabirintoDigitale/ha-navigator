@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.5.14";
+const PANEL_VERSION = "1.5.15";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -3158,7 +3158,8 @@ class NavigatorPanel extends HTMLElement {
     }
     if (!bot.querySelector(".info")) this._buildNavBar();
     const kmh = nav.speed != null && nav.fix ? Math.round(nav.speed * 3.6) : null;
-    bot.querySelector(".info").innerHTML = `<span class="rem">${fmtTime(remTime)}</span><span>${fmtKm(remM / 1000)} · arrivo ${arrival(remTime)}</span>
+    const modeIco = (MODES.find((m) => m[0] === this._mode) || MODES[0])[1];
+    bot.querySelector(".info").innerHTML = `<span title="Mezzo del percorso">${modeIco}</span><span class="rem">${fmtTime(remTime)}</span><span>${fmtKm(remM / 1000)} · arrivo ${arrival(remTime)}</span>
       ${kmh != null ? `<span class="spd ${nav.over ? "over" : ""}" title="Velocità">${kmh} km/h</span>` : ""}
       ${nav.limit ? `<span class="lim" title="Limite di velocità">${nav.limit}</span>` : ""}
       ${nav.cam ? `<span class="cam" title="Autovelox fisso">📷 ${fmtDist(nav.cam.to)}${nav.cam.maxspeed ? ` · ${nav.cam.maxspeed}` : ""}</span>` : ""}`;
@@ -3379,7 +3380,13 @@ class NavigatorPanel extends HTMLElement {
     if (r) {
       const rt = r.routes[this._sel];
       const s = rt.summary;
-      html += `<div class="sec"><h3>Percorsi <span class="muted" style="text-transform:none">${r.engine === "osrm" ? "OSRM" : "Valhalla"}</span></h3><div class="alts">`;
+      html += `<div class="sec"><h3>Percorsi <span class="muted" style="text-transform:none">${r.engine === "osrm" ? "OSRM" : "Valhalla"}</span></h3>`;
+      // a piedi e in bici i sensi unici delle auto non valgono: rotonde e strade si possono percorrere nei due sensi
+      if (this._mode === "piedi" || this._mode === "bici") {
+        html += `<div class="note" style="margin:0 0 8px">${this._mode === "piedi" ? "🚶 Percorso <b>a piedi</b>" : "🚲 Percorso <b>in bici</b>"}:
+          sensi unici e rotonde delle auto non valgono, il percorso può farli nei due sensi. Per guidare scegli Auto o Moto.</div>`;
+      }
+      html += `<div class="alts">`;
       const fastest = Math.min(...r.routes.map((x) => x.summary.time));
       const shortest = Math.min(...r.routes.map((x) => x.summary.length_km));
       r.routes.forEach((x, i) => {
