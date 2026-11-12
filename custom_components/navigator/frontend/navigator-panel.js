@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.5.12";
+const PANEL_VERSION = "1.5.13";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -38,6 +38,8 @@ const DEM_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}
 const DEM_ATTR = 'Rilievo <a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md" target="_blank" rel="noopener">Mapzen/Tilezen</a>';
 const OFM_URL = "https://tiles.openfreemap.org/planet";
 const OFM_ATTR = 'Edifici <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> &copy; OpenMapTiles';
+// stile degli edifici 3D
+const BLD_STYLES = [["colorati", "Colorati (secondo l'altezza)"], ["finestre", "Con finestre"], ["semplici", "Semplici"]];
 const TERRAIN_EX = [["1", "Reale"], ["1.5", "Accentuato"], ["2", "Molto accentuato"]];
 
 let maplibreLoading = null;
@@ -179,7 +181,7 @@ const VEHICLE_SVG = { auto: CAR_SVG, moto: MOTO_SVG, bici: BICI_SVG, piedi: PIED
 const SETTINGS_KEY = "navigator-panel-settings";
 const DEFAULT_SETTINGS = { voice: false, lang: "it", voiceSel: "f", out: "auto", autoZoom: true, beep: false,
   fuelBrands: [], fuelKind: "", camAlert: true, view3d: false, b3d: true, terrainEx: "1.5", pitch3d: 60, tunnelFx: true, zoom3dOff: 0,
-  voiceStyle: "normale", voiceRate: 1, voicePitch: 1 };
+  voiceStyle: "normale", voiceRate: 1, voicePitch: 1, bldStyle: "colorati" };
 // marche dei distributori (come nell'anagrafica del MIMIT)
 const FUEL_BRANDS = ["Agip Eni", "Api-Ip", "Q8", "Esso", "Tamoil", "Shell", "Retitalia", "Beyfin", "Costantin", "Europam", "Pompe bianche"];
 const BRAND_COLORS = { "agip eni": "#f7c600", "eni": "#f7c600", "api-ip": "#0057a8", "ip": "#0057a8", "q8": "#0a3a7a", "esso": "#d71920",
@@ -2096,14 +2098,47 @@ class NavigatorPanel extends HTMLElement {
       g.addLayer({ id: "tun", type: "line", source: "ofm", "source-layer": "transportation", minzoom: 12,
         filter: ["==", ["get", "brunnel"], "tunnel"], paint: { "line-opacity": 0 } });
     }
+    const style = this._settings.bldStyle || "colorati";
+    if (g.getLayer("bld") && (!want || this._bldApplied !== style)) g.removeLayer("bld");
     if (want && !g.getLayer("bld")) {
       g.addLayer({ id: "bld", type: "fill-extrusion", source: "ofm", "source-layer": "building", minzoom: 14,
-        paint: { "fill-extrusion-color": "#d9d4cb", "fill-extrusion-opacity": 0.85,
-          "fill-extrusion-height": ["coalesce", ["get", "render_height"], 8],
-          "fill-extrusion-base": ["coalesce", ["get", "render_min_height"], 0] } }, "lines");
-    } else if (!want && g.getLayer("bld")) {
-      g.removeLayer("bld");
+        paint: this._bldPaint(style) }, "lines");
+      this._bldApplied = style;
     }
+    // luce: più radente e un po' più forte con gli stili colorati, così le facciate hanno chiari e scuri come nei navigatori
+    g.setLight(style === "semplici" ? { anchor: "viewport", color: "#ffffff", intensity: 0.5, position: [1.15, 210, 30] }
+      : { anchor: "viewport", color: "#fff8ee", intensity: 0.45, position: [1.3, 230, 45] });
+  }
+
+  // aspetto degli edifici: semplici (grigio chiaro), colorati secondo l'altezza (bassi chiari, alti azzurri) o con finestre
+  _bldPaint(style) {
+    const g = this._g3;
+    const h = ["coalesce", ["get", "render_height"], 8];
+    const base = { "fill-extrusion-height": h, "fill-extrusion-base": ["coalesce", ["get", "render_min_height"], 0],
+      "fill-extrusion-vertical-gradient": true };
+    if (style === "semplici") return { ...base, "fill-extrusion-color": "#d9d4cb", "fill-extrusion-opacity": 0.85 };
+    if (style === "finestre") {
+      if (!g.hasImage("bld-win")) g.addImage("bld-win", this._windowPattern(), { pixelRatio: 2 });
+      return { ...base, "fill-extrusion-pattern": "bld-win", "fill-extrusion-opacity": 0.95 };
+    }
+    return { ...base, "fill-extrusion-opacity": 0.92,
+      "fill-extrusion-color": ["interpolate", ["linear"], h, 0, "#eef1f4", 10, "#dfe7ef", 25, "#c7d7ea", 50, "#a9c3e3", 100, "#86a9d6", 200, "#6e93c8"] };
+  }
+
+  // facciata chiara con file di finestre azzurre (si ripete sui lati degli edifici)
+  _windowPattern() {
+    const c = document.createElement("canvas");
+    c.width = c.height = 32;
+    const x = c.getContext("2d");
+    x.fillStyle = "#e8edf3";
+    x.fillRect(0, 0, 32, 32);
+    for (const [wx, wy] of [[4, 5], [18, 5], [4, 19], [18, 19]]) {
+      x.fillStyle = "#7d9cc4";
+      x.fillRect(wx, wy, 10, 8);
+      x.fillStyle = "#b9cde6"; // riflesso
+      x.fillRect(wx, wy, 10, 2);
+    }
+    return x.getImageData(0, 0, 32, 32);
   }
 
   _set3dBase() {
@@ -2983,6 +3018,8 @@ class NavigatorPanel extends HTMLElement {
           telefono e scarica anche le quote del terreno: consuma più batteria e dati della mappa piatta.</div>
         <label class="line"><span>Rilievo</span><select data-s="terrainEx">${TERRAIN_EX.map(([v, n]) => `<option value="${v}" ${String(s.terrainEx) === v ? "selected" : ""}>${n}</option>`).join("")}</select></label>
         ${sw("b3d", "Edifici in 3D", "Da vicino, con l'altezza degli edifici dove è nota (OpenFreeMap, dati OpenStreetMap)")}
+        ${s.b3d !== false ? `<label class="line"><span>Stile degli edifici</span><select data-s="bldStyle">${
+          BLD_STYLES.map(([v, n]) => `<option value="${v}" ${(s.bldStyle || "colorati") === v ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>` : ""}
       </div>
       <div class="grp"><h3>Velocità</h3>
         ${sw("camAlert", "Avviso autovelox fissi", "Cartello nella barra della guida e, con le indicazioni vocali o il beep attivi, avviso a 600 metri (da 1 km in autostrada)")}
@@ -3007,7 +3044,7 @@ class NavigatorPanel extends HTMLElement {
     wrap.querySelectorAll("input[data-s]").forEach((el) => el.addEventListener("change", () => {
       s[el.dataset.s] = el.checked;
       this._saveSettings();
-      if (el.dataset.s === "b3d") this._apply3dSettings();
+      if (el.dataset.s === "b3d") { this._apply3dSettings(); this._openSettings(); } // compare o sparisce lo stile degli edifici
       if (el.dataset.s === "autoZoom3d") { this._g3key = null; this._sync3d(); }
       if (el.dataset.s === "voice" && el.checked) this._unlockAudio();
     }));
@@ -3018,7 +3055,7 @@ class NavigatorPanel extends HTMLElement {
       if (k === "lang") s.voiceSel = s.voiceSel === "m" ? "m" : "f"; // le voci cambiano con la lingua
       this._saveSettings();
       if (k === "voiceStyle") { this._unlockAudio(); this._speak(PHRASES[s.lang].test, true, true); }
-      if (k === "terrainEx") this._apply3dSettings();
+      if (k === "terrainEx" || k === "bldStyle") this._apply3dSettings();
       if (k === "lang" && this._result && !this._nav) this._compute(false); // indicazioni nella nuova lingua
       this._openSettings();
     }));

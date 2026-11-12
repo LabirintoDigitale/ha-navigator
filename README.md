@@ -155,7 +155,8 @@ vicina alla macchina; quando la valle si apre torna quella scelta); **◎** rime
 **3D** torna alla mappa piatta; la scelta resta per le volte successive.
 
 - Usa la grafica del telefono (WebGL) e scarica anche le quote del terreno: consuma più batteria e dati della mappa piatta.
-- In ⚙ si sceglie quanto accentuare il rilievo e si possono togliere gli edifici.
+- In ⚙ si sceglie quanto accentuare il rilievo e lo **stile degli edifici**: *Colorati* (bassi chiari, alti azzurri, con chiari e scuri
+  sulle facciate), *Con finestre* (facciate chiare con file di finestre) o *Semplici*; gli edifici si possono anche togliere.
 - La libreria 3D ([MapLibre GL JS](https://maplibre.org)) è inclusa in `frontend/maplibre` e si carica solo alla prima pressione di **3D**.
 
 ### Gallerie
