@@ -6,6 +6,7 @@ Non dipende da Home Assistant: riceve una sessione aiohttp e gli indirizzi dei s
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
 import re
 import time
@@ -17,6 +18,9 @@ import aiohttp
 from .const import LANGUAGES, MAX_EXCLUDE, MODES, USER_AGENT
 
 TIMEOUT = aiohttp.ClientTimeout(total=30)
+LANES_TIMEOUT = aiohttp.ClientTimeout(total=6)  # le corsie sono un di più: il percorso non le aspetta a lungo
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class NavigatorError(Exception):
@@ -258,6 +262,7 @@ class MapServices:
             result["auto_excluded"] = auto_excluded
             if MODES[mode][0] in ("auto", "motorcycle"):
                 await self._speed_limits(result["routes"][0], MODES[mode][0])
+                await self._lanes(result["routes"], points, mode)
         except NavigatorError as err:
             if getattr(err, "no_route", False):
                 raise
@@ -274,6 +279,58 @@ class MapServices:
             r.pop("_legs_enc", None)
             r.setdefault("speed_limits", [])
         return result
+
+    async def _lanes(self, routes: list[dict], points: list[dict], mode: str) -> None:
+        """Corsie agli incroci: Valhalla non le fornisce, OSRM sì (dalle corsie mappate in OpenStreetMap).
+
+        Si chiede a OSRM lo stesso tragitto, si raccolgono gli incroci con le corsie e si agganciano alle manovre di
+        Valhalla nello stesso punto e con la stessa direzione d'arrivo; le corsie da tenere si scelgono in base alla
+        manovra. Se OSRM non risponde le indicazioni restano senza corsie.
+        """
+        coords = ";".join(f"{p['lon']},{p['lat']}" for p in points)
+        url = f"{self.osrm}/routed-{MODES[mode][1]}/route/v1/driving/{coords}"
+        try:
+            async with self._session.get(url, params={"overview": "false", "steps": "true", "alternatives": "false"},
+                                         headers=self._headers, timeout=LANES_TIMEOUT) as resp:
+                if resp.status >= 400:
+                    raise NavigatorError(f"errore {resp.status}")
+                data = await resp.json(content_type=None)
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, NavigatorError) as err:
+            _LOGGER.debug("Corsie non disponibili: %s", err)
+            return
+        found = []  # (lat, lon, direzione d'arrivo, corsie)
+        for r in (data.get("routes") or [])[:1]:
+            for leg in r.get("legs", []):
+                for step in leg.get("steps", []):
+                    for it in step.get("intersections", []):
+                        lanes = _osrm_lanes([it])
+                        if not lanes or "in" not in it:
+                            continue
+                        loc = it["location"]
+                        found.append((loc[1], loc[0], (it["bearings"][it["in"]] + 180) % 360, lanes))
+        if not found:
+            return
+        for route in routes:
+            sh = route["shape"]
+            for m in route["maneuvers"]:
+                want = _LANE_WANT.get(m.get("type"))
+                b = m["begin"]
+                if want is None or b < 1 or b >= len(sh):
+                    continue
+                here = sh[b]
+                arrive = _bearing(sh[b - 1], here)
+                best = None
+                for lat, lon, brg, lanes in found:
+                    d = _dist_m(here[0], here[1], lat, lon)
+                    if d <= 25 and abs((arrive - brg + 540) % 360 - 180) < 45 and (best is None or d < best[0]):
+                        best = (d, lanes)
+                if not best:
+                    continue
+                lanes = [{"d": ln["d"], "v": any(x in want for x in ln["d"])} for ln in best[1]]
+                if not any(ln["v"] for ln in lanes):
+                    lanes = best[1]  # nessuna corsia con quella freccia: si tengono quelle valide per OSRM
+                if len(lanes) > 1:
+                    m["lanes"] = lanes
 
     async def _speed_limits(self, route: dict, costing: str) -> None:
         """Limiti di velocità lungo il percorso: [[inizio, fine, km/h], ...] sugli indici della forma."""
@@ -379,6 +436,7 @@ class MapServices:
                     "toll": bool(m.get("toll")),
                     "highway": bool(m.get("highway")),
                     "ferry": m.get("travel_type") == "ferry" or bool(m.get("ferry")),
+                    "exit": m.get("roundabout_exit_count") or None,
                     "begin": offset + m.get("begin_shape_index", 0),
                     "end": offset + m.get("end_shape_index", 0),
                     "leg": leg_no,
@@ -432,6 +490,8 @@ class MapServices:
                         "toll": toll,
                         "highway": any("motorway" in (i.get("classes") or []) for i in step.get("intersections", [])),
                         "ferry": step.get("mode") == "ferry",
+                        "exit": step["maneuver"].get("exit") if "roundabout" in step["maneuver"].get("type", "") or "rotary" in step["maneuver"].get("type", "") else None,
+                        "lanes": _osrm_lanes(step.get("intersections") or [{}]),
                         "begin": begin,
                         "end": begin,
                         "leg": leg_no,
@@ -455,6 +515,35 @@ class MapServices:
                 "toll_km": round(sum(s["length_km"] for s in toll_segments), 1),
             })
         return {"engine": "osrm", "routes": routes}
+
+
+# manovre di Valhalla -> frecce delle corsie da tenere (indicazioni OSRM/OpenStreetMap)
+_STRAIGHT = ("straight", "none")
+_LANE_WANT = {
+    8: _STRAIGHT, 17: _STRAIGHT, 22: _STRAIGHT,
+    9: ("slight right", "right"), 18: ("slight right", "right"), 20: ("slight right", "right"), 23: ("slight right", "right"),
+    10: ("right",), 11: ("sharp right", "right"),
+    16: ("slight left", "left"), 19: ("slight left", "left"), 21: ("slight left", "left"), 24: ("slight left", "left"),
+    15: ("left",), 14: ("sharp left", "left"),
+    12: ("uturn",), 13: ("uturn",),
+}
+
+
+def _osrm_lanes(intersections: list[dict]) -> list[dict] | None:
+    """Corsie del primo incrocio (quello della manovra): [{"d": ["left", "straight"], "v": True}, ...]."""
+    lanes = (intersections[0] if intersections else {}).get("lanes") or []
+    out = [{"d": list(ln.get("indications") or ["none"]), "v": bool(ln.get("valid"))} for ln in lanes]
+    return out if len(out) > 1 else None
+
+
+def _dist_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    kx = 111320 * math.cos(math.radians(lat1))
+    return math.hypot((lon2 - lon1) * kx, (lat2 - lat1) * 110540)
+
+
+def _bearing(a: list[float], b: list[float]) -> float:
+    kx = math.cos(math.radians(a[0]))
+    return (math.degrees(math.atan2((b[1] - a[1]) * kx, b[0] - a[0])) + 360) % 360
 
 
 def _nearest_index(shape: list[list[float]], point: list[float]) -> int:

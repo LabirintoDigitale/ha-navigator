@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.5.15";
+const PANEL_VERSION = "1.6.0";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -93,6 +93,13 @@ function arrival(sec) {
 function maneuverIcon(m) {
   if (m.ferry) return "⛴️";
   const t = m.type;
+  // rotonda: il numero dell'uscita ben visibile
+  if (m.exit && (t === 26 || t === 0 || (m.text || "").toLowerCase().includes("rotonda"))) {
+    // anello della rotonda (con la freccia del senso di giro, antiorario) e uscita verso l'alto; dentro il numero dell'uscita
+    return `<svg class="rbx" viewBox="0 0 40 40" title="${m.exit}ª uscita"><circle cx="20" cy="25" r="10.5" fill="none" stroke="currentColor" stroke-width="3"/>
+      <path d="M20 14.5V3M15.5 7.5 20 3l4.5 4.5M7.5 21.5l2 4.5 4-2.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="20" y="30.5" text-anchor="middle" font-size="14" font-weight="800" font-family="sans-serif" fill="currentColor">${m.exit}</text></svg>`;
+  }
   if ([1, 2, 3].includes(t)) return "🟢";
   if ([4, 5, 6].includes(t)) return "🏁";
   if ([9, 10, 11].includes(t)) return "↱";
@@ -107,6 +114,24 @@ function maneuverIcon(m) {
   if (txt.includes("destra")) return "↱";
   if (txt.includes("sinistra")) return "↰";
   return "↑";
+}
+
+// frecce di una corsia (come sui cartelli): una o più indicazioni sovrapposte, la punta in alto è "dritto"
+// tutte partono dallo stesso fusto in basso al centro, così più frecce insieme formano un'unica figura
+const LANE_PATHS = {
+  straight: "M12 21V4M7.5 8.5 12 4l4.5 4.5",
+  none: "M12 21V4M7.5 8.5 12 4l4.5 4.5",
+  right: "M12 21v-8q0-4 4-4h3.5M16 5.5l3.5 3.5-3.5 3.5",
+  left: "M12 21v-8q0-4-4-4H4.5M8 5.5 4.5 9 8 12.5",
+  "slight right": "M12 21v-7l6-6M13 7.5h5.5V13",
+  "slight left": "M12 21v-7L6 8M11 7.5H5.5V13",
+  "sharp right": "M12 21v-9l6 6M18 12.5V18h-5.5",
+  "sharp left": "M12 21v-9l-6 6M6 12.5V18h5.5",
+  uturn: "M14 21V9a4 4 0 0 0-8 0v7M3 13l3 3 3-3",
+};
+function laneSvg(dirs) {
+  const ds = dirs.filter((d) => LANE_PATHS[d]);
+  return `<svg viewBox="0 0 24 24">${(ds.length ? ds : ["none"]).map((d) => `<path d="${LANE_PATHS[d]}"/>`).join("")}</svg>`;
 }
 
 // il veicolo in navigazione: fuoristrada blu scuro visto dall'alto, tetto in due pannelli e hardtop posteriore grigio;
@@ -588,6 +613,14 @@ const STYLE = `
   /* frecce del verso di marcia sul percorso (2D) */
   .rarrow { width: 16px; height: 16px; background: no-repeat center / 16px 16px
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 11 8 5l5 6' fill='none' stroke='%23263238' stroke-width='4.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M3 11 8 5l5 6' fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+  /* rotonda con il numero dell'uscita */
+  .rbx { width: 1.15em; height: 1.15em; vertical-align: middle; color: inherit; }
+  /* corsie sotto l'indicazione: chiare quelle da tenere */
+  .lanes { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+  .lanes .ln { width: 30px; height: 34px; border-radius: 5px; background: rgba(0,0,0,.25); display: flex; align-items: center; justify-content: center; }
+  .lanes .ln svg { width: 24px; height: 24px; fill: none; stroke: rgba(255,255,255,.35); stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+  .lanes .ln.on { background: rgba(255,255,255,.18); box-shadow: inset 0 0 0 2px #fff; }
+  .lanes .ln.on svg { stroke: #fff; }
 `;
 
 class NavigatorPanel extends HTMLElement {
@@ -3145,7 +3178,10 @@ class NavigatorPanel extends HTMLElement {
       const next = ms[k + 1] || ms[k];
       const toNext = Math.max(0, rt._cum[next.begin] - along);
       top.className = "navtop";
-      top.innerHTML = `<span class="ic">${maneuverIcon(next)}</span><div><div class="d">${toNext < 15 ? "Ora" : fmtDist(toNext)}</div><div class="t">${esc(next.text)}</div></div>`;
+      // corsie da tenere (dove sono mappate), entro 2 km dalla manovra
+      const lanes = next.lanes && toNext < 2000
+        ? `<div class="lanes" title="Corsie: quelle chiare sono quelle da tenere">${next.lanes.map((l) => `<span class="ln ${l.v ? "on" : ""}">${laneSvg(l.d)}</span>`).join("")}</div>` : "";
+      top.innerHTML = `<span class="ic">${maneuverIcon(next)}</span><div><div class="d">${toNext < 15 ? "Ora" : fmtDist(toNext)}</div><div class="t">${esc(next.text)}</div>${lanes}</div>`;
     }
     // tempo e distanza rimanenti
     let remTime = rt.summary.time;

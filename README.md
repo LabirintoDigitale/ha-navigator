@@ -33,6 +33,9 @@ marcia e ti segue. Con **▲ / ▼** scegli la prospettiva, dalla vista dall'alt
   - **Ricalcola senza pedaggi**: Navigator evita le strade a pagamento e, se il server ne usa ancora qualcuna, la esclude e ricalcola finché il percorso è gratuito;
   - **Togli** una singola tratta: il percorso viene ricalcolato senza quella tratta (segnata con ✕ sulla mappa); le tratte tolte si possono ripristinare.
 - **Indicazioni passo passo** in italiano: clic su un passo per vederlo sulla mappa.
+- **Rotonde** con il numero dell'uscita ben visibile nell'icona, e **corsie** (auto e moto) sotto l'indicazione in guida, come in
+  autostrada: le corsie da tenere sono chiare, le altre spente. Le corsie vengono da OSRM (dati di OpenStreetMap) e compaiono
+  solo dove sono mappate.
 - **Navigazione** con la tua posizione: la mappa ti segue, in alto vedi la prossima manovra e la distanza, in basso tempo e km rimanenti e l'orario di arrivo. Se esci dal percorso per qualche secondo compare il popup **"Ricalcolo del percorso…"** e Navigator rifà la strada da dove sei (con le stesse opzioni: pedaggi, tratte tolte, tappe ancora da raggiungere).
 - Apri il percorso in **Google Maps**, **Waze** o **OpenStreetMap**, oppure copia il riepilogo.
 - Mappe gratuite senza chiave: stradale, topografica, scura e satellite (Esri), escursionistica (OpenTopoMap).
@@ -66,7 +69,7 @@ Tutte le richieste partono da Home Assistant (nessuna chiave, nessun account):
 | A cosa serve | Servizio | Note |
 | --- | --- | --- |
 | Percorsi | [Valhalla](https://github.com/valhalla/valhalla) su `valhalla1.openstreetmap.de` (FOSSGIS) | istruzioni in italiano, pedaggi, alternative |
-| Percorsi (riserva) | [OSRM](https://project-osrm.org/) su `routing.openstreetmap.de` (FOSSGIS) | usato solo se Valhalla non risponde; senza opzioni "evita" |
+| Percorsi (riserva) e corsie | [OSRM](https://project-osrm.org/) su `routing.openstreetmap.de` (FOSSGIS) | percorso se Valhalla non risponde (senza opzioni "evita"); in auto e moto le corsie agli incroci |
 | Ricerca | [Photon](https://photon.komoot.io) (komoot) | suggerimenti mentre scrivi |
 | Ricerca e indirizzi (riserva) | [Nominatim](https://nominatim.org) di OpenStreetMap | max 1 richiesta al secondo |
 | Distributori (Italia) | [Anagrafica impianti attivi del MIMIT](https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv) | una volta al giorno, con la marca |
