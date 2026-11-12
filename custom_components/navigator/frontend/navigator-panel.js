@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.6";
+const PANEL_VERSION = "1.9.7";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -2867,12 +2867,13 @@ class NavigatorPanel extends HTMLElement {
       return x - Math.floor(x);
     };
     const MC = window.maplibregl.MercatorCoordinate;
+    const dist2 = (la, lo) => (la - lat0) ** 2 + ((lo - lon0) * 0.7) ** 2;
     let ground = 0; // quota del terreno al centro (già col rilievo accentuato): le nuvole stanno sopra
     try { ground = this._g3.queryTerrainElevation([lon0, lat0]) || 0; } catch (e) { /* senza rilievo */ }
-    const STEP = 0.014; // ~1,5 km
+    const STEP = 0.012; // ~1,3 km
     const out = [];
     const ci = Math.round(lat0 / STEP), cj = Math.round(lon0 / STEP);
-    const R = 12; // caselle per lato: ~18 km intorno al centro
+    const R = 15; // caselle per lato: ~18 km intorno al centro
     for (let i = ci - R; i <= ci + R; i++) {
       for (let j = cj - R; j <= cj + R; j++) {
         const la = i * STEP, lo = j * STEP;
@@ -2882,17 +2883,22 @@ class NavigatorPanel extends HTMLElement {
         for (let n = 0; n < 3; n++) {
           if (rnd(i, j, n) > Math.min(0.97, 0.05 + (cover / 100) * 0.95) * [1, 0.8, 0.5][n]) continue;
           const clat = la + (rnd(i, j, n + 10) - 0.5) * STEP, clon = lo + (rnd(i, j, n + 20) - 0.5) * STEP * 1.4;
-          const size = 260 + rnd(i, j, n + 30) * 600 * (0.6 + cover / 200); // metri
+          const size = 200 + rnd(i, j, n + 30) * 420 * (0.6 + cover / 200); // metri
           const m = MC.fromLngLat([clon, clat], 0);
           const puffs = [];
-          const np = 5 + Math.floor(rnd(i, j, n + 50) * 5);
+          const np = 4 + Math.floor(rnd(i, j, n + 50) * 4);
           for (let k = 0; k < np; k++) {
             const ang = rnd(i, j, n * 11 + k + 60) * Math.PI * 2;
             const off = k ? size * (0.3 + rnd(i, j, n * 11 + k + 70) * 0.7) : 0;
             puffs.push({ dx: Math.cos(ang) * off, dy: Math.sin(ang) * off * 0.6, dz: (k ? rnd(i, j, n * 11 + k + 90) * 0.5 : 0.3) * size * 0.6,
               r: size * (k ? 0.3 + rnd(i, j, n * 11 + k + 80) * 0.3 : 0.55) });
+            if (puffs.length > 1 && dist2(clat, clon) > 0.008) break; // lontane: bastano due sbuffi, si vedono piccole
           }
-          out.push({ x: m.x, y: m.y, alt: ground + 1000 + rnd(i, j, n + 40) * 1200, rain: !!w?.rain, puffs });
+          // quota: 500–1400 m sopra il terreno (quello del punto, se già caricato, o quello al centro), così le nuvole
+          // galleggiano sopra il paesaggio e si vedono anche con poco cielo sullo schermo
+          let gl = ground;
+          try { gl = Math.max(ground, this._g3.queryTerrainElevation([clon, clat]) || 0); } catch (e) { /* fuori dai dati del rilievo */ }
+          out.push({ x: m.x, y: m.y, alt: gl + 500 + rnd(i, j, n + 40) * 900, rain: !!w?.rain, puffs });
         }
       }
     }
@@ -2969,8 +2975,9 @@ class NavigatorPanel extends HTMLElement {
         const rad = ((pf.r * u) / z) * F;
         if (rad < 1 || sx + rad < 0 || sx - rad > W || sy + rad < 0 || sy - rad > H) continue;
         const dist = Math.hypot(vx, vy, vz) / u;
-        // sfumano lontano (oltre ~15 km) e molto vicino, per non coprire tutto lo schermo
-        const a = Math.min(1, Math.max(0, (22000 - dist) / 7000)) * Math.min(1, Math.max(0, (dist - 300) / 900));
+        // sfumano lontano (oltre ~15 km), vicino alla telecamera e nella parte bassa dello schermo (la strada resta libera)
+        const a = Math.min(1, Math.max(0, (22000 - dist) / 7000)) * Math.min(1, Math.max(0, (dist - 1200) / 1600))
+          * Math.min(1, Math.max(0, (H * 0.62 - sy) / (H * 0.3)));
         if (a <= 0.02) continue;
         items.push([z, sx, sy, rad, a, c.rain]);
       }
@@ -2980,8 +2987,9 @@ class NavigatorPanel extends HTMLElement {
     const top = 0.92 * Math.min(1, Math.max(0, (g.getPitch() - 40) / 15));
     if (top <= 0) return;
     for (const [, sx, sy, rad, a, rain] of items) {
-      x.globalAlpha = a * top;
+      x.globalAlpha = a * top * 0.6;
       x.drawImage(rain ? rainS : shadow, sx - rad, sy - rad * 0.8, rad * 2, rad * 2); // ombra sotto
+      x.globalAlpha = a * top;
       x.drawImage(rain ? rainL : light, sx - rad, sy - rad * 1.1, rad * 2, rad * 2);
     }
     x.globalAlpha = 1;
