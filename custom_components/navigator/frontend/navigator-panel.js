@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.5.9";
+const PANEL_VERSION = "1.5.10";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -993,6 +993,7 @@ class NavigatorPanel extends HTMLElement {
     box.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
       this._mode = b.dataset.m;
       this._renderModes();
+      this._drawMarkers(); // il veicolo della posizione cambia col mezzo
       this._saveState();
       this._autoCompute();
     }));
@@ -1086,11 +1087,12 @@ class NavigatorPanel extends HTMLElement {
       L.marker([this._dev.lat, this._dev.lon], { title: "Questo dispositivo (GPS o posizione stimata dal browser)",
         icon: L.divIcon({ className: "", html: '<div class="me dev"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }) }).addTo(this._markerLayer);
     }
+    // la posizione seguita ("Segui la posizione di") è il veicolo del mezzo scelto, come in guida (dove c'è già il suo)
     if (this._me && !this._nav) {
       const src = this._me.src && this._me.src !== "gps" ? this._hass?.states?.[this._me.src]?.attributes?.friendly_name : "";
       L.marker([this._me.lat, this._me.lon], { title: src ? `${src} (posizione da Home Assistant)` : "Questo dispositivo",
-        icon: L.divIcon({ className: "", html: '<div class="me"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }),
-        title: "La mia posizione", interactive: false }).addTo(this._markerLayer);
+        icon: L.divIcon({ className: "", html: `<div class="nav-car">${VEHICLE_SVG[this._mode] || CAR_SVG}</div>`,
+          iconSize: [47, 47], iconAnchor: [23.5, 23.5] }), zIndexOffset: 900 }).addTo(this._markerLayer);
     }
   }
 

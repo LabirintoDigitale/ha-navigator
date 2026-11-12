@@ -95,7 +95,7 @@ Risposta: `duration_min`, `distance_km`, `has_toll`, `toll_km`, `has_highway`, `
 
 ## Navigazione e posizione
 
-Dopo aver calcolato un percorso, nella sezione **Navigazione** scegli da dove prendere la posizione e premi **Parti**. La stessa scelta vale per il **punto blu** di ◎ *La mia posizione* (anche prima di partire e come partenza "La mia posizione"); il link *📱 Mostra la posizione di questo dispositivo* mette un segnaposto grigio sul GPS (o sulla posizione stimata dal browser) del dispositivo che stai usando. Accanto a persone e dispositivi il menu dice da quanto è arrivata la loro ultima posizione; se è più vecchia di 10 minuti, **Parti** avvisa prima di partire:
+Dopo aver calcolato un percorso, nella sezione **Navigazione** scegli da dove prendere la posizione e premi **Parti**. La stessa scelta vale per ◎ *La mia posizione*, che mostra il **veicolo** del mezzo scelto in quel punto, (anche prima di partire e come partenza "La mia posizione"); il link *📱 Mostra la posizione di questo dispositivo* mette un segnaposto grigio sul GPS (o sulla posizione stimata dal browser) del dispositivo che stai usando. Accanto a persone e dispositivi il menu dice da quanto è arrivata la loro ultima posizione; se è più vecchia di 10 minuti, **Parti** avvisa prima di partire:
 
 - **GPS di questo dispositivo**: il più preciso, ma il browser lo concede solo se Home Assistant è aperto in **HTTPS**.
   Si può scegliere anche nell'**app Companion per Android**, che però spesso non passa il GPS alle pagine anche con tutte le autorizzazioni
