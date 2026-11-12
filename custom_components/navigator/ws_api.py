@@ -400,11 +400,12 @@ async def ws_trip_finish(hass: HomeAssistant, connection: websocket_api.ActiveCo
 @websocket_api.websocket_command({
     vol.Required("type"): "navigator/poi_tiles",
     vol.Required("tiles"): vol.All([vol.All(vol.Length(min=2, max=2), [vol.Coerce(int)])], vol.Length(min=1, max=16)),
+    vol.Optional("kinds", default=[]): [str],
 })
 @websocket_api.async_response
 async def ws_poi_tiles(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
     """Punti di interesse di più riquadri con una sola richiesta a Overpass (quelli già in memoria non si richiedono)."""
     async def go():
-        return await _data(hass).pois.poi_tiles([(x, y) for x, y in msg["tiles"]])
+        return await _data(hass).pois.poi_tiles([(x, y) for x, y in msg["tiles"]], msg["kinds"])
 
     await _run(connection, msg["id"], go())

@@ -178,17 +178,28 @@ class Pois:
                     raise PoiError(data["remark"][:80])
                 return data.get("elements", [])
 
-        tasks = [asyncio.ensure_future(one(u)) for u in OVERPASS_URLS]
+        async def named(url: str) -> list[dict]:
+            try:
+                return await one(url)
+            except asyncio.TimeoutError as err:
+                raise PoiError(f"{url.split('/')[2]}: nessuna risposta in {int(timeout)} s") from err
+            except aiohttp.ClientError as err:
+                raise PoiError(f"{url.split('/')[2]}: {err.__class__.__name__}") from err
+            except ValueError as err:
+                raise PoiError(f"{url.split('/')[2]}: risposta non valida") from err
+
+        tasks = [asyncio.ensure_future(named(u)) for u in OVERPASS_URLS]
+        errs: list[str] = []
         try:
             for fut in asyncio.as_completed(tasks):
                 try:
                     return await fut
-                except (PoiError, aiohttp.ClientError, asyncio.TimeoutError, ValueError):
-                    continue
+                except PoiError as err:
+                    errs.append(str(err).replace("errore 429", "errore 429 (troppe richieste)").replace("errore 504", "errore 504 (server sovraccarico)"))
         finally:
             for t in tasks:
                 t.cancel()
-        raise PoiError("I server di OpenStreetMap (Overpass) non rispondono")
+        raise PoiError("I server di OpenStreetMap (Overpass) non rispondono" + (f" ({'; '.join(errs)})" if errs else ""))
 
     @staticmethod
     def _osm_item(e: dict) -> dict | None:
@@ -331,8 +342,12 @@ class Pois:
 
     # ------------------------------------------------------------------ punti di interesse sulla mappa
 
-    async def poi_tiles(self, tiles: list[tuple[int, int]]) -> dict:
-        """Più riquadri con una sola richiesta a Overpass (quelli mancanti); i punti si dividono per riquadro."""
+    async def poi_tiles(self, tiles: list[tuple[int, int]], kinds: list[str] | None = None) -> dict:
+        """Più riquadri con una sola richiesta a Overpass (quelli mancanti); i punti si dividono per riquadro.
+
+        Se Overpass non risponde, riserva con Photon per le categorie scelte: solo i punti con un nome adatto (parziali,
+        non tenuti in memoria).
+        """
         now = time.time()
         missing = [k for k in tiles if not (self._poi_tiles.get(k) and now - self._poi_tiles[k][0] < POI_TILE_MAX_AGE)]
         if missing:
@@ -342,7 +357,16 @@ class Pois:
                 items = await self._poi_query(y0 * POI_TILE, x0 * POI_TILE, (y1 + 1) * POI_TILE, (x1 + 1) * POI_TILE)
             except PoiError as err:
                 _LOGGER.warning("Punti di interesse non scaricati da Overpass: %s", err)
-                raise
+                if not kinds:
+                    raise
+                found = await self._poi_photon(y0 * POI_TILE, x0 * POI_TILE, (y1 + 1) * POI_TILE, (x1 + 1) * POI_TILE, kinds)
+                out = []
+                for x, y in tiles:
+                    its = [it for it in found if math.floor(it["lon"] / POI_TILE) == x and math.floor(it["lat"] / POI_TILE) == y]
+                    if (x, y) not in missing:
+                        its = (self._poi_tiles.get((x, y)) or (0, []))[1]
+                    out.append({"x": x, "y": y, "items": its, "partial": (x, y) in missing})
+                return {"tiles": out, "partial": True, "reason": str(err)}
             split: dict[tuple[int, int], list] = {(x, y): [] for x in range(x0, x1 + 1) for y in range(y0, y1 + 1)}
             for it in items:
                 key = (math.floor(it["lon"] / POI_TILE), math.floor(it["lat"] / POI_TILE))
@@ -355,6 +379,31 @@ class Pois:
                 self._poi_tiles.popitem(last=False)
         return {"tiles": [{"x": x, "y": y, "items": (self._poi_tiles.get((x, y)) or (0, []))[1]} for x, y in tiles]}
 
+    async def _poi_photon(self, s: float, w: float, n: float, e: float, kinds: list[str]) -> list[dict]:
+        """Riserva: per ogni categoria scelta, i punti con un nome trovati da Photon nella zona."""
+        async def one(kind: str) -> list[dict]:
+            term, tags = _POI_PHOTON.get(kind, (None, []))
+            if not term:
+                return []
+            params = [("q", term), ("limit", 50), ("bbox", f"{w:.5f},{s:.5f},{e:.5f},{n:.5f}")] + [("osm_tag", t) for t in tags]
+            try:
+                async with self._session.get(f"{self._photon}/api", params=params, headers={"User-Agent": USER_AGENT},
+                                             timeout=aiohttp.ClientTimeout(total=12)) as resp:
+                    resp.raise_for_status()
+                    data = await resp.json(content_type=None)
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+                return []
+            out = []
+            for f in data.get("features", []):
+                c = (f.get("geometry") or {}).get("coordinates") or [0, 0]
+                pr = f.get("properties", {})
+                out.append({"lat": c[1], "lon": c[0], "id": f"{(pr.get('osm_type') or 'N')[0].lower()}{pr.get('osm_id', '')}",
+                            "k": kind, "name": pr.get("name") or ""})
+            return out
+
+        res = await asyncio.gather(*(one(k) for k in kinds[:8]))
+        return [it for r in res for it in r]
+
     async def _poi_query(self, s: float, w: float, n: float, e: float) -> list[dict]:
         bb = f"({s:.4f},{w:.4f},{n:.4f},{e:.4f})"
         q = ("[out:json][timeout:25];("
@@ -362,10 +411,7 @@ class Pois:
              f'nwr["shop"~"^({"|".join(_POI_SHOP)})$"]{bb};'
              f'nwr["tourism"~"^({"|".join(_POI_TOURISM)})$"]{bb};'
              ");out center tags;")
-        try:
-            els = await self._overpass_race(q, 25)  # tutti i server insieme: vince la prima risposta valida
-        except PoiError:
-            els = await self._overpass(q, 30)  # nessuno ha risposto in tempo: uno alla volta, con più pazienza
+        els = await self._overpass_race(q, 20)  # tutti i server insieme: vince la prima risposta valida, o si rinuncia
         items = []
         for el in els:
             it = self._osm_item(el)
@@ -594,3 +640,16 @@ def _poi_kind(tags: dict) -> str | None:
         if kind:
             return kind
     return None
+
+
+# riserva con Photon: parola da cercare e tag OpenStreetMap di ogni categoria
+_POI_PHOTON = {
+    "farmacia": ("farmacia", ["amenity:pharmacy"]), "ospedale": ("ospedale", ["amenity:hospital", "amenity:clinic"]),
+    "supermercato": ("supermercato", ["shop:supermarket"]), "ristorante": ("ristorante", ["amenity:restaurant", "amenity:fast_food"]),
+    "bar": ("bar", ["amenity:cafe", "amenity:bar", "amenity:pub"]), "banca": ("banca", ["amenity:bank", "amenity:atm"]),
+    "hotel": ("hotel", ["tourism:hotel", "tourism:guest_house", "tourism:motel", "tourism:hostel"]),
+    "ricarica": ("ricarica", ["amenity:charging_station"]), "carburante": ("distributore", ["amenity:fuel"]),
+    "polizia": ("carabinieri", ["amenity:police"]), "posta": ("poste", ["amenity:post_office"]),
+    "officina": ("officina", ["shop:car_repair", "shop:tyres"]), "scuola": ("scuola", ["amenity:school"]),
+    "chiesa": ("chiesa", ["amenity:place_of_worship"]),
+}

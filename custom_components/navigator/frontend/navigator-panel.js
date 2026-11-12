@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.8.4";
+const PANEL_VERSION = "1.8.5";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -4019,15 +4019,21 @@ class NavigatorPanel extends HTMLElement {
     this._poiView = tiles.slice(0, 9).map((t) => `${t.x},${t.y}`);
     this._renderPois();
     const view = this._poiView;
-    const todo = view.filter((key) => { const t = this._poiTiles.get(key); return !(t && (t.items || t.pending || Date.now() - (t.failed || 0) < 60000)); });
+    const fresh = (t) => t && ((t.items && !(t.partial && Date.now() - t.at > 120000)) || t.pending || Date.now() - (t.failed || 0) < 60000);
+    const todo = view.filter((key) => !fresh(this._poiTiles.get(key)));
     if (todo.length) this._poiStatus("loading");
     else this._poiStatusAfter();
     if (todo.length) {
       // una sola richiesta per tutti i riquadri mancanti (il backend li divide e li tiene in memoria)
       for (const key of todo) this._poiTiles.set(key, { pending: true });
       try {
-        const r = await this._hass.callWS({ type: "navigator/poi_tiles", tiles: todo.map((k) => k.split(",").map(Number)) });
-        for (const t of r.tiles || []) this._poiTiles.set(`${t.x},${t.y}`, { items: t.items || [] });
+        // al massimo 45 s: oltre, errore e Riprova (il backend si arrende prima, con la riserva di Photon)
+        const r = await Promise.race([
+          this._hass.callWS({ type: "navigator/poi_tiles", tiles: todo.map((k) => k.split(",").map(Number)), kinds: [...this._poiKindsOn()] }),
+          new Promise((_, ko) => setTimeout(() => ko({ message: "nessuna risposta da Home Assistant in 45 s" }), 45000)),
+        ]);
+        for (const t of r.tiles || []) this._poiTiles.set(`${t.x},${t.y}`, { items: t.items || [], partial: !!t.partial, at: Date.now() });
+        this._poiReason = r.partial ? r.reason : "";
       } catch (e) {
         for (const key of todo) this._poiTiles.set(key, { failed: Date.now(), error: e }); // si riprova fra un minuto
       }
@@ -4040,6 +4046,10 @@ class NavigatorPanel extends HTMLElement {
   _poiStatusAfter() {
     const tiles = (this._poiView || []).map((k) => this._poiTiles.get(k)).filter(Boolean);
     if (tiles.some((t) => t.pending)) { this._poiStatus("loading"); return; }
+    if (tiles.some((t) => t.partial)) {
+      this._poiStatus("partial", this._poiReason || "");
+      return;
+    }
     const failed = tiles.find((t) => t.failed);
     if (failed && !tiles.some((t) => t.items?.length)) {
       const e = failed.error || {};
@@ -4056,12 +4066,13 @@ class NavigatorPanel extends HTMLElement {
     if (!el) return;
     clearTimeout(this._poiStatT);
     const text = { far: "📍 Avvicina la mappa per vedere i punti di interesse", loading: "📍 Carico i punti di interesse…",
-      empty: "📍 Nessun punto di interesse in questa zona", error: `⚠ Punti di interesse non caricati: ${esc(detail)}` }[state];
+      empty: "📍 Nessun punto di interesse in questa zona", error: `⚠ Punti di interesse non caricati: ${esc(detail)}`,
+      partial: "⚠ Overpass non risponde: punti parziali (solo quelli trovati con la ricerca)" }[state];
     el.hidden = !text;
     if (!text) return;
-    el.innerHTML = `<span>${text}</span>${state === "error" ? `<button data-ps="retry">Riprova</button>` : ""}`;
+    el.innerHTML = `<span title="${esc(detail)}">${text}</span>${state === "error" || state === "partial" ? `<button data-ps="retry">Riprova</button>` : ""}`;
     el.querySelector('[data-ps="retry"]')?.addEventListener("click", () => {
-      for (const k of this._poiView || []) if (this._poiTiles.get(k)?.failed) this._poiTiles.delete(k);
+      for (const k of this._poiView || []) { const t = this._poiTiles.get(k); if (t?.failed || t?.partial) this._poiTiles.delete(k); }
       this._loadPois();
     });
     if (state === "empty") this._poiStatT = setTimeout(() => { el.hidden = true; }, 4000);
