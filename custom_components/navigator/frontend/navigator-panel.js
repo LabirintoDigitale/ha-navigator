@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.5.8";
+const PANEL_VERSION = "1.5.9";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -400,6 +400,7 @@ const STYLE = `
   .xmark { width: 22px; height: 22px; border-radius: 50%; background: #c62828; color: #fff; border: 2px solid #fff;
     display: flex; align-items: center; justify-content: center; font: 700 13px sans-serif; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
   .me { width: 16px; height: 16px; border-radius: 50%; background: #1a73e8; border: 3px solid #fff; box-shadow: 0 0 0 6px rgba(26,115,232,.25); }
+  .me.dev { background: #607d8b; box-shadow: 0 0 0 6px rgba(96,125,139,.25); }
   .popup .n { font-weight: 600; font-size: 14px; } .popup .a { font-size: 12px; color: #666; margin: 2px 0 8px; }
   .popup .row button { font-size: 12px; padding: 5px 7px; background: #fff; color: #222; border: 1px solid #ccc; }
   .verwarn { background: var(--error-color, #db4437); color: #fff; padding: 8px 14px; font-size: 14px; }
@@ -607,6 +608,12 @@ class NavigatorPanel extends HTMLElement {
     this._hass = hass;
     if (this._menuBtn) this._menuBtn.hass = hass;
     if (this._nav && this._nav.source !== "gps") this._entityFix();
+    // punto blu legato a una persona o a un dispositivo: segue le sue posizioni nuove
+    const ms = this._me?.src && this._me.src !== "gps" ? hass.states?.[this._me.src] : null;
+    if (ms && ms.last_updated !== this._me.upd && ms.attributes.latitude != null && this._markerLayer) {
+      this._me = { lat: ms.attributes.latitude, lon: ms.attributes.longitude, src: this._me.src, upd: ms.last_updated };
+      this._drawMarkers();
+    }
     // Home Assistant passa hass prima di inserire il pannello nella pagina: la mappa va creata solo quando è visibile
     if (first && this.isConnected) this._init();
   }
@@ -1075,13 +1082,49 @@ class NavigatorPanel extends HTMLElement {
     }
     // "La mia posizione" (punto blu, il GPS o la stima del browser di questo dispositivo): non in guida, dove la posizione
     // è quella seguita (il veicolo) e un secondo punto confonderebbe (es. la stima del PC accanto alla persona seguita)
+    if (this._dev && !this._nav) {
+      L.marker([this._dev.lat, this._dev.lon], { title: "Questo dispositivo (GPS o posizione stimata dal browser)",
+        icon: L.divIcon({ className: "", html: '<div class="me dev"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }) }).addTo(this._markerLayer);
+    }
     if (this._me && !this._nav) {
-      L.marker([this._me.lat, this._me.lon], { icon: L.divIcon({ className: "", html: '<div class="me"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }),
+      const src = this._me.src && this._me.src !== "gps" ? this._hass?.states?.[this._me.src]?.attributes?.friendly_name : "";
+      L.marker([this._me.lat, this._me.lon], { title: src ? `${src} (posizione da Home Assistant)` : "Questo dispositivo",
+        icon: L.divIcon({ className: "", html: '<div class="me"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }),
         title: "La mia posizione", interactive: false }).addTo(this._markerLayer);
     }
   }
 
-  _locate(fly) {
+  // fonte della posizione scelta in "Segui la posizione di" (anche prima di partire)
+  _meSource() {
+    const list = this._navSources();
+    const v = this.shadowRoot.getElementById("navsrc")?.value;
+    return list.some((x) => x.id === v && x.ok) ? v : this._defaultNavSource(list);
+  }
+
+  // "La mia posizione" (punto blu): quella della fonte scelta in "Segui la posizione di", cioè persona o dispositivo di
+  // Home Assistant (si aggiorna da solo) oppure il GPS di questo dispositivo
+  _locate(fly, src = this._meSource()) {
+    if (src && src !== "gps") {
+      const st = this._hass?.states?.[src];
+      if (st?.attributes?.latitude != null) {
+        this._me = { lat: st.attributes.latitude, lon: st.attributes.longitude, src, upd: st.last_updated };
+        this._drawMarkers();
+        if (fly) this._map.flyTo([this._me.lat, this._me.lon], 15, { duration: 0.8 });
+        return Promise.resolve(this._me);
+      }
+    }
+    return this._locateDevice(fly, "me");
+  }
+
+  // GPS (o stima del browser) di questo dispositivo: nel punto blu ("me") o nel segnaposto grigio ("dev")
+  _locateDevice(fly, target = "me") {
+    const put = (lat, lon) => {
+      const p = { lat, lon, src: "gps" };
+      if (target === "dev") this._dev = p; else this._me = p;
+      this._drawMarkers();
+      if (fly) this._map.flyTo([lat, lon], 15, { duration: 0.8 });
+      return p;
+    };
     return new Promise((resolve) => {
       const android = this._companion() === "android";
       // app Android: se il GPS della pagina non risponde si ripiega sulla propria persona
@@ -1089,10 +1132,7 @@ class NavigatorPanel extends HTMLElement {
         const me = this._myPerson();
         const st = me && this._hass.states[me.id];
         if (!st) return false;
-        this._me = { lat: st.attributes.latitude, lon: st.attributes.longitude };
-        this._drawMarkers();
-        if (fly) this._map.flyTo([this._me.lat, this._me.lon], 15, { duration: 0.8 });
-        resolve(this._me);
+        resolve(put(st.attributes.latitude, st.attributes.longitude));
         return true;
       };
       if (android && !(window.isSecureContext && window.navigator.geolocation)) {
@@ -1106,10 +1146,7 @@ class NavigatorPanel extends HTMLElement {
         return;
       }
       window.navigator.geolocation.getCurrentPosition((pos) => {
-        this._me = { lat: pos.coords.latitude, lon: pos.coords.longitude };
-        this._drawMarkers();
-        if (fly) this._map.flyTo([this._me.lat, this._me.lon], 15, { duration: 0.8 });
-        resolve(this._me);
+        resolve(put(pos.coords.latitude, pos.coords.longitude));
       }, (err) => {
         if (android && fromPerson()) return;
         if (err.code === 1) this._gpsHelp();
@@ -1179,7 +1216,8 @@ class NavigatorPanel extends HTMLElement {
       <label class="muted" style="display:block;margin-bottom:4px">Segui la posizione di</label>
       <select class="inp" id="navsrc">${opts}</select>
       <div class="row" style="margin-top:8px"><button class="primary" data-a="navstart" style="flex:1">▶ Parti</button></div>${hint}
-      <button class="link" data-a="gpshelp" style="margin-top:6px;padding-left:0">📡 Problemi con il GPS? Posizione negata?</button></div>`;
+      <button class="link" data-a="devpos" style="margin-top:6px;padding-left:0;display:block">📱 Mostra la posizione di questo dispositivo</button>
+      <button class="link" data-a="gpshelp" style="margin-top:2px;padding-left:0">📡 Problemi con il GPS? Posizione negata?</button></div>`;
   }
 
   async _startNav(source, force = false) {
@@ -3306,6 +3344,11 @@ class NavigatorPanel extends HTMLElement {
         <div class="muted" style="margin-top:6px">Le app esterne ricalcolano il percorso: le tratte tolte qui non vengono trasmesse.</div></div>`;
     }
     box.innerHTML = html;
+    // cambiando la fonte in "Segui la posizione di", il punto blu passa subito alla nuova fonte
+    box.querySelector("#navsrc")?.addEventListener("change", (e) => {
+      try { localStorage.setItem(`${STORE_KEY}-navsrc`, e.target.value); } catch (err) { /* storage non disponibile */ }
+      if (this._me) this._locate(false, e.target.value);
+    });
     box.querySelectorAll(".alt").forEach((el) => el.addEventListener("click", () => this._select(+el.dataset.i)));
     box.querySelectorAll(".steps li[data-k]").forEach((el) => el.addEventListener("click", () => {
       const m = r.routes[this._sel].maneuvers[+el.dataset.k];
@@ -3344,6 +3387,8 @@ class NavigatorPanel extends HTMLElement {
         this._openNearby(a.slice(5));
       } else if (a === "gpshelp") {
         this._gpsHelp(true);
+      } else if (a === "devpos") {
+        this._locateDevice(true, "dev").then((p) => { if (p) this._msg("Segnaposto grigio: la posizione di questo dispositivo (su un PC è solo una stima)"); });
       } else if (a === "navstop") {
         this._stopNav();
       } else if (a === "copy") {
