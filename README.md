@@ -186,8 +186,11 @@ vicina alla macchina; quando la valle si apre torna quella scelta); **◎** rime
   30 secondi e quando l'app va in secondo piano; senza **Esci** il viaggio resta, segnato "interrotto") con data, partenza e arrivo,
   veicolo, km, tempo, velocità media e massima e la traccia; viaggi raggruppati per mese con i totali, e si possono mostrare sulla
   mappa (più viaggi insieme, colori diversi).
-- **Garage** (⚙): i tuoi veicoli con nome, targa e tipo (auto, moto, scooter, furgone, camper, bici); alla partenza si sceglie il
-  veicolo usato, che resta nell'archivio. Senza veicoli si usa un veicolo predefinito.
+- **Garage** (⚙): i tuoi veicoli con nome, targa e tipo (auto, moto, scooter, furgone, camper, bici, altro). Nel menu **Veicolo**
+  (sopra l'itinerario) c'è in cima **Base**, con i bottoni Auto / Moto / Bici / A piedi per scegliere il mezzo; scegliendo un
+  veicolo del garage i bottoni spariscono: il mezzo del percorso viene dal tipo (moto e scooter → moto, bici → bici, gli altri →
+  auto) e sulla mappa compare il suo disegno visto dall'alto (camper, furgone, fuoristrada per "altro"…). Il veicolo usato resta
+  nell'archivio.
 
 ### Meteo lungo il percorso e modalità notte
 

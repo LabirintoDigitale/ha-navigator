@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.0";
+const PANEL_VERSION = "1.9.1";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -200,7 +200,55 @@ const PIEDI_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" w
   <path d="M15.6 16.8 Q20 11 24.4 16.8 Q20 15.2 15.6 16.8 Z" fill="#0a2150" stroke="#fff" stroke-width=".6"/>
 </svg>`;
 
+// camper visto dall'alto: lungo e bianco, cabina col parabrezza, oblò e pannello solare sul tetto, riga rossa sui fianchi
+const CAMPER_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 92" width="25" height="53">
+  <rect x="1" y="12" width="5" height="12" rx="2" fill="#151515"/><rect x="38" y="12" width="5" height="12" rx="2" fill="#151515"/>
+  <rect x="1" y="66" width="5" height="12" rx="2" fill="#151515"/><rect x="38" y="66" width="5" height="12" rx="2" fill="#151515"/>
+  <rect x="4" y="2" width="36" height="88" rx="6" fill="#f3f2ec" stroke="#fff" stroke-width="1.6"/>
+  <rect x="4" y="2" width="36" height="88" rx="6" fill="none" stroke="#7a7a74" stroke-width=".8"/>
+  <rect x="7" y="3" width="7" height="2.4" rx="1.1" fill="#ffe28a"/><rect x="30" y="3" width="7" height="2.4" rx="1.1" fill="#ffe28a"/>
+  <rect x="7" y="86.6" width="6" height="2.2" rx="1" fill="#e53935"/><rect x="31" y="86.6" width="6" height="2.2" rx="1" fill="#e53935"/>
+  <path d="M8 8 Q22 4 36 8 L34.5 15 Q22 12 9.5 15 Z" fill="#2f4f7f"/>
+  <rect x="4.2" y="20" width="2" height="62" fill="#c62828"/><rect x="37.8" y="20" width="2" height="62" fill="#c62828"/>
+  <rect x="8.5" y="19" width="27" height="66" rx="3" fill="#e9e8e1" stroke="#c8c7bf" stroke-width=".8"/>
+  <rect x="14" y="24" width="16" height="9" rx="2" fill="#a9bcd2" stroke="#7d8fa6" stroke-width=".8"/>
+  <rect x="11" y="39" width="22" height="14" rx="1.2" fill="#24365c" stroke="#101a30" stroke-width=".8"/>
+  <path d="M16.5 39 V53 M22 39 V53 M27.5 39 V53 M11 46 H33" stroke="#4b6596" stroke-width=".7"/>
+  <rect x="16" y="60" width="12" height="9" rx="2" fill="#a9bcd2" stroke="#7d8fa6" stroke-width=".8"/>
+  <rect x="13" y="74" width="18" height="6" rx="1.5" fill="#d6d5cd"/>
+</svg>`;
+
+// furgone visto dall'alto: bianco, parabrezza, nervature sul tetto
+const FURGONE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 84" width="25" height="48">
+  <rect x="1" y="12" width="5" height="12" rx="2" fill="#151515"/><rect x="38" y="12" width="5" height="12" rx="2" fill="#151515"/>
+  <rect x="1" y="60" width="5" height="12" rx="2" fill="#151515"/><rect x="38" y="60" width="5" height="12" rx="2" fill="#151515"/>
+  <rect x="4" y="2" width="36" height="80" rx="7" fill="#f5f5f5" stroke="#fff" stroke-width="1.6"/>
+  <rect x="4" y="2" width="36" height="80" rx="7" fill="none" stroke="#7a7a7a" stroke-width=".8"/>
+  <rect x="7" y="3" width="7" height="2.4" rx="1.1" fill="#ffe28a"/><rect x="30" y="3" width="7" height="2.4" rx="1.1" fill="#ffe28a"/>
+  <rect x="7" y="78.6" width="6" height="2.2" rx="1" fill="#e53935"/><rect x="31" y="78.6" width="6" height="2.2" rx="1" fill="#e53935"/>
+  <path d="M8 9 Q22 4 36 9 L34.5 18 Q22 14 9.5 18 Z" fill="#2f4f7f"/>
+  <rect x="9" y="22" width="26" height="56" rx="2.5" fill="#e6e6e6" stroke="#c4c4c4" stroke-width=".8"/>
+  <path d="M9 30 H35 M9 38 H35 M9 46 H35 M9 54 H35 M9 62 H35 M9 70 H35" stroke="#cdcdcd" stroke-width="1.1"/>
+</svg>`;
+
+// "altro": fuoristrada grigio-verde visto dall'alto
+const ALTRO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 80" width="26" height="47">
+  <rect x="1" y="12" width="5" height="13" rx="2" fill="#151515"/><rect x="38" y="12" width="5" height="13" rx="2" fill="#151515"/>
+  <rect x="1" y="54" width="5" height="13" rx="2" fill="#151515"/><rect x="38" y="54" width="5" height="13" rx="2" fill="#151515"/>
+  <rect x="4" y="2" width="36" height="76" rx="9" fill="#5f6b52" stroke="#fff" stroke-width="1.6"/>
+  <rect x="7" y="3.2" width="7" height="2.6" rx="1.2" fill="#ffe28a"/><rect x="30" y="3.2" width="7" height="2.6" rx="1.2" fill="#ffe28a"/>
+  <rect x="7" y="74.4" width="6" height="2.4" rx="1" fill="#e53935"/><rect x="31" y="74.4" width="6" height="2.4" rx="1" fill="#e53935"/>
+  <path d="M8 27 Q22 19 36 27 L34 32 Q22 26 10 32 Z" fill="#33402b"/>
+  <rect x="10" y="33" width="24" height="34" rx="3" fill="#4d5843" stroke="#2f3828" stroke-width=".8"/>
+  <path d="M12 38 H32 M12 62 H32" stroke="#2b3324" stroke-width="1.4" stroke-linecap="round"/>
+  <path d="M10 68 Q22 72 34 68 L33 72 Q22 75 11 72 Z" fill="#33402b"/>
+</svg>`;
+
 const VEHICLE_SVG = { auto: CAR_SVG, moto: MOTO_SVG, bici: BICI_SVG, piedi: PIEDI_SVG };
+// disegno per tipo di veicolo del garage
+const VEH_TYPE_SVG = { auto: CAR_SVG, moto: MOTO_SVG, scooter: MOTO_SVG, furgone: FURGONE_SVG, camper: CAMPER_SVG, bici: BICI_SVG, altro: ALTRO_SVG };
+// mezzo del percorso per tipo di veicolo
+const VEH_TYPE_MODE = { auto: "auto", furgone: "auto", camper: "auto", altro: "auto", moto: "moto", scooter: "moto", bici: "bici" };
 
 // impostazioni salvate su questo dispositivo
 const SETTINGS_KEY = "navigator-panel-settings";
@@ -1338,7 +1386,7 @@ class NavigatorPanel extends HTMLElement {
     if (this._me && !this._nav) {
       const src = this._me.src && this._me.src !== "gps" ? this._hass?.states?.[this._me.src]?.attributes?.friendly_name : "";
       L.marker([this._me.lat, this._me.lon], { title: src ? `${src} (posizione da Home Assistant)` : "Questo dispositivo",
-        icon: L.divIcon({ className: "", html: `<div class="nav-car">${VEHICLE_SVG[this._mode] || CAR_SVG}</div>`,
+        icon: L.divIcon({ className: "", html: `<div class="nav-car">${this._vehSvg()}</div>`,
           iconSize: [47, 47], iconAnchor: [23.5, 23.5] }), zIndexOffset: 900 }).addTo(this._markerLayer);
     }
   }
@@ -1446,7 +1494,7 @@ class NavigatorPanel extends HTMLElement {
     if (!vb || !sb) return;
     const curV = vb.querySelector("#navveh")?.value || this._vehicleId();
     vb.innerHTML = `<h3>Veicolo</h3><select class="inp" id="navveh">${this._vehicles().map((v) => `<option value="${esc(v.id)}" ${v.id === curV ? "selected" : ""}>${
-      vehIcon(v.type)} ${esc(v.name || "Veicolo")}${v.plate ? ` · ${esc(v.plate)}` : ""}</option>`).join("")}</select>`;
+      v.type ? vehIcon(v.type) : "🧭"} ${esc(v.name || "Veicolo")}${v.plate ? ` · ${esc(v.plate)}` : ""}</option>`).join("")}</select>`;
     const list = this._navSources();
     const curS = sb.querySelector("#navsrc")?.value;
     const def = list.some((x) => x.id === curS && x.ok) ? curS : this._defaultNavSource(list);
@@ -1456,8 +1504,10 @@ class NavigatorPanel extends HTMLElement {
         x.ageText ? ` · ${x.age > STALE_MS ? "⚠ " : ""}${esc(x.ageText)}` : ""}</option>`).join("")}</select>`;
     vb.querySelector("#navveh").addEventListener("change", (e) => {
       try { localStorage.setItem(`${STORE_KEY}-veh`, e.target.value); } catch (err) { /* storage non disponibile */ }
+      this._applyVehicle(true);
       if (this._result) this._renderResults();
     });
+    this._applyVehicle(false);
     sb.querySelector("#navsrc").addEventListener("change", (e) => {
       try { localStorage.setItem(`${STORE_KEY}-navsrc`, e.target.value); } catch (err) { /* storage non disponibile */ }
       if (this._me) this._locate(false, e.target.value);
@@ -1484,9 +1534,10 @@ class NavigatorPanel extends HTMLElement {
          Companion invia a Home Assistant; per aggiornamenti ogni pochi secondi attiva nell'app la posizione ad alta precisione
          (Impostazioni → App Companion → Gestisci sensori → Posizione in background → Modalità alta precisione).</div>`;
     const src = list.find((x) => x.id === this._meSource());
-    const veh = this._vehicles().find((v) => v.id === this._vehicleId());
+    const veh = this._curVehicle();
+    const md = MODES.find((m) => m[0] === this._mode) || MODES[0];
     return `<div class="sec"><h3>Navigazione</h3>
-      <div class="muted">${veh ? `${vehIcon(veh.type)} ${esc(veh.name || "Veicolo")}${veh.plate ? ` · ${esc(veh.plate)}` : ""} · ` : ""}posizione da ${esc(src?.name || "—")}</div>
+      <div class="muted">${veh.type ? `${vehIcon(veh.type)} ${esc(veh.name || "Veicolo")}${veh.plate ? ` · ${esc(veh.plate)}` : ""}` : `${md[1]} ${md[2]}`} · posizione da ${esc(src?.name || "—")}</div>
       <div class="row" style="margin-top:8px"><button class="primary" data-a="navstart" style="flex:1">▶ Parti</button></div>${hint}
       <button class="link" data-a="devpos" style="margin-top:6px;padding-left:0;display:block">📱 Mostra la posizione di questo dispositivo</button>
       <button class="link" data-a="gpshelp" style="margin-top:2px;padding-left:0">📡 Problemi con il GPS? Posizione negata?</button></div>`;
@@ -1507,7 +1558,8 @@ class NavigatorPanel extends HTMLElement {
     try { localStorage.setItem(`${STORE_KEY}-navsrc`, source); } catch (e) { /* storage non disponibile */ }
     this._sel = 0;
     this._tripFrom = this._points[0]?.name || "";
-    this._tripVehicle = this._vehicles().find((v) => v.id === (this.shadowRoot.getElementById("navveh")?.value || this._vehicleId())) || this._vehicles()[0];
+    const tv = this._curVehicle();
+    this._tripVehicle = tv.type ? tv : { id: "base", name: "Base", plate: "", type: { piedi: "altro" }[this._mode] || this._mode };
     this._nav = { source, follow: true, idx: 0, passed: 0, offSince: null, offCount: 0, rerouting: false, lastReroute: 0,
       lastKey: null, fix: null, arrived: false, view: "guida", dir: null };
     this._tripBegin();
@@ -1932,7 +1984,7 @@ class NavigatorPanel extends HTMLElement {
     // in guida la mappa ruota al contrario, così resta col muso in alto
     const h = this._nav.dir ?? 0;
     if (!this._meMarker) {
-      const icon = L.divIcon({ className: "", iconSize: [47, 47], iconAnchor: [23.5, 23.5], html: `<div class="nav-car">${VEHICLE_SVG[this._mode] || CAR_SVG}</div>` });
+      const icon = L.divIcon({ className: "", iconSize: [47, 47], iconAnchor: [23.5, 23.5], html: `<div class="nav-car">${this._vehSvg()}</div>` });
       this._accCircle = L.circle(ll, { radius: f.acc || 0, color: "#1a73e8", weight: 1, fillOpacity: 0.1, interactive: false }).addTo(this._map);
       this._meMarker = L.marker(ll, { icon, interactive: false, zIndexOffset: 1000 }).addTo(this._map);
       this._carRot = h;
@@ -2514,7 +2566,7 @@ class NavigatorPanel extends HTMLElement {
     try { // un errore nella vista 3D non deve fermare la guida (chiamata a ogni posizione)
       if (!this._me3d) {
         const el = document.createElement("div");
-        el.innerHTML = `<div class="nav-car">${VEHICLE_SVG[this._mode] || CAR_SVG}</div>`;
+        el.innerHTML = `<div class="nav-car">${this._vehSvg()}</div>`;
         this._me3d = new window.maplibregl.Marker({ element: el, rotationAlignment: "map", pitchAlignment: "map" })
           .setLngLat([f.lon, f.lat]).addTo(g);
       }
@@ -3983,11 +4035,36 @@ class NavigatorPanel extends HTMLElement {
     if (this._result) this._renderResults();
   }
 
-  // veicoli dell'utente; se il garage è vuoto, un veicolo predefinito del tipo del mezzo scelto
+  // veicoli: "Base" (il mezzo si sceglie con i bottoni Auto/Moto/Bici/A piedi) e poi quelli del garage
   _vehicles() {
-    if (this._garage?.length) return this._garage;
-    const type = this._mode === "moto" ? "moto" : this._mode === "bici" ? "bici" : "auto";
-    return [{ id: "default", name: "Veicolo predefinito", plate: "", type }];
+    return [{ id: "base", name: "Base", plate: "", type: "" }, ...(this._garage || [])];
+  }
+
+  _curVehicle() {
+    return this._vehicles().find((v) => v.id === this._vehicleId()) || this._vehicles()[0];
+  }
+
+  // disegno del veicolo sulla mappa: quello del veicolo del garage, altrimenti quello del mezzo
+  _vehSvg() {
+    const v = this._curVehicle();
+    return (v.type && VEH_TYPE_SVG[v.type]) || VEHICLE_SVG[this._mode] || CAR_SVG;
+  }
+
+  // veicolo scelto: con uno del garage i bottoni del mezzo spariscono e il mezzo viene dal tipo di veicolo
+  _applyVehicle(recompute = false) {
+    const v = this._curVehicle();
+    const modes = this.$("modes");
+    if (modes) modes.hidden = !!v.type;
+    if (v.type) {
+      const mode = VEH_TYPE_MODE[v.type] || "auto";
+      if (mode !== this._mode) {
+        this._mode = mode;
+        this._renderModes();
+        this._saveState();
+        if (recompute) this._autoCompute();
+      }
+    }
+    this._drawMarkers();
   }
 
   _vehicleId() {
