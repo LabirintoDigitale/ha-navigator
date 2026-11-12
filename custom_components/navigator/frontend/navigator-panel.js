@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.5.10";
+const PANEL_VERSION = "1.5.11";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1350,6 +1350,7 @@ class NavigatorPanel extends HTMLElement {
     // tolleranza: strada + imprecisione del GPS
     const limit = (slow ? 30 : 45) + Math.min(fix.acc || 0, 80);
     nav.snap = snap;
+    this._routeProgress();
     nav.dir = this._direction(rt, snap, fix, limit);
     this._drawMe();
     this._applyRotation();
@@ -1536,6 +1537,7 @@ class NavigatorPanel extends HTMLElement {
     const p = this._pointAt(rt, along);
     nav.fix = { lat: p.ll[0], lon: p.ll[1], acc: 0, speed: t.speed, heading: p.dir, time: now, est: true };
     nav.snap = { dist: 0, idx: p.idx, t: p.t, along };
+    this._routeProgress();
     nav.idx = p.idx;
     nav.dir = p.dir;
     nav.offSince = null;
@@ -3173,26 +3175,53 @@ class NavigatorPanel extends HTMLElement {
       line.bindTooltip(`${fmtTime(rt.summary.time)} · ${fmtKm(rt.summary.length_km)}`, { sticky: true });
       line.on("click", (ev) => { L.DomEvent.stopPropagation(ev); this._select(i); });
     });
-    const rt = r.routes[this._sel];
+    const rt = this._geom(r.routes[this._sel]);
     const color = ROUTE_COLORS[this._sel % ROUTE_COLORS.length];
-    L.polyline(rt.shape, { color: "#fff", weight: 10, opacity: 0.9, interactive: false }).addTo(this._routeLayer);
-    L.polyline(rt.shape, { color, weight: 6, opacity: 1, interactive: false, arrows: true }).addTo(this._routeLayer);
+    // in guida la parte già percorsa è grigia e chiara, senza frecce; davanti resta del colore del percorso
+    const total = rt._cum[rt._cum.length - 1];
+    const done = this._nav?.fix && this._nav.snap ? Math.max(0, Math.min(total, this._nav.snap.along || 0)) : 0;
+    const ahead = done > 0 ? this._sliceAlong(rt, done, total) : rt.shape;
+    if (done > 0) {
+      L.polyline(this._sliceAlong(rt, 0, done), { color: "#90a4ae", weight: 6, opacity: 0.55, interactive: false }).addTo(this._routeLayer);
+    }
+    L.polyline(ahead, { color: "#fff", weight: 10, opacity: 0.9, interactive: false }).addTo(this._routeLayer);
+    L.polyline(ahead, { color, weight: 6, opacity: 1, interactive: false, arrows: true }).addTo(this._routeLayer);
+    // tratti da un indice all'altro del percorso, solo per la parte ancora da fare
+    const part = (i0, i1) => {
+      const a = Math.max(done, rt._cum[i0]);
+      const b = rt._cum[Math.min(i1, rt._cum.length - 1)];
+      return b > a ? this._sliceAlong(rt, a, b) : null;
+    };
     // gallerie: grigio a trattini, la strada passa sotto la collina (in 3D la linea segue comunque il terreno)
-    for (const [a, b] of this._tunnelRanges(rt)) {
+    for (const [ta, b] of this._tunnelRanges(rt)) {
+      if (b <= done) continue;
+      const a = Math.max(ta, done);
       const pts = this._sliceAlong(rt, a, b);
       L.polyline(pts, { color: "#cfd8dc", weight: 7, opacity: 1, interactive: false }).addTo(this._routeLayer);
       L.polyline(pts, { color: "#37474f", weight: 7, opacity: 1, dashArray: "8 8", interactive: false })
         .bindTooltip(`🚇 Galleria · ${fmtDist(b - a)}`, { sticky: true }).addTo(this._routeLayer);
     }
     for (const seg of rt.toll_segments) {
-      L.polyline(rt.shape.slice(seg.begin, seg.end + 1), { color: "#f57c00", weight: 6, opacity: 1 })
+      const pts = part(seg.begin, seg.end);
+      if (!pts) continue;
+      L.polyline(pts, { color: "#f57c00", weight: 6, opacity: 1 })
         .bindTooltip(`💶 ${seg.name} · ${fmtKm(seg.length_km)} a pagamento`, { sticky: true })
         .addTo(this._routeLayer);
     }
     for (const m of rt.maneuvers) {
-      if (m.ferry) {
-        L.polyline(rt.shape.slice(m.begin, m.end + 1), { color: "#0288d1", weight: 5, dashArray: "8 8" }).addTo(this._routeLayer);
-      }
+      const pts = m.ferry ? part(m.begin, m.end) : null;
+      if (pts) L.polyline(pts, { color: "#0288d1", weight: 5, dashArray: "8 8" }).addTo(this._routeLayer);
+    }
+  }
+
+  // guida: il percorso si ridisegna ogni 15 m di strada fatta (parte percorsa grigia)
+  _routeProgress() {
+    const nav = this._nav;
+    const a = nav?.snap?.along;
+    if (a == null) return;
+    if (nav.drawnAlong == null || Math.abs(a - nav.drawnAlong) >= 15) {
+      nav.drawnAlong = a;
+      this._drawRoute();
     }
   }
 
@@ -3216,7 +3245,8 @@ class NavigatorPanel extends HTMLElement {
     const step = Math.max(10, 90 * mpp);
     const view = m.getBounds().pad(0.15);
     let n = 0;
-    for (let a = step / 2; a < total && n < 250; a += step) {
+    const from = this._nav?.fix && this._nav.snap ? this._nav.snap.along || 0 : 0; // in guida solo davanti a te
+    for (let a = from + step / 2; a < total && n < 250; a += step) {
       const p = this._pointAt(rt, a);
       if (!view.contains(p.ll)) continue;
       n++;

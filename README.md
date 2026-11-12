@@ -25,6 +25,7 @@ marcia e ti segue. Con **▲ / ▼** scegli la prospettiva, dalla vista dall'alt
 - Mezzo: **auto, moto, bici, a piedi**. Opzioni: evita pedaggi, autostrade, traghetti.
 - Fino a **3 percorsi alternativi** con durata, distanza, orario di arrivo stimato e chilometri a pagamento.
 - **Frecce del verso di marcia** sul percorso scelto (in 2D e in 3D): nelle rotonde e nei sensi unici si vede subito da che parte si va.
+  In guida la parte già percorsa diventa **grigia e chiara** (senza frecce): davanti resta solo la strada da fare.
 - **Pedaggi**:
   - le tratte a pagamento sono evidenziate in arancione sulla mappa ed elencate con nome (A4, A21…) e lunghezza;
   - **Ricalcola senza pedaggi**: Navigator evita le strade a pagamento e, se il server ne usa ancora qualcuna, la esclude e ricalcola finché il percorso è gratuito;
