@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.8.6";
+const PANEL_VERSION = "1.8.7";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -240,6 +240,11 @@ const POI_KINDS = {
   scuola: ["Scuole", "🏫", "#5d4037"], chiesa: ["Chiese", "⛪", "#757575"],
 };
 const POI_TILE = 0.02; // come nel backend
+// punti di interesse dalle mappe vettoriali OpenFreeMap (livello "poi", schema OpenMapTiles): la sottoclasse è il valore OSM
+const OFM_POI = { pharmacy: "farmacia", hospital: "ospedale", clinic: "ospedale", supermarket: "supermercato",
+  restaurant: "ristorante", fast_food: "ristorante", cafe: "bar", bar: "bar", pub: "bar", bank: "banca", atm: "banca",
+  hotel: "hotel", motel: "hotel", guest_house: "hotel", hostel: "hotel", charging_station: "ricarica", fuel: "carburante",
+  police: "polizia", post_office: "posta", car_repair: "officina", tyres: "officina", school: "scuola", place_of_worship: "chiesa" };
 // pulsanti all'arrivo: domini ammessi e servizio da chiamare
 const ARR_DOMAINS = ["cover", "lock", "switch", "light", "button", "input_button", "script", "scene", "input_boolean", "fan"];
 const ARR_ICONS = { cover: "🚪", lock: "🔒", switch: "⏻", light: "💡", button: "🔘", input_button: "🔘", script: "📜", scene: "🎬", input_boolean: "⏻", fan: "🌀" };
@@ -2204,6 +2209,7 @@ class NavigatorPanel extends HTMLElement {
         if (!this._g3gest.size) { this._g3key = null; this._sync3d(); }
       });
     }
+    g.on("moveend", () => this._schedulePois()); // i punti di interesse della zona ora visibile
     g.on("moveend", (e) => {
       if (!e.originalEvent || (this._nav?.follow)) return;
       const cc = g.getCenter();
@@ -2216,7 +2222,9 @@ class NavigatorPanel extends HTMLElement {
       if (e.sourceId !== "ofm" || !e.isSourceLoaded) return;
       this._scheduleTunnels();
       clearTimeout(this._poiBldT);
-      this._poiBldT = setTimeout(() => this._poiBuildings(), 500); // edifici dei punti di interesse appena arrivati
+      this._poiBldT = setTimeout(() => { // punti (e loro edifici) appena arrivati con le mappe
+        if (this._poiKindsOn().size) { this._poiKey = null; this._renderPois(); this._poiStatus(""); } else this._poiBuildings();
+      }, 500);
     });
     // quando le quote del terreno sono arrivate si ricontrolla: se la telecamera è finita sotto una collina ci si allontana
     // (solo misura, nessun movimento se è tutto a posto: così "idle" non si ripete all'infinito)
@@ -2286,6 +2294,9 @@ class NavigatorPanel extends HTMLElement {
           "fill-extrusion-height": ["+", ["get", "h"], 0.8], "fill-extrusion-vertical-gradient": true } }, "lines");
     } else if (g.getLayer("bld")) {
       g.moveLayer("poi-bld", "lines");
+    }
+    if (!g.getLayer("poi-src")) { // invisibile: fa scaricare il livello dei punti di interesse insieme agli edifici
+      g.addLayer({ id: "poi-src", type: "circle", source: "ofm", "source-layer": "poi", minzoom: 13, paint: { "circle-opacity": 0, "circle-radius": 1 } });
     }
     if (!g.getLayer("tun")) {
       g.addLayer({ id: "tun", type: "line", source: "ofm", "source-layer": "transportation", minzoom: 12,
@@ -4002,6 +4013,8 @@ class NavigatorPanel extends HTMLElement {
     const m = this._map;
     if (!m || !this._poiTiles) return;
     if (!this._poiKindsOn().size) { this._poiStatus(""); this._renderPois(); return; }
+    // in 3D i punti arrivano con le mappe di OpenFreeMap (subito, dal browser): niente Overpass
+    if (this._3d && this._g3ok && this._g3?.getSource("ofm")) { this._poiStatus(""); this._renderPois(); return; }
     if (m.getZoom() < POI_MIN_ZOOM) {
       this._poiStatus("far");
       this._renderPois();
@@ -4089,11 +4102,27 @@ class NavigatorPanel extends HTMLElement {
   // punti da mostrare: categorie scelte, riquadri visibili, al massimo 150 (i più vicini al centro)
   _poiItems() {
     const kinds = this._poiKindsOn();
-    if (!kinds.size || !this._poiView || this._map.getZoom() < POI_MIN_ZOOM) return [];
+    if (!kinds.size || this._map.getZoom() < POI_MIN_ZOOM) return [];
     const c = this._map.getCenter();
     const out = [];
     const seen = new Set(); // un edificio a cavallo di due riquadri arriva da tutti e due
-    for (const key of this._poiView) {
+    const g = this._g3;
+    if (this._3d && this._g3ok && g?.getSource("ofm")) {
+      let feats = [];
+      try { feats = g.querySourceFeatures("ofm", { sourceLayer: "poi" }); } catch (e) { /* dati non pronti */ }
+      const b = g.getBounds();
+      for (const f of feats) {
+        const p = f.properties || {};
+        const k = OFM_POI[p.subclass] || OFM_POI[p.class];
+        const [lon, lat] = f.geometry?.coordinates || [];
+        if (!k || !kinds.has(k) || lat == null || !b.contains([lon, lat])) continue;
+        const id = `o${f.id ?? `${lon.toFixed(5)},${lat.toFixed(5)}`}`;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        out.push({ id, lat, lon, k, name: p.name || p["name:it"] || p.name_int || "" });
+      }
+    }
+    for (const key of this._poiView || []) {
       for (const it of this._poiTiles.get(key)?.items || []) {
         if (kinds.has(it.k) && !seen.has(it.id)) { seen.add(it.id); out.push(it); }
       }

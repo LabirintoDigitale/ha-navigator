@@ -42,7 +42,8 @@ marcia e ti segue. Con **▲ / ▼** scegli la prospettiva, dalla vista dall'alt
 - **Vista 3D** con rilievo del terreno ed edifici, anche in guida, con la prospettiva regolabile ([dettagli](#vista-3d)).
 - **Punti di interesse sulla mappa** (⚙ → *Punti di interesse sulla mappa*): farmacie, ospedali, supermercati, ristoranti, bar,
   bancomat, hotel, colonnine di ricarica, distributori, polizia, poste, officine, scuole, chiese. Da OpenStreetMap (una sola richiesta per la zona visibile), visibili da
-  vicino; in 2D un'icona colorata, in 3D l'edificio colorato con la categoria e sopra l'icona che fluttua. Tocca un punto per andarci.
+  vicino; in 2D un'icona colorata, in 3D l'edificio colorato con la categoria e sopra l'icona che fluttua. Tocca un punto per andarci. In 3D i punti arrivano direttamente con le mappe di OpenFreeMap (subito, senza Overpass); in 2D da
+  Overpass, con Photon come riserva se Overpass non risponde.
 - Servizio **`navigator.plan_route`** per le automazioni (tempo di viaggio, distanza, pedaggi).
 
 | Togli una tratta a pagamento | Ricalcola senza pedaggi |
