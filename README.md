@@ -158,7 +158,7 @@ Con un percorso calcolato, la sezione **Nelle vicinanze** del pannello (e in gui
   **🅿️ Vai qui** imposta il parcheggio come arrivo. Fonte: OpenStreetMap (Overpass); se i server non rispondono, i parcheggi con
   un nome trovati con Photon.
 - **📷 Autovelox fissi** sul percorso, da OpenStreetMap (tutta Italia, aggiornati una volta alla settimana). In guida compare
-  il cartello "📷 distanza · limite" a 600 m (1 km sopra i 90 km/h) e, se attivi, l'avviso a voce e un doppio beep; quelli
+  in alto, sotto l'indicazione di svolta (che resta sempre visibile), la striscia "📷 Autovelox · limite · distanza" che scende fino a 0 a 600 m (1 km sopra i 90 km/h) e, se attivi, l'avviso a voce e un doppio beep; quelli
   orientati verso l'altra carreggiata vengono ignorati.
 
 > Gli autovelox **mobili** non ci sono: non esiste una banca dati libera e aggiornata (le app che li mostrano usano dati

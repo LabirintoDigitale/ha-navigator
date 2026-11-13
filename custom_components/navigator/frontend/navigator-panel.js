@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.19";
+const PANEL_VERSION = "1.9.20";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -982,6 +982,16 @@ const STYLE = `
   .navtop .d { font-size: 24px; font-weight: 700; white-space: nowrap; }
   .navtop .t { font-size: 15px; line-height: 1.25; }
   .navtop.wait { background: #37474f; }
+  .navtop { flex-wrap: wrap; }
+  .navtop .camrow { flex: 1 0 100%; display: flex; align-items: center; gap: 8px; background: #fff; color: #b71c1c; border-radius: 8px;
+    padding: 4px 8px; font-weight: 700; font-size: 16px; position: relative; overflow: hidden; }
+  .navtop .camrow .cico { font-size: 20px; }
+  .navtop .camrow .ctx { flex: 1; }
+  .navtop .camrow .clim { width: 30px; height: 30px; border-radius: 50%; border: 4px solid #d32f2f; color: #111; display: flex;
+    align-items: center; justify-content: center; font-size: 13px; background: #fff; box-sizing: border-box; }
+  .navtop .camrow .cd { font-size: 20px; min-width: 64px; text-align: right; }
+  .navtop .camrow .cbar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(211,47,47,.2); }
+  .navtop .camrow .cbar i { display: block; height: 100%; background: #d32f2f; transition: width .5s linear; }
   .navtop.preview { background: #1f4e79; gap: 8px; padding: 8px 8px 8px 10px; }
   .navtop .pv { background: rgba(255,255,255,.15); color: #fff; border: none; border-radius: 8px; min-width: 34px; height: 40px; font-size: 22px;
     padding: 0 6px; flex: none; cursor: pointer; }
@@ -4268,7 +4278,7 @@ class NavigatorPanel extends HTMLElement {
     const to = next.along - along;
     const warn = (nav.speed || 0) > 25 ? 1000 : 600;
     if (to > warn) return;
-    nav.cam = { to, maxspeed: next.maxspeed };
+    nav.cam = { to: Math.max(0, to), maxspeed: next.maxspeed, warn };
     nav.camsDone = nav.camsDone || new Set();
     if (!nav.camsDone.has(next.id) && to > 40) {
       nav.camsDone.add(next.id);
@@ -4597,6 +4607,14 @@ class NavigatorPanel extends HTMLElement {
         ? `<div class="lanes" title="Corsie: quelle chiare sono quelle da tenere">${next.lanes.map((l) => `<span class="ln ${l.v ? "on" : ""}">${laneSvg(l.d)}</span>`).join("")}</div>` : "";
       top.innerHTML = `<span class="ic">${maneuverIcon(next)}</span><div><div class="d">${toNext < 15 ? "Ora" : fmtDist(toNext)}</div><div class="t">${esc(next.text)}</div>${lanes}</div>`;
     }
+    // autovelox: striscia sotto l'indicazione (la svolta resta sempre visibile), distanza che scende fino a 0
+    if (nav.cam && nav.fix && !nav.arrived) {
+      const c = nav.cam;
+      const pct = Math.max(0, Math.min(100, (c.to / (c.warn || 1000)) * 100));
+      top.insertAdjacentHTML("beforeend", `<div class="camrow"><span class="cico">📷</span><span class="ctx">Autovelox</span>
+        ${c.maxspeed ? `<span class="clim">${c.maxspeed}</span>` : ""}<span class="cd">${c.to < 15 ? "ora" : fmtDist(c.to)}</span>
+        <span class="cbar"><i style="width:${pct.toFixed(0)}%"></i></span></div>`);
+    }
     // tempo e distanza rimanenti
     let remTime = rt.summary.time;
     let remM = total;
@@ -4615,7 +4633,7 @@ class NavigatorPanel extends HTMLElement {
     bot.querySelector(".info").innerHTML = `<span title="Mezzo del percorso">${modeIco}</span><span class="rem">${fmtTime(remTime)}</span><span>${fmtKm(remM / 1000)} · arrivo ${arrival(remTime)}</span>
       ${kmh != null ? `<span class="spd ${nav.over ? "over" : ""}" title="Velocità">${kmh} km/h</span>` : ""}
       ${nav.limit ? `<span class="lim" title="Limite di velocità">${nav.limit}</span>` : ""}
-      ${nav.cam ? `<span class="cam" title="Autovelox fisso">📷 ${fmtDist(nav.cam.to)}${nav.cam.maxspeed ? ` · ${nav.cam.maxspeed}` : ""}</span>` : ""}`;
+`;
     const c = bot.querySelector('[data-n="center"]');
     c.classList.toggle("attn", !nav.follow);
     c.title = nav.follow ? "La mappa segue la tua posizione" : "Torna sulla tua posizione";
