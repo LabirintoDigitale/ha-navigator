@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.36";
+const PANEL_VERSION = "1.9.37";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -2372,7 +2372,16 @@ class NavigatorPanel extends HTMLElement {
     nav.snap = snap;
     this._routeProgress();
     nav.dir = this._direction(rt, snap, fix, limit);
-    this._carGlide(prev, fix, nav.dir ?? nav.heading ?? 0, now); // mezzo 3D fluido tra una posizione e l'altra
+    // posizione mostrata del mezzo: all'avvio, finché non ci si muove davvero, sta sull'inizio della linea; poi dov'è davvero
+    nav.startPos = nav.startPos || [fix.lat, fix.lon];
+    if (!nav.started && (distM(nav.startPos, [fix.lat, fix.lon]) > 12 || (nav.speed || 0) > 2.5)) nav.started = true;
+    let target = { lat: fix.lat, lon: fix.lon };
+    if (!nav.started && snap.dist <= limit && rt.shape.length > 1) {
+      const i = Math.min(snap.idx, rt.shape.length - 2);
+      target = { lat: rt.shape[i][0] + snap.t * (rt.shape[i + 1][0] - rt.shape[i][0]),
+        lon: rt.shape[i][1] + snap.t * (rt.shape[i + 1][1] - rt.shape[i][1]) };
+    }
+    this._carGlide(prev, target, nav.dir ?? nav.heading ?? 0, now); // mezzo 3D fluido, sempre rivolto nel verso di marcia
     this._drawMe();
     this._applyRotation();
     if (nav.follow) this._followView();
@@ -3491,7 +3500,8 @@ class NavigatorPanel extends HTMLElement {
   }
 
   // movimento fluido del mezzo 3D: scorre dalla posizione mostrata a quella nuova nel tempo tra due posizioni (rAF),
-  // invece di saltare a ogni aggiornamento del GPS
+  // invece di saltare a ogni aggiornamento del GPS. La direzione la prende dal proprio movimento, così punta sempre
+  // nel verso in cui va (anche fuori percorso): niente movimento "a granchio".
   _carGlide(prev, fix, dir, now) {
     const from = this._carDisp
       || (prev ? { lat: prev.lat, lon: prev.lon, dir: this._nav?.heading ?? dir } : { lat: fix.lat, lon: fix.lon, dir });
@@ -3502,7 +3512,9 @@ class NavigatorPanel extends HTMLElement {
       this._carDisp = { lat: fix.lat, lon: fix.lon, dir };
       return;
     }
-    const dd = ((((dir - from.dir) % 360) + 540) % 360) - 180; // giro più corto per la direzione
+    // il muso segue lo spostamento reale (se significativo), altrimenti resta com'è: così va sempre avanti
+    const moveDir = distM([from.lat, from.lon], [fix.lat, fix.lon]) > 4 ? bearing([from.lat, from.lon], [fix.lat, fix.lon]) : from.dir;
+    const dd = ((((moveDir - from.dir) % 360) + 540) % 360) - 180; // giro più corto per la direzione
     const dur = Math.max(300, Math.min(1400, prev.time ? now - prev.time : 700));
     this._carAnim = { t0: performance.now(), dur, from, to: { lat: fix.lat, lon: fix.lon }, dir0: from.dir, dd };
     const step = () => {
