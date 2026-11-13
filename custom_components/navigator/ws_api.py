@@ -32,7 +32,7 @@ def async_setup(hass: HomeAssistant) -> None:
         return
     for handler in (ws_info, ws_search, ws_reverse, ws_route, ws_place_save, ws_place_delete, ws_recent_clear, ws_nearby,
                     ws_poi_tile, ws_live, ws_weather, ws_trip_save, ws_trips, ws_trip, ws_trip_delete, ws_garage,
-                    ws_garage_save, ws_trip_start, ws_trip_append, ws_trip_finish, ws_poi_tiles, ws_poi_info, ws_live_all, ws_garage_select):
+                    ws_garage_save, ws_trip_start, ws_trip_append, ws_trip_finish, ws_poi_tiles, ws_poi_info, ws_live_all, ws_garage_select, ws_cameras_area):
         websocket_api.async_register_command(hass, handler)
     hass.data[DATA_WS_REGISTERED] = True
 
@@ -198,6 +198,20 @@ async def ws_recent_clear(hass: HomeAssistant, connection: websocket_api.ActiveC
 
 
 LATLON = vol.All(vol.Length(min=2, max=2), [vol.Coerce(float)])
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "navigator/cameras_area",
+    vol.Required("s"): vol.Coerce(float), vol.Required("w"): vol.Coerce(float),
+    vol.Required("n"): vol.Coerce(float), vol.Required("e"): vol.Coerce(float),
+})
+@websocket_api.async_response
+async def ws_cameras_area(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Autovelox fissi nella zona visibile, per i punti di interesse sulla mappa."""
+    async def go():
+        return await _data(hass).pois.cameras_area(msg["s"], msg["w"], msg["n"], msg["e"])
+
+    await _run(connection, msg["id"], go())
 
 
 @websocket_api.websocket_command({

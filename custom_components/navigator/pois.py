@@ -336,6 +336,12 @@ class Pois:
             await self._exec(self._write, name, {"time": now, "items": items})
             return items
 
+    async def cameras_area(self, s: float, w: float, n: float, e: float) -> dict:
+        """Autovelox fissi in un riquadro (punti di interesse sulla mappa), dall'elenco del paese scaricato una volta alla settimana."""
+        items = await self._load_cameras()
+        inside = [c for c in items if s <= c["lat"] <= n and w <= c["lon"] <= e][:400]
+        return {"items": inside, "updated": int(self._cams_time)}
+
     async def cameras(self, line: list[list[float]], radius: float) -> dict:
         items = await self._load_cameras()
         return {"items": await self._exec(_near_line, items, line, radius), "source": "OpenStreetMap", "updated": int(self._cams_time)}
@@ -626,7 +632,7 @@ def _osm_fuels(tags: dict) -> list[dict]:
 
 _POI_AMENITY = ["pharmacy", "hospital", "clinic", "restaurant", "fast_food", "cafe", "bar", "pub", "atm", "bank",
                 "charging_station", "fuel", "police", "post_office", "school", "place_of_worship"]
-_POI_SHOP = ["supermarket", "car_repair", "tyres"]
+_POI_SHOP = ["supermarket", "car_repair", "tyres", "tobacco"]
 _POI_TOURISM = ["hotel", "motel", "guest_house", "hostel"]
 _POI_KINDS = {
     ("amenity", "pharmacy"): "farmacia", ("amenity", "hospital"): "ospedale", ("amenity", "clinic"): "ospedale",
@@ -636,7 +642,7 @@ _POI_KINDS = {
     ("amenity", "charging_station"): "ricarica", ("amenity", "fuel"): "carburante",
     ("amenity", "police"): "polizia", ("amenity", "post_office"): "posta",
     ("amenity", "school"): "scuola", ("amenity", "place_of_worship"): "chiesa",
-    ("shop", "supermarket"): "supermercato", ("shop", "car_repair"): "officina", ("shop", "tyres"): "officina",
+    ("shop", "tobacco"): "tabacchi", ("shop", "supermarket"): "supermercato", ("shop", "car_repair"): "officina", ("shop", "tyres"): "officina",
     ("tourism", "hotel"): "hotel", ("tourism", "motel"): "hotel", ("tourism", "guest_house"): "hotel",
     ("tourism", "hostel"): "hotel",
 }
@@ -660,4 +666,5 @@ _POI_PHOTON = {
     "polizia": ("carabinieri", ["amenity:police"]), "posta": ("poste", ["amenity:post_office"]),
     "officina": ("officina", ["shop:car_repair", "shop:tyres"]), "scuola": ("scuola", ["amenity:school"]),
     "chiesa": ("chiesa", ["amenity:place_of_worship"]),
+    "tabacchi": ("tabacchi", ["shop:tobacco"]),
 }

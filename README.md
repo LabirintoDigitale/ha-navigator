@@ -52,7 +52,8 @@ categoria e sopra fluttua l'icona:
 - Mappe gratuite senza chiave: stradale, topografica, scura e satellite (Esri), escursionistica (OpenTopoMap).
 - **Vista 3D** con rilievo del terreno ed edifici, anche in guida, con la prospettiva regolabile ([dettagli](#vista-3d)).
 - **Punti di interesse sulla mappa** (⚙ → *Punti di interesse sulla mappa*): farmacie, ospedali, supermercati, ristoranti, bar,
-  bancomat, hotel, colonnine di ricarica, distributori, polizia, poste, officine, scuole, chiese. Da OpenStreetMap (una sola richiesta per la zona visibile), visibili da
+  bancomat, hotel, colonnine di ricarica, distributori, polizia, poste, officine, scuole, chiese, tabaccherie e autovelox fissi
+  (questi dall'elenco nazionale di OpenStreetMap che il backend aggiorna una volta alla settimana). Da OpenStreetMap (una sola richiesta per la zona visibile), visibili da
   vicino; in 2D un'icona colorata, in 3D l'edificio colorato con la categoria e sopra l'icona che fluttua. Tocca un punto per andarci. I punti arrivano dalle mappe vettoriali di OpenFreeMap (livello *poi* di OpenStreetMap), lette direttamente dal browser: subito, in 2D
   e in 3D. Solo se OpenFreeMap non risponde si usa Overpass (con Photon come riserva).
 - **Scheda del punto di interesse**: toccando un bar, un ristorante, una farmacia… la scheda mostra gli **orari** con *aperto ora /

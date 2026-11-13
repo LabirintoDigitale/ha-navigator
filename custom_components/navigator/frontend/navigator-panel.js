@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.18";
+const PANEL_VERSION = "1.9.19";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -545,13 +545,15 @@ const POI_KINDS = {
   carburante: ["Distributori", "⛽", "#f9a825"], polizia: ["Polizia e carabinieri", "🚓", "#283593"],
   posta: ["Uffici postali", "📮", "#d84315"], officina: ["Officine e gommisti", "🔧", "#455a64"],
   scuola: ["Scuole", "🏫", "#5d4037"], chiesa: ["Chiese", "⛪", "#757575"],
+  tabacchi: ["Tabaccherie", "🚬", "#37474f"], autovelox: ["Autovelox fissi", "📷", "#e53935"],
 };
 const POI_TILE = 0.02; // come nel backend
 // punti di interesse dalle mappe vettoriali OpenFreeMap (livello "poi", schema OpenMapTiles): la sottoclasse è il valore OSM
 const OFM_POI = { pharmacy: "farmacia", hospital: "ospedale", clinic: "ospedale", supermarket: "supermercato",
   restaurant: "ristorante", fast_food: "ristorante", cafe: "bar", bar: "bar", pub: "bar", bank: "banca", atm: "banca",
   hotel: "hotel", motel: "hotel", guest_house: "hotel", hostel: "hotel", charging_station: "ricarica", fuel: "carburante",
-  police: "polizia", post_office: "posta", car_repair: "officina", tyres: "officina", school: "scuola", place_of_worship: "chiesa" };
+  police: "polizia", post_office: "posta", car_repair: "officina", tyres: "officina", school: "scuola", place_of_worship: "chiesa",
+  tobacco: "tabacchi" };
 // pulsanti all'arrivo: domini ammessi e servizio da chiamare
 const ARR_DOMAINS = ["cover", "lock", "switch", "light", "button", "input_button", "script", "scene", "input_boolean", "fan"];
 const ARR_ICONS = { cover: "🚪", lock: "🔒", switch: "⏻", light: "💡", button: "🔘", input_button: "🔘", script: "📜", scene: "🎬", input_boolean: "⏻", fan: "🌀" };
@@ -5382,10 +5384,34 @@ class NavigatorPanel extends HTMLElement {
     return new Set((this._settings.poiKinds || []).filter((k) => POI_KINDS[k]));
   }
 
+  // autovelox della zona visibile (con margine): si richiedono solo uscendo dalla zona già scaricata
+  async _loadCamPois() {
+    const b = this._map.getBounds();
+    const have = this._camBox;
+    if (have && b.getSouth() >= have.s && b.getNorth() <= have.n && b.getWest() >= have.w && b.getEast() <= have.e) return;
+    if (this._camLoading) return;
+    this._camLoading = true;
+    const dy = (b.getNorth() - b.getSouth()) * 0.75, dx = (b.getEast() - b.getWest()) * 0.75;
+    const box = { s: b.getSouth() - dy, n: b.getNorth() + dy, w: b.getWest() - dx, e: b.getEast() + dx };
+    try {
+      const r = await this._hass.callWS({ type: "navigator/cameras_area", ...box });
+      this._camPois = (r.items || []).map((x) => ({ id: x.id, lat: x.lat, lon: x.lon, k: "autovelox",
+        name: `Autovelox${x.maxspeed ? ` ${x.maxspeed} km/h` : ""}${x.name ? ` · ${x.name}` : ""}` }));
+      this._camBox = box;
+      console.debug("[Navigator POI] autovelox nella zona:", this._camPois.length);
+    } catch (e) {
+      console.debug("[Navigator POI] autovelox non disponibili:", e?.message || e);
+    }
+    this._camLoading = false;
+    this._poiKey = null;
+    this._renderPois();
+  }
+
   async _loadPois() {
     const m = this._map;
     if (!m || !this._poiTiles) return;
     if (!this._poiKindsOn().size) { this._poiStatus(""); this._renderPois(); return; }
+    if (this._poiKindsOn().has("autovelox") && m.getZoom() >= POI_MIN_ZOOM) this._loadCamPois();
     // in 2D: i riquadri z14 di OpenFreeMap (gli stessi del 3D) letti dal browser; Overpass solo se OpenFreeMap non risponde
     if (!this._3d && !this._ofmDown) {
       if (await this._loadOfmPois()) return;
@@ -5578,6 +5604,11 @@ class NavigatorPanel extends HTMLElement {
       for (const it of this._poiTiles.get(key)?.items || []) {
         if (kinds.has(it.k) && !seen.has(it.id)) { seen.add(it.id); out.push(it); }
       }
+    }
+    // autovelox fissi: non sono nelle mappe di OpenFreeMap, arrivano dall'elenco del backend (lo stesso degli avvisi in guida)
+    if (kinds.has("autovelox") && this._camPois) {
+      const b = this._3d && this._g3 ? this._g3.getBounds() : this._map.getBounds().pad(0.1);
+      for (const it of this._camPois) if (!seen.has(it.id) && b.contains(this._3d ? [it.lon, it.lat] : [it.lat, it.lon])) { seen.add(it.id); out.push(it); }
     }
     out.sort((a, z) => Math.hypot(a.lat - c.lat, a.lon - c.lng) - Math.hypot(z.lat - c.lat, z.lon - c.lng));
     return out.slice(0, 150);
