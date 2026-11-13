@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.26";
+const PANEL_VERSION = "1.9.27";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1518,8 +1518,22 @@ class NavigatorPanel extends HTMLElement {
     try {
       this._info = await this._hass.callWS({ type: "navigator/info" });
       if (this._info.version !== PANEL_VERSION) {
+        // il pannello caricato è più vecchio del backend: la pagina (o la WebView dell'app) ha in cache il file vecchio.
+        // Si ricarica una volta sola per ogni versione del backend, così riprende il pannello aggiornato senza intervento.
+        let tried = null;
+        try { tried = sessionStorage.getItem("navigator-reload"); } catch (e) { /* storage non disponibile */ }
+        if (tried !== this._info.version) {
+          try { sessionStorage.setItem("navigator-reload", this._info.version); } catch (e) { /* storage non disponibile */ }
+          $("verwarn").innerHTML = `<div class="verwarn">Aggiorno il pannello alla versione ${esc(this._info.version)}…</div>`;
+          console.debug("[Navigator] pannello", PANEL_VERSION, "→ backend", this._info.version, ": ricarico");
+          setTimeout(() => { try { window.location.reload(); } catch (e) { /* ricarica non riuscita */ } }, 400);
+          return;
+        }
+        // già ricaricato ma la versione non cambia: la cache resiste, si avvisa soltanto
         $("verwarn").innerHTML = `<div class="verwarn">Aggiornamento non completato: il pannello è la versione ${PANEL_VERSION} ma l'integrazione è la ${esc(this._info.version)}.
-          Riavvia Home Assistant (Impostazioni → Sistema → Riavvia), poi ricarica la pagina.</div>`;
+          Riavvia Home Assistant (Impostazioni → Sistema → Riavvia); nell'app NaviHA chiudila e riaprila, oppure svuota la cache.</div>`;
+      } else {
+        try { sessionStorage.removeItem("navigator-reload"); } catch (e) { /* storage non disponibile */ }
       }
     } catch (err) {
       $("verwarn").innerHTML = `<div class="verwarn">Navigator non risponde: ${esc(err.message || err)}. Riavvia Home Assistant dopo l'installazione.</div>`;
