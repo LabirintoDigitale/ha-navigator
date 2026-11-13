@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.21";
+const PANEL_VERSION = "1.9.22";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1786,7 +1786,19 @@ class NavigatorPanel extends HTMLElement {
     if (dir == null && sh[m.begin + 1]) dir = bearing(at, sh[m.begin + 1]);
     if (this._3d && this._g3) {
       this._schedule3d();
-      this._g3.easeTo({ center: [at[1], at[0]], zoom: 17.2, bearing: dir ?? this._g3.getBearing(), pitch: Math.max(this._g3.getPitch(), 55), duration: 800 });
+      // come in guida: l'inclinazione e la distanza scelte dall'utente (non valori fissi), girata nel verso di marcia
+      const g = this._g3;
+      const cam = this._clearCamera({ center: [at[1], at[0]], zoom: 16 + this._zoom3dOff(), bearing: dir ?? g.getBearing(),
+        pitch: this._pitch3d(), padding: { top: 0, bottom: 0, left: 0, right: 0 } });
+      this._stepAnim = true; // durante il movimento la mappa 2D non deve riportare indietro la vista
+      g.easeTo({ ...cam, duration: 800 });
+      // finito il movimento la mappa 2D (nascosta) va nello stesso punto: altrimenti al primo aggiornamento riportava indietro la vista
+      g.once("moveend", () => {
+        this._stepAnim = false;
+        const cc = g.getCenter();
+        this._from3d = true;
+        try { this._map.setView([cc.lat, cc.lng], g.getZoom() + 1, { animate: false }); } finally { this._from3d = false; }
+      });
     } else {
       if (dir != null && !this._isGuida()) {
         this._freeRot = true;
@@ -3628,7 +3640,7 @@ class NavigatorPanel extends HTMLElement {
 
   _sync3dCam() {
     const g = this._g3;
-    if (!this._3d || !g || this._from3d || this._g3gest?.size) return; // durante un gesto con le dita decide l'utente
+    if (!this._3d || !g || this._from3d || this._g3gest?.size || this._stepAnim) return; // durante un gesto con le dita decide l'utente
     const nav = this._nav;
     // MapLibre misura lo zoom con riquadri da 512 pixel, Leaflet da 256; in guida si aggiunge la distanza scelta dall'utente
     const z = nav?.fix && nav.follow && this._isGuida() ? this._base3dZoom() + this._zoom3dOff() : this._map.getZoom() - 1;
