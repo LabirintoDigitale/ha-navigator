@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.15";
+const PANEL_VERSION = "1.9.16";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -3332,7 +3332,7 @@ class NavigatorPanel extends HTMLElement {
   // ingrandimento del modellino: più si è lontani più è grande, così sullo schermo resta di misura simile;
   // due ruote e pedone sono piccoli davvero: un po' più ingranditi
   _veh3dScale(kind) {
-    return Math.max(1.5, Math.min(50, 6 * 2 ** (17 - this._g3.getZoom()))) * (["moto", "scooter", "bici", "piedi"].includes(kind) ? 1.7 : 1);
+    return Math.max(1.5, Math.min(60, 8 * 2 ** (17 - this._g3.getZoom()))) * (["moto", "scooter", "bici", "piedi"].includes(kind) ? 1.7 : 1);
   }
 
   // etichetta della targa sul retro del mezzo 3D, ricalcolata a ogni movimento con lo zoom e l'inclinazione del momento;
@@ -3354,15 +3354,26 @@ class NavigatorPanel extends HTMLElement {
     const th = (f.dir * Math.PI) / 180;
     const lat = f.lat + at.rear * Math.cos(th) * S / 111320;
     const lon = f.lon + (at.rear * Math.sin(th) * S) / (111320 * Math.cos((f.lat * Math.PI) / 180));
-    const mpp = (40075016.686 * Math.cos((f.lat * Math.PI) / 180)) / (512 * 2 ** g.getZoom()); // metri per pixel
-    const pitch = (g.getPitch() * Math.PI) / 180;
-    // più grande del vero (come il modellino), e mai sotto i 64 px: deve leggersi
-    const wpx = Math.max(64, Math.min(150, ((at.w * S) / mpp) * 1.9));
+    // misura sullo schermo dalla larghezza vera del retro del modellino proiettata (con la prospettiva: lontano è più piccolo)
+    const mLon = 1 / (111320 * Math.cos((f.lat * Math.PI) / 180));
+    const side = (x) => [lon + x * Math.cos(th) * S * mLon, lat - (x * Math.sin(th) * S) / 111320];
+    let px = 0;
+    try {
+      const a = g.project(side(-0.9)), b = g.project(side(0.9));
+      px = Math.hypot(a.x - b.x, a.y - b.y);
+    } catch (e) { /* fuori dai dati del rilievo */ }
+    const mpp = (40075016.686 * Math.cos((f.lat * Math.PI) / 180)) / (512 * 2 ** g.getZoom()); // metri per pixel al centro
+    const ratio = px > 0 ? px / ((1.8 * S) / mpp) : 1; // quanto la prospettiva rimpicciolisce il mezzo rispetto al centro
+    // un po' più larga del retro del mezzo (deve leggersi), ma in proporzione: lontano rimpicciolisce con lui
+    const wpx = Math.max(40, Math.min(130, (px || (1.8 * S) / mpp) * 1.35));
     el.style.width = `${wpx}px`;
-    el.style.fontSize = `${Math.max(9, Math.min(20, wpx * 0.13))}px`;
+    el.style.fontSize = `${Math.max(7, Math.min(17, wpx * 0.145))}px`;
     const away = Math.abs(((((f.dir - g.getBearing()) % 360) + 540) % 360) - 180) > 100;
-    el.style.visibility = away ? "hidden" : "";
-    this._plate3d.setLngLat([lon, lat]).setOffset([0, -((at.z * S) / mpp) * Math.sin(pitch)]);
+    const pos = g.project([lon, lat]);
+    const off = pos.x < -50 || pos.y < -50 || pos.x > g.getCanvas().clientWidth + 50 || pos.y > g.getCanvas().clientHeight + 50;
+    el.style.visibility = away || off ? "hidden" : "";
+    const pitch = (g.getPitch() * Math.PI) / 180;
+    this._plate3d.setLngLat([lon, lat]).setOffset([0, -((at.z * S) / mpp) * Math.sin(pitch) * ratio]);
   }
 
   // la telecamera non deve finire sotto il terreno: inclinata sta dietro e più in basso del punto guardato, e le colline
