@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.25";
+const PANEL_VERSION = "1.9.26";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1806,7 +1806,9 @@ class NavigatorPanel extends HTMLElement {
       const cam = this._clearCamera({ center: [at[1], at[0]], zoom: already ? g.getZoom() : 16 + this._zoom3dOff(), bearing: dir ?? g.getBearing(),
         pitch: already ? g.getPitch() : this._pitch3d(), padding: { top: 0, bottom: 0, left: 0, right: 0 } });
       this._stepAnim = true; // durante il movimento la mappa 2D non deve riportare indietro la vista
-      g.easeTo({ ...cam, duration: 800 });
+      const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+      g.easeTo({ ...cam, duration: reduce ? 0 : 800 });
+      if (reduce) requestAnimationFrame(() => g.fire("moveend")); // senza animazione il moveend potrebbe non arrivare
       // finito il movimento la mappa 2D (nascosta) va nello stesso punto: altrimenti al primo aggiornamento riportava indietro la vista
       g.once("moveend", () => {
         this._stepAnim = false;
@@ -3655,7 +3657,7 @@ class NavigatorPanel extends HTMLElement {
 
   _sync3dCam() {
     const g = this._g3;
-    if (!this._3d || !g || this._from3d || this._g3gest?.size || this._stepAnim) return; // durante un gesto con le dita decide l'utente
+    if (!this._3d || !g || this._from3d || this._g3gest?.size || this._stepAnim || this._stepK != null) return; // gesto con le dita o anteprima aperta: non si tocca la vista
     const nav = this._nav;
     // MapLibre misura lo zoom con riquadri da 512 pixel, Leaflet da 256; in guida si aggiunge la distanza scelta dall'utente
     const z = nav?.fix && nav.follow && this._isGuida() ? this._base3dZoom() + this._zoom3dOff() : this._map.getZoom() - 1;
