@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.40";
+const PANEL_VERSION = "1.9.41";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -2927,6 +2927,9 @@ class NavigatorPanel extends HTMLElement {
     this._me3d = null;
     this._cloudCanvas = null;
     this._cloudHooked = false;
+    this._g3interacting = false;
+    cancelAnimationFrame(this._cloudRaf); this._cloudRaf = 0;
+    cancelAnimationFrame(this._plateRaf); this._plateRaf = 0;
     this._plate3d = null;
     const el = this.$("map3d");
     if (el) el.innerHTML = "";
@@ -3207,7 +3210,9 @@ class NavigatorPanel extends HTMLElement {
         paint: { "fill-extrusion-color": ["get", "c"], "fill-extrusion-base": ["get", "b"], "fill-extrusion-height": ["get", "h"],
           "fill-extrusion-opacity": 1, "fill-extrusion-vertical-gradient": true } });
       g.on("zoom", () => { if (this._settings.veh3d !== false && this._veh3dPos()) this._drawVeh3d(); });
-      g.on("move", () => this._placePlate3d()); // inclinazione e rotazione cambiano altezza e verso della targa
+      // la targa è agganciata al mezzo per coordinate: la ri-misura solo quando il mezzo si ridimensiona (zoom) o la mappa si ferma
+      g.on("zoom", () => this._schedulePlate3d());
+      g.on("moveend", () => this._schedulePlate3d());
     } else {
       g.moveLayer("veh3d");
     }
@@ -3215,7 +3220,11 @@ class NavigatorPanel extends HTMLElement {
     // nuvole in cielo: disegnate su un foglio sopra la mappa, in prospettiva con la telecamera
     if (!this._cloudHooked) {
       this._cloudHooked = true;
-      g.on("render", () => this._drawClouds());
+      // durante un gesto dell'utente (trascinamento/zoom/rotazione/inclinazione) il ridisegno delle nuvole si ferma: si
+      // riprende quando la mappa smette di muoversi, così il gesto resta fluido
+      for (const ev of ["dragstart", "zoomstart", "rotatestart", "pitchstart"]) g.on(ev, (e) => { if (e.originalEvent) this._g3interacting = true; });
+      g.on("moveend", () => { this._g3interacting = false; this._drawClouds(); });
+      g.on("render", () => { if (!this._g3interacting) this._scheduleCloudDraw(); });
       g.on("resize", () => this._drawClouds());
     }
     this._cloudKey = null; // ricolora (giorno/notte) e ridisegna
@@ -3628,13 +3637,24 @@ class NavigatorPanel extends HTMLElement {
       this._plate3dAt = null;
     }
     src.setData({ type: "FeatureCollection", features: feats });
-    this._placePlate3d();
+    this._schedulePlate3d();
   }
 
   // ingrandimento del modellino: più si è lontani più è grande, così sullo schermo resta di misura simile;
   // due ruote e pedone sono piccoli davvero: un po' più ingranditi
   _veh3dScale(kind) {
     return Math.max(1.5, Math.min(60, 8 * 2 ** (17 - this._g3.getZoom()))) * (["moto", "scooter", "bici", "piedi"].includes(kind) ? 1.7 : 1);
+  }
+
+  // nuvole e targa: al massimo una volta per fotogramma (più eventi "render"/"move" nello stesso frame non le ridisegnano più volte)
+  _scheduleCloudDraw() {
+    if (this._cloudRaf) return;
+    this._cloudRaf = requestAnimationFrame(() => { this._cloudRaf = 0; this._drawClouds(); });
+  }
+
+  _schedulePlate3d() {
+    if (this._plateRaf) return;
+    this._plateRaf = requestAnimationFrame(() => { this._plateRaf = 0; this._placePlate3d(); });
   }
 
   // etichetta della targa sul retro del mezzo 3D, ricalcolata a ogni movimento con lo zoom e l'inclinazione del momento;
@@ -3652,30 +3672,20 @@ class NavigatorPanel extends HTMLElement {
     }
     const el = this._plate3d.getElement();
     if (el.dataset.t !== at.text) { el.dataset.t = at.text; el.innerHTML = `<span class="eu">I</span><b>${esc(at.text)}</b><span class="eu"></span>`; }
+    // appiccicata al retro del mezzo per coordinate geografiche: MapLibre la muove e la inclina da sola a ogni fotogramma,
+    // senza ricalcoli in JS; qui si aggiornano solo posizione e misura, quando il mezzo si muove o si ridimensiona (zoom)
     const S = this._veh3dScale(at.kind);
     const th = (f.dir * Math.PI) / 180;
-    const lat = f.lat + at.rear * Math.cos(th) * S / 111320;
+    const lat = f.lat + (at.rear * Math.cos(th) * S) / 111320;
     const lon = f.lon + (at.rear * Math.sin(th) * S) / (111320 * Math.cos((f.lat * Math.PI) / 180));
-    // misura sullo schermo dalla larghezza vera del retro del modellino proiettata (con la prospettiva: lontano è più piccolo)
-    const mLon = 1 / (111320 * Math.cos((f.lat * Math.PI) / 180));
-    const side = (x) => [lon + x * Math.cos(th) * S * mLon, lat - (x * Math.sin(th) * S) / 111320];
-    let px = 0;
-    try {
-      const a = g.project(side(-0.9)), b = g.project(side(0.9));
-      px = Math.hypot(a.x - b.x, a.y - b.y);
-    } catch (e) { /* fuori dai dati del rilievo */ }
-    const mpp = (40075016.686 * Math.cos((f.lat * Math.PI) / 180)) / (512 * 2 ** g.getZoom()); // metri per pixel al centro
-    const ratio = px > 0 ? px / ((1.8 * S) / mpp) : 1; // quanto la prospettiva rimpicciolisce il mezzo rispetto al centro
-    // un po' più larga del retro del mezzo (deve leggersi), ma in proporzione: lontano rimpicciolisce con lui
-    const wpx = Math.max(40, Math.min(130, (px || (1.8 * S) / mpp) * 1.35));
+    // larghezza in pixel circa come il mezzo a questo zoom (si aggiorna solo quando il mezzo si ridimensiona)
+    const pxPerM = (512 * 2 ** g.getZoom()) / (40075016.686 * Math.cos((f.lat * Math.PI) / 180));
+    const wpx = Math.max(42, Math.min(140, 1.8 * S * pxPerM * 1.25));
     el.style.width = `${wpx}px`;
-    el.style.fontSize = `${Math.max(7, Math.min(17, wpx * 0.145))}px`;
-    const away = Math.abs(((((f.dir - g.getBearing()) % 360) + 540) % 360) - 180) > 100;
-    const pos = g.project([lon, lat]);
-    const off = pos.x < -50 || pos.y < -50 || pos.x > g.getCanvas().clientWidth + 50 || pos.y > g.getCanvas().clientHeight + 50;
-    el.style.visibility = away || off ? "hidden" : "";
-    const pitch = (g.getPitch() * Math.PI) / 180;
-    this._plate3d.setLngLat([lon, lat]).setOffset([0, -((at.z * S) / mpp) * Math.sin(pitch) * ratio]);
+    el.style.fontSize = `${Math.max(7, Math.min(16, wpx * 0.16))}px`;
+    // nascosta quando il retro non guarda verso la telecamera
+    el.style.visibility = Math.abs(((((f.dir - g.getBearing()) % 360) + 540) % 360) - 180) > 100 ? "hidden" : "";
+    this._plate3d.setLngLat([lon, lat]);
   }
 
   // la telecamera non deve finire sotto il terreno: inclinata sta dietro e più in basso del punto guardato, e le colline
