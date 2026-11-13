@@ -2,6 +2,7 @@ name: Validate
 
 on:
   push:
+    branches-ignore: [apk]   # il branch apk contiene solo l'APK di NaviHA, non l'integrazione
   pull_request:
   workflow_dispatch:
 
