@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.39";
+const PANEL_VERSION = "1.9.40";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -872,6 +872,9 @@ const STYLE = `
   .mapwrap { flex: 1; position: relative; min-width: 0; min-height: 300px; }
   /* !important: se la mappa nasce prima che il pannello sia in pagina Leaflet scrive position: relative e l'altezza va a 0 */
   #map { position: absolute !important; inset: 0; background: #ddd; }
+  /* i gesti (trascinamento, zoom, rotazione a due dita) li gestiamo noi e Leaflet: il browser non deve prendersi
+     il gesto a due dita come zoom della pagina, altrimenti la rotazione della mappa 2D non parte */
+  #map, #map * { touch-action: none !important; }
   #map, #map3d { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; } /* tocco prolungato: niente selezione */
   @media (max-width: 800px) {
     :host { display: block; overflow-y: auto; }
