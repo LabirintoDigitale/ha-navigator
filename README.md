@@ -41,7 +41,9 @@ categoria e sopra fluttua l'icona:
   - le tratte a pagamento sono evidenziate in arancione sulla mappa ed elencate con nome (A4, A21…) e lunghezza;
   - **Ricalcola senza pedaggi**: Navigator evita le strade a pagamento e, se il server ne usa ancora qualcuna, la esclude e ricalcola finché il percorso è gratuito;
   - **Togli** una singola tratta: il percorso viene ricalcolato senza quella tratta (segnata con ✕ sulla mappa); le tratte tolte si possono ripristinare.
-- **Indicazioni passo passo** in italiano: clic su un passo per vederlo sulla mappa.
+- **Indicazioni passo passo** in italiano: toccando un passo si vede **come in guida**: in alto la barra con freccia, distanza,
+  testo e corsie (‹ › per scorrere le indicazioni, ✕ per chiudere), la mappa centrata sulla manovra e girata nel verso di marcia
+  (in 2D e in 3D) e un segnaposto col logo di Navigator sul punto esatto.
 - **Rotonde** con il numero dell'uscita ben visibile nell'icona, e **corsie** (auto e moto) sotto l'indicazione in guida, come in
   autostrada: le corsie da tenere sono chiare, le altre spente. Le corsie vengono da OSRM (dati di OpenStreetMap) e compaiono
   solo dove sono mappate.

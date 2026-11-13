@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.17";
+const PANEL_VERSION = "1.9.18";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -980,6 +980,16 @@ const STYLE = `
   .navtop .d { font-size: 24px; font-weight: 700; white-space: nowrap; }
   .navtop .t { font-size: 15px; line-height: 1.25; }
   .navtop.wait { background: #37474f; }
+  .navtop.preview { background: #1f4e79; gap: 8px; padding: 8px 8px 8px 10px; }
+  .navtop .pv { background: rgba(255,255,255,.15); color: #fff; border: none; border-radius: 8px; min-width: 34px; height: 40px; font-size: 22px;
+    padding: 0 6px; flex: none; cursor: pointer; }
+  .navtop .pv:disabled { opacity: .3; cursor: default; }
+  .navtop .pv.x { font-size: 16px; }
+  .navtop .pvn { font-size: 12px; opacity: .8; margin-top: 2px; }
+  .steps li.sel { background: rgba(3,169,244,.15); }
+  .steppin { position: relative; width: 36px; height: 48px; filter: drop-shadow(0 2px 3px rgba(0,0,0,.45)); }
+  .steppin svg { width: 36px; height: 48px; display: block; }
+  .steppin img { position: absolute; left: 9.5px; top: 8.5px; width: 17px; height: 17px; border-radius: 50%; }
   .navbot { position: absolute; z-index: 1001; bottom: 20px; left: 10px; right: 10px; display: flex; align-items: center; gap: 8px 12px;
     flex-wrap: wrap; background: var(--card-background-color, #fff); color: var(--primary-text-color); border-radius: 12px;
     padding: 8px 10px; box-shadow: 0 2px 10px rgba(0,0,0,.3); font-size: 14px; }
@@ -1722,6 +1732,68 @@ class NavigatorPanel extends HTMLElement {
     this._afterPointsChange();
   }
 
+  // ----------------------------------------------------------------- anteprima di un'indicazione dell'itinerario
+
+  _stepPreview(k) {
+    if (this._nav || !this._result) return;
+    const rt = this._geom(this._result.routes[this._sel]);
+    const ms = rt.maneuvers;
+    k = Math.max(0, Math.min(ms.length - 1, k));
+    const m = ms[k];
+    const sh = rt.shape;
+    const at = sh[Math.min(m.begin, sh.length - 1)];
+    this._stepK = k;
+    this._stepRt = this._result.routes[this._sel];
+    // barra in alto come in guida: distanza dall'indicazione di prima, freccia, testo, corsie
+    const top = this.$("navtop");
+    const prevD = k > 0 ? rt._cum[m.begin] - rt._cum[ms[k - 1].begin] : 0;
+    const lanes = m.lanes ? `<div class="lanes">${m.lanes.map((l) => `<span class="ln ${l.v ? "on" : ""}">${laneSvg(l.d)}</span>`).join("")}</div>` : "";
+    top.className = "navtop preview";
+    top.hidden = false;
+    top.innerHTML = `<button class="pv" data-pv="-1" title="Indicazione precedente" ${k === 0 ? "disabled" : ""}>‹</button>
+      <span class="ic">${maneuverIcon(m)}</span>
+      <div style="flex:1;min-width:0"><div class="d">${k === 0 ? "Partenza" : fmtDist(prevD)}</div><div class="t">${esc(m.text)}</div>${lanes}
+        <div class="pvn">${k + 1} di ${ms.length} · km ${(rt._cum[m.begin] / 1000).toFixed(1).replace(".", ",")} dalla partenza</div></div>
+      <button class="pv" data-pv="1" title="Indicazione successiva" ${k === ms.length - 1 ? "disabled" : ""}>›</button>
+      <button class="pv x" data-pv="0" title="Chiudi">✕</button>`;
+    top.querySelectorAll("[data-pv]").forEach((b) => b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const d = +b.dataset.pv;
+      if (d) this._stepPreview(k + d); else this._stepClose();
+    }));
+    this.$("results")?.querySelectorAll(".steps li[data-k]").forEach((li) => li.classList.toggle("sel", +li.dataset.k === k));
+    // segnaposto sulla manovra
+    this._stepLayer ??= L.layerGroup().addTo(this._map);
+    this._stepLayer.clearLayers();
+    L.marker(at, { interactive: false, zIndexOffset: 1500, icon: L.divIcon({ className: "", iconSize: [36, 48], iconAnchor: [18, 47],
+      html: `<div class="steppin"><svg viewBox="0 0 36 48"><path d="M18 47C14 37 3 29 3 17a15 15 0 0 1 30 0c0 12-11 20-15 30z" fill="#1f2a37" stroke="#fff" stroke-width="2"/>
+        <circle cx="18" cy="17" r="10.5" fill="#fff"/></svg><img src="${ICON}" alt=""></div>` }) }).addTo(this._stepLayer);
+    // verso di marcia all'arrivo sulla manovra: la mappa si gira così, "come se guidassi"
+    let dir = null;
+    for (let i = m.begin; i > 0 && dir == null; i--) if (distM(sh[i - 1], at) > 3) dir = bearing(sh[i - 1], at);
+    if (dir == null && sh[m.begin + 1]) dir = bearing(at, sh[m.begin + 1]);
+    if (this._3d && this._g3) {
+      this._schedule3d();
+      this._g3.easeTo({ center: [at[1], at[0]], zoom: 17.2, bearing: dir ?? this._g3.getBearing(), pitch: Math.max(this._g3.getPitch(), 55), duration: 800 });
+    } else {
+      if (dir != null && !this._isGuida()) {
+        this._freeRot = true;
+        this._rot = dir;
+      }
+      this._map.setView(at, Math.max(this._map.getZoom(), 17), { animate: false });
+      this._relayout();
+      this._applyInteract();
+    }
+  }
+
+  _stepClose() {
+    this._stepK = null;
+    this._stepLayer?.clearLayers();
+    if (!this._nav) this.$("navtop").hidden = true;
+    this.$("results")?.querySelectorAll(".steps li.sel").forEach((li) => li.classList.remove("sel"));
+    this._schedule3d();
+  }
+
   _openPoi(it) {
     this._showPlace({ name: it.name || POI_KINDS[it.k][0], address: POI_KINDS[it.k][0], lat: it.lat, lon: it.lon,
       poi: { name: it.name || "", osm: /^[nwr]\d+$/.test(it.id || "") ? it.id : "" } }, false);
@@ -2076,6 +2148,7 @@ class NavigatorPanel extends HTMLElement {
   }
 
   async _startNav(source, force = false) {
+    if (this._stepK != null) this._stepClose(); // in guida la barra in alto è della guida
     if (!this._result) return;
     // persona o dispositivo con una posizione vecchia: la guida partirebbe da lì (es. app Companion chiusa)
     if (source !== "gps" && !force) {
@@ -3299,7 +3372,7 @@ class NavigatorPanel extends HTMLElement {
     g.getSource("lines").setData({ type: "FeatureCollection", features: feats });
     for (const m of this._g3markers) m.remove();
     this._g3markers = [];
-    for (const grp of [this._markerLayer, this._poiLayer, this._wxLayer, this._liveLayer].filter(Boolean)) {
+    for (const grp of [this._markerLayer, this._poiLayer, this._wxLayer, this._liveLayer, this._stepLayer].filter(Boolean)) {
       grp.eachLayer((l) => {
         const ic = l.options?.icon?.options;
         if (!(l instanceof L.Marker) || !ic?.html) return;
@@ -5634,6 +5707,8 @@ class NavigatorPanel extends HTMLElement {
   }
 
   _renderResults() {
+    // percorso cambiato (nuovo calcolo o altra alternativa): l'anteprima dell'indicazione non vale più
+    if (this._stepK != null && this._stepRt !== this._result?.routes[this._sel]) this._stepClose();
     const box = this.$("results");
     const r = this._result;
     let html = "";
@@ -5738,13 +5813,8 @@ class NavigatorPanel extends HTMLElement {
     // cambiando la fonte in "Segui la posizione di", il punto blu passa subito alla nuova fonte
     this._renderPlanSel();
     box.querySelectorAll(".alt").forEach((el) => el.addEventListener("click", () => this._select(+el.dataset.i)));
-    box.querySelectorAll(".steps li[data-k]").forEach((el) => el.addEventListener("click", () => {
-      const m = r.routes[this._sel].maneuvers[+el.dataset.k];
-      const shape = r.routes[this._sel].shape;
-      const seg = shape.slice(m.begin, Math.max(m.end, m.begin) + 1);
-      if (seg.length > 1 && m.length_km > 0.5) this._map.fitBounds(L.latLngBounds(seg), { padding: [40, 40], maxZoom: 17 });
-      else this._map.setView(shape[m.begin], 17);
-    }));
+    // toccando un'indicazione: anteprima come in guida (barra in alto, mappa sulla manovra nel verso di marcia, segnaposto)
+    box.querySelectorAll(".steps li[data-k]").forEach((el) => el.addEventListener("click", () => this._stepPreview(+el.dataset.k)));
     box.querySelectorAll("button[data-a]").forEach((b) => b.addEventListener("click", () => {
       const a = b.dataset.a;
       const k = +b.dataset.k;
