@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.32";
+const PANEL_VERSION = "1.9.33";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -514,7 +514,7 @@ const SETTINGS_KEY = "navigator-panel-settings";
 const DEFAULT_SETTINGS = { voice: false, lang: "it", voiceSel: "f", out: "auto", autoZoom: true, beep: false,
   fuelBrands: [], fuelKind: "", camAlert: true, view3d: false, b3d: true, clouds3d: true, veh3d: true, terrainEx: "1.5", pitch3d: 60, tunnelFx: true, zoom3dOff: 0,
   voiceStyle: "normale", voiceRate: 1, voicePitch: 1, bldStyle: "colorati",
-  poiKinds: ["farmacia", "ospedale", "supermercato"], arrEntities: [], arrHomeOnly: true, nightMode: "auto", wxAlert: true };
+  poiKinds: ["farmacia", "ospedale", "supermercato"], arrEntities: [], arrHomeOnly: true, nightMode: "auto", wxAlert: true, muteGuide: false };
 // marche dei distributori (come nell'anagrafica del MIMIT)
 const FUEL_BRANDS = ["Agip Eni", "Api-Ip", "Q8", "Esso", "Tamoil", "Shell", "Retitalia", "Beyfin", "Costantin", "Europam", "Pompe bianche"];
 const BRAND_COLORS = { "agip eni": "#f7c600", "eni": "#f7c600", "api-ip": "#0057a8", "ip": "#0057a8", "q8": "#0a3a7a", "esso": "#d71920",
@@ -987,6 +987,8 @@ const STYLE = `
   .navtop.moved { left: var(--ntx); top: var(--nty); right: auto; width: max-content; max-width: min(94%, 520px); }
   .navtop.dragging { cursor: grabbing; opacity: .92; box-shadow: 0 6px 20px rgba(0,0,0,.5); user-select: none; transition: none; }
   .navtop { flex-wrap: wrap; }
+  .navtop .navmute { margin-left: auto; background: rgba(255,255,255,.18); color: #fff; border: none; border-radius: 10px;
+    width: 42px; height: 42px; font-size: 20px; flex: none; cursor: pointer; align-self: center; }
   .navtop .camrow { flex: 1 0 100%; display: flex; align-items: center; gap: 8px; background: #fff; color: #b71c1c; border-radius: 8px;
     padding: 4px 8px; font-weight: 700; font-size: 16px; position: relative; overflow: hidden; }
   .navtop .camrow .cico { font-size: 20px; }
@@ -1473,6 +1475,10 @@ class NavigatorPanel extends HTMLElement {
     this._map.on("dragstart", () => this._userMoved());
     this._bindGuidaGestures();
     this._bindNavTopDrag();
+    // tasto mute nella barra delle indicazioni (delega: la barra viene ridisegnata a ogni posizione)
+    this.$("navtop").addEventListener("click", (e) => {
+      if (e.target.closest('[data-a="mute"]')) { e.stopPropagation(); this._toggleMuteGuide(); }
+    });
     this._ro = new ResizeObserver(() => this._relayout());
     this._ro.observe($("mapwrap"));
     setTimeout(() => this._map.invalidateSize(), 300);
@@ -2373,7 +2379,7 @@ class NavigatorPanel extends HTMLElement {
       nav.arrived = true;
       this._renderNav();
       this._navPopup("ok", "🏁", `Sei arrivato a ${esc(dest.name)}`, 8000);
-      this._speak(PHRASES[this._settings.lang].arrived, true);
+      if (!this._settings.muteGuide) this._speak(PHRASES[this._settings.lang].arrived, true);
       return;
     }
     if (nav.arrived) { this._renderNav(); return; }
@@ -2579,7 +2585,7 @@ class NavigatorPanel extends HTMLElement {
   // indicazioni vocali: un avviso in anticipo ("Tra 300 metri, …") e uno al momento della manovra
   _voiceGuide(rt, along) {
     const nav = this._nav;
-    if (!this._settings.voice) return;
+    if (!this._settings.voice || this._settings.muteGuide) return; // mute: zittita solo la voce delle indicazioni
     if (nav.spokenRoute !== rt) { nav.spokenRoute = rt; nav.spoken = new Set(); }
     const ms = rt.maneuvers;
     const lang = this._settings.lang;
@@ -2632,7 +2638,7 @@ class NavigatorPanel extends HTMLElement {
     nav.rerouting = true;
     nav.lastReroute = Date.now();
     this._navPopup("warn", "↻", "Fuori percorso<br><b>Ricalcolo del percorso…</b>", 0);
-    this._speak(PHRASES[this._settings.lang].reroute, true);
+    if (!this._settings.muteGuide) this._speak(PHRASES[this._settings.lang].reroute, true);
     this._renderNav();
     const before = this._points;
     this._points = [{ name: "📍 Posizione attuale", address: "", lat: fix.lat, lon: fix.lon }, ...this._points.slice(1 + nav.passed)];
@@ -4572,6 +4578,14 @@ class NavigatorPanel extends HTMLElement {
     try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(this._settings)); } catch (e) { /* storage non disponibile */ }
   }
 
+  // zittisce o riattiva SOLO la voce delle indicazioni di marcia; gli avvisi di velocità, autovelox e meteo restano
+  _toggleMuteGuide() {
+    this._settings.muteGuide = !this._settings.muteGuide;
+    this._saveSettings();
+    if (this._nav) this._renderNav();
+    this._msg(this._settings.muteGuide ? "🔇 Voce delle indicazioni disattivata (gli avvisi restano)" : "🔊 Voce delle indicazioni attivata");
+  }
+
   // servizi notify dell'app Companion (mobile_app_…): prima quello del telefono della propria persona
   _notifyServices() {
     const list = Object.keys(this._hass?.services?.notify || {}).filter((n) => n.startsWith("mobile_app_"));
@@ -4890,6 +4904,12 @@ class NavigatorPanel extends HTMLElement {
       const lanes = next.lanes && toNext < 2000
         ? `<div class="lanes" title="Corsie: quelle chiare sono quelle da tenere">${next.lanes.map((l) => `<span class="ln ${l.v ? "on" : ""}">${laneSvg(l.d)}</span>`).join("")}</div>` : "";
       top.innerHTML = `<span class="ic">${maneuverIcon(next)}</span><div><div class="d">${toNext < 15 ? "Ora" : fmtDist(toNext)}</div><div class="t">${esc(next.text)}</div>${lanes}</div>`;
+    }
+    // tasto per zittire SOLO la voce delle indicazioni (gli avvisi di velocità, autovelox e meteo restano)
+    if (this._settings.voice) {
+      const muted = !!this._settings.muteGuide;
+      top.insertAdjacentHTML("beforeend", `<button class="navmute" data-a="mute"
+        title="${muted ? "Voce indicazioni disattivata — tocca per riattivarla (gli avvisi restano)" : "Zittisci la voce delle indicazioni (gli avvisi restano)"}">${muted ? "🔇" : "🔊"}</button>`);
     }
     // autovelox: striscia sotto l'indicazione (la svolta resta sempre visibile), distanza che scende fino a 0
     if (nav.cam && nav.fix && !nav.arrived) {
