@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.37";
+const PANEL_VERSION = "1.9.38";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -2372,16 +2372,19 @@ class NavigatorPanel extends HTMLElement {
     nav.snap = snap;
     this._routeProgress();
     nav.dir = this._direction(rt, snap, fix, limit);
-    // posizione mostrata del mezzo: all'avvio, finché non ci si muove davvero, sta sull'inizio della linea; poi dov'è davvero
+    // posizione mostrata (mezzo e telecamera): all'avvio, finché non ci si muove davvero, sta sull'inizio della linea del
+    // percorso; appena ti muovi davvero (oltre ~12 m o >2,5 m/s) passa alla posizione GPS reale
     nav.startPos = nav.startPos || [fix.lat, fix.lon];
     if (!nav.started && (distM(nav.startPos, [fix.lat, fix.lon]) > 12 || (nav.speed || 0) > 2.5)) nav.started = true;
-    let target = { lat: fix.lat, lon: fix.lon };
-    if (!nav.started && snap.dist <= limit && rt.shape.length > 1) {
-      const i = Math.min(snap.idx, rt.shape.length - 2);
-      target = { lat: rt.shape[i][0] + snap.t * (rt.shape[i + 1][0] - rt.shape[i][0]),
-        lon: rt.shape[i][1] + snap.t * (rt.shape[i + 1][1] - rt.shape[i][1]) };
+    if (!nav.started && rt.shape.length > 1) {
+      nav.disp = { lat: rt.shape[0][0], lon: rt.shape[0][1] };
+      let j = 1;
+      while (j < rt.shape.length - 1 && rt._cum[j] < 20) j++;
+      nav.dir = bearing(rt.shape[0], rt.shape[j]); // muso e mappa allineati all'inizio della linea
+    } else {
+      nav.disp = { lat: fix.lat, lon: fix.lon };
     }
-    this._carGlide(prev, target, nav.dir ?? nav.heading ?? 0, now); // mezzo 3D fluido, sempre rivolto nel verso di marcia
+    this._carGlide(prev, nav.disp, nav.dir ?? nav.heading ?? 0, now); // mezzo 3D fluido, sempre rivolto nel verso di marcia
     this._drawMe();
     this._applyRotation();
     if (nav.follow) this._followView();
@@ -2679,9 +2682,16 @@ class NavigatorPanel extends HTMLElement {
     }
   }
 
+  // posizione mostrata in guida: quella sull'inizio della linea all'avvio, altrimenti il GPS reale
+  _navPos() {
+    const nav = this._nav;
+    return nav?.disp || (nav?.fix ? { lat: nav.fix.lat, lon: nav.fix.lon } : null);
+  }
+
   _drawMe() {
     const f = this._nav.fix;
-    const ll = [f.lat, f.lon];
+    const p = this._navPos() || f;
+    const ll = [p.lat, p.lon];
     // il veicolo (auto, moto, bici o persona, secondo il mezzo scelto) ruota con la direzione di marcia;
     // in guida la mappa ruota al contrario, così resta col muso in alto
     const h = this._nav.dir ?? 0;
@@ -3753,10 +3763,11 @@ class NavigatorPanel extends HTMLElement {
     if (nav?.fix && nav.follow) {
       const guida = this._isGuida();
       const pad = guida ? this._guidaPad() : null;
-      const key = `${nav.fix.lat},${nav.fix.lon},${z},${nav.dir},${guida},${this._pitch3d()},${pad ? Math.round(pad.top) + "/" + Math.round(pad.bottom) : ""}`;
+      const pos = this._navPos(); // all'avvio l'inizio della linea, poi il GPS reale
+      const key = `${pos.lat},${pos.lon},${z},${nav.dir},${guida},${this._pitch3d()},${pad ? Math.round(pad.top) + "/" + Math.round(pad.bottom) : ""}`;
       if (key === this._g3key) return;
       this._g3key = key;
-      const cam = this._clearCamera({ center: [nav.fix.lon, nav.fix.lat], zoom: z,
+      const cam = this._clearCamera({ center: [pos.lon, pos.lat], zoom: z,
         bearing: guida && nav.dir != null ? nav.dir : g.getBearing(), pitch: guida ? this._pitch3d() : g.getPitch(),
         padding: pad || none });
       g.easeTo({ ...cam, duration: 700, easing: (t) => t });
@@ -3862,7 +3873,7 @@ class NavigatorPanel extends HTMLElement {
   // centra la mappa sulla posizione; in guida la posizione sta nel terzo basso dello schermo, con la strada davanti
   _followView(animate = true) {
     const nav = this._nav;
-    const f = nav.fix;
+    const f = this._navPos() || nav.fix;
     // al primo aggancio almeno zoom 16, poi resta quello scelto con + e −
     let z = nav.zoomed ? this._map.getZoom() : Math.max(this._map.getZoom(), 16);
     // zoom secondo la velocità, salvo per 20 secondi dopo uno zoom fatto a mano
