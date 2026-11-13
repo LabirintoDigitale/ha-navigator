@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.8";
+const PANEL_VERSION = "1.9.9";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1096,6 +1096,14 @@ const STYLE = `
   .wxlist { margin: 4px 0 0; padding: 0; list-style: none; font-size: 13px; }
   .wxlist li { padding: 3px 0; }
   /* diario dei viaggi */
+  .livecar { display: flex; flex-direction: column; align-items: center; width: 60px; }
+  .livecar .lc { width: 40px; height: 44px; display: flex; align-items: center; justify-content: center; }
+  .livecar .lc svg { max-height: 40px; width: auto; filter: drop-shadow(0 1px 3px rgba(0,0,0,.55)); }
+  .livecar .ln { color: #fff; font: 600 11px sans-serif; padding: 1px 6px; border-radius: 8px; white-space: nowrap; margin-top: -2px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.4); max-width: 90px; overflow: hidden; text-overflow: ellipsis; }
+  .livedest { width: 22px; height: 22px; border-radius: 50%; background: #fff; border: 3px solid; display: flex; align-items: center;
+    justify-content: center; font-size: 11px; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+  .trip.live .nm div { font-size: 13px; }
   .trip { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--divider-color); font-size: 13px; }
   .trip .nm { flex: 1; min-width: 0; cursor: pointer; } .trip .nm small { display: block; color: var(--secondary-text-color); }
   /* notte: satellite ed escursionistica più scuri */
@@ -1214,7 +1222,7 @@ class NavigatorPanel extends HTMLElement {
       <div class="main" id="mainbox">
         <div class="side">
           <div class="sidetabs" id="sidetabs">
-            <button data-tab="viaggio" class="on">🧭 Viaggio</button><button data-tab="archivio">🗂️ Archivio</button></div>
+            <button data-tab="viaggio" class="on">🧭 Viaggio</button><button data-tab="live">📡 Live</button><button data-tab="archivio">🗂️ Archivio</button></div>
           <div id="tabViaggio">
           <div class="sec">
             <h3>Cerca un luogo</h3>
@@ -1243,6 +1251,7 @@ class NavigatorPanel extends HTMLElement {
             <div class="footver"><img src="${ICON}" alt=""> Navigator versione ${PANEL_VERSION} ·
               <a href="https://github.com/LabirintoDigitale/ha-navigator" target="_blank" rel="noopener">LabirintoDigitale/ha-navigator</a></div></div>
           </div>
+          <div id="tabLive" hidden><div class="sec" id="livesec"></div></div>
           <div id="tabArchivio" hidden><div class="sec" id="tripsec"></div></div>
         </div>
         <div class="mapwrap" id="mapwrap">
@@ -1294,6 +1303,7 @@ class NavigatorPanel extends HTMLElement {
     this._poiMapLayer = L.layerGroup().addTo(this._map); // punti di interesse scelti in ⚙ (in 3D li disegna MapLibre)
     this._wxLayer = L.layerGroup().addTo(this._map);     // meteo lungo il percorso
     this._tripLayer = L.layerGroup().addTo(this._map);   // traccia di un viaggio del diario
+    this._liveLayer = L.layerGroup().addTo(this._map);   // guide in corso degli utenti (scheda Live)
     this._applyNight();
     this._loadTrips();
     this._loadGarage();
@@ -3074,6 +3084,7 @@ class NavigatorPanel extends HTMLElement {
     const lines = [];
     this._routeLayer.eachLayer((l) => lines.push(l));
     this._tripLayer?.eachLayer((l) => lines.push(l));
+    this._liveLayer?.eachLayer((l) => lines.push(l));
     lines.forEach((l) => {
       if (!(l instanceof L.Polyline)) return;
       const o = l.options;
@@ -3083,7 +3094,7 @@ class NavigatorPanel extends HTMLElement {
     g.getSource("lines").setData({ type: "FeatureCollection", features: feats });
     for (const m of this._g3markers) m.remove();
     this._g3markers = [];
-    for (const grp of [this._markerLayer, this._poiLayer, this._wxLayer].filter(Boolean)) {
+    for (const grp of [this._markerLayer, this._poiLayer, this._wxLayer, this._liveLayer].filter(Boolean)) {
       grp.eachLayer((l) => {
         const ic = l.options?.icon?.options;
         if (!(l instanceof L.Marker) || !ic?.html) return;
@@ -4353,12 +4364,24 @@ class NavigatorPanel extends HTMLElement {
     if (!nav || !this._hass) return;
     const min = Math.round(remTime / 60);
     const now = Date.now();
-    if (nav.liveMin === min && nav.liveArr === !!nav.arrived && now - (nav.liveAt || 0) < 30000) return;
+    if (nav.liveMin === min && nav.liveArr === !!nav.arrived && now - (nav.liveAt || 0) < 10000) return; // Live: ogni ~10 s
     Object.assign(nav, { liveMin: min, liveArr: !!nav.arrived, liveAt: now });
     const dest = this._points[this._points.length - 1] || {};
     this._hass.callWS({ type: "navigator/live", active: true, eta: (now + remTime * 1000) / 1000, minutes: min,
       km: Math.round(remM / 100) / 10, dest: dest.name || "", address: dest.address || "", mode: this._mode,
-      lat: dest.lat, lon: dest.lon, arrived: !!nav.arrived }).catch(() => { /* versione dell'integrazione vecchia */ });
+      lat: dest.lat, lon: dest.lon, arrived: !!nav.arrived,
+      ...(nav.fix && !nav.fix.est ? { plat: nav.fix.lat, plon: nav.fix.lon } : {}),
+      ...(nav.dir != null ? { dir: nav.dir } : {}),
+      ...(typeof nav.fix?.speed === "number" && nav.fix.speed >= 0 ? { speed: nav.fix.speed * 3.6 } : {}),
+      from: this._tripFrom || "", trip_id: nav.trip?.id || "",
+      vehicle: this._tripVehicle && this._tripVehicle.id !== "base" ? { name: this._tripVehicle.name || "", plate: this._tripVehicle.plate || "", type: this._tripVehicle.type || "",
+        icon: this._tripVehicle.icon || "", color: this._tripVehicle.color || "" } : {},
+    }).catch(() => {
+      // integrazione vecchia (senza i campi della scheda Live): si manda lo stato di base
+      this._hass.callWS({ type: "navigator/live", active: true, eta: (now + remTime * 1000) / 1000, minutes: min,
+        km: Math.round(remM / 100) / 10, dest: dest.name || "", address: dest.address || "", mode: this._mode,
+        lat: dest.lat, lon: dest.lon, arrived: !!nav.arrived }).catch(() => { /* versione dell'integrazione vecchia */ });
+    });
   }
 
   // ----------------------------------------------------------------- pulsanti all'arrivo
@@ -4575,7 +4598,114 @@ class NavigatorPanel extends HTMLElement {
     this.$("sidetabs").querySelectorAll("[data-tab]").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
     this.$("tabViaggio").hidden = tab !== "viaggio";
     this.$("tabArchivio").hidden = tab !== "archivio";
+    this.$("tabLive").hidden = tab !== "live";
     if (tab === "archivio") this._loadTrips();
+    // Live: aggiornata ogni 10 secondi finché la scheda è aperta
+    clearInterval(this._liveTimer);
+    this._liveTimer = null;
+    if (tab === "live") {
+      this._loadLive(true);
+      this._liveTimer = setInterval(() => this._loadLive(), 10000);
+    }
+  }
+
+  // ----------------------------------------------------------------- Live: le guide in corso di tutti gli utenti
+  // ognuna selezionabile sulla mappa (traccia fatta finora, veicolo, arrivo); a guida finita sparisce
+
+  async _loadLive(first = false) {
+    const box = this.$("livesec");
+    if (!box) return;
+    if (first && !this._live) box.innerHTML = `<h3>Live</h3><div class="muted"><span class="loading"></span> Guide in corso…</div>`;
+    try {
+      this._live = (await this._hass.callWS({ type: "navigator/live_all" })).live || [];
+      this._liveErr = null;
+    } catch (e) {
+      this._liveErr = String(e.message || e).includes("Unknown command")
+        ? "Live non disponibile: aggiorna l'integrazione Navigator e riavvia Home Assistant." : e.message || String(e);
+    }
+    this._renderLive();
+    this._drawLive();
+  }
+
+  _renderLive() {
+    const box = this.$("livesec");
+    if (!box) return;
+    if (this._liveErr) { box.innerHTML = `<h3>Live</h3><div class="muted">${esc(this._liveErr)}</div>`; return; }
+    const list = this._live || [];
+    const colors = ["#e53935", "#1e88e5", "#43a047", "#fb8c00", "#8e24aa", "#00897b", "#6d4c41", "#d81b60"];
+    this._liveCol ??= new Map(); // utente -> colore, fisso finché la guida dura
+    this._liveOff ??= new Set(); // guide tolte dalla mappa (le altre si vedono)
+    const ids = new Set(list.map((x) => x.user_id));
+    for (const id of [...this._liveCol.keys()]) if (!ids.has(id)) { this._liveCol.delete(id); this._liveOff.delete(id); }
+    for (const x of list) {
+      if (!this._liveCol.has(x.user_id)) {
+        const used = [...this._liveCol.values()];
+        this._liveCol.set(x.user_id, colors.find((c) => !used.includes(c)) || colors[this._liveCol.size % colors.length]);
+      }
+    }
+    let html = `<h3>Live <span class="muted" style="text-transform:none">aggiornata ogni 10 s</span></h3>`;
+    if (!list.length) {
+      html += `<div class="muted">Nessuno sta guidando adesso. Qui compaiono le guide in corso di tutti gli utenti di Home Assistant
+        (da quando premono Parti a quando escono), con la posizione sulla mappa.</div>`;
+    }
+    const now = Date.now() / 1000;
+    list.forEach((x, k) => {
+      const col = this._liveCol.get(x.user_id);
+      const on = !this._liveOff.has(x.user_id);
+      const v = x.vehicle || {};
+      const vico = v.type ? vehIcon(v.type) : (MODES.find((m) => m[0] === x.mode) || MODES[0])[1];
+      const ago = Math.max(0, Math.round(now - (x.updated || now)));
+      const agoTxt = ago < 60 ? `${ago} s fa` : `${Math.round(ago / 60)} min fa`;
+      const eta = x.arrived ? "✅ arrivato" : x.eta ? `arrivo ${fmtClock(x.eta)} · ${fmtTime((x.minutes || 0) * 60)} · ${fmtKm(x.km || 0)}` : "";
+      html += `<div class="trip live"><input type="checkbox" data-lc="${k}" ${on ? "checked" : ""} title="Mostra sulla mappa">
+        <span class="sw" style="background:${col}"></span>
+        <div class="nm" data-lv="${k}"><b>${esc(x.name || "Utente")}${x.me ? " (tu)" : ""}</b> · ${vico} ${esc(v.name || "")}${v.plate ? ` ${esc(v.plate)}` : ""}
+          <div>${x.from ? `${esc(x.from)} → ` : "→ "}${esc(x.dest || "?")}</div>
+          <small>${eta}${x.speed != null && !x.arrived ? ` · ${Math.round(x.speed)} km/h` : ""} · aggiornato ${agoTxt}${ago > 120 ? " ⚠" : ""}</small></div></div>`;
+    });
+    box.innerHTML = html;
+    box.querySelectorAll("[data-lc]").forEach((el) => el.addEventListener("change", () => {
+      const x = list[+el.dataset.lc];
+      if (el.checked) this._liveOff.delete(x.user_id); else this._liveOff.add(x.user_id);
+      this._drawLive();
+    }));
+    // toccando il nome la mappa va su quella persona (e la mostra, se era nascosta)
+    box.querySelectorAll("[data-lv]").forEach((el) => el.addEventListener("click", () => {
+      const x = list[+el.dataset.lv];
+      this._liveOff.delete(x.user_id);
+      this._renderLive();
+      this._drawLive();
+      const p = x.track?.[x.track.length - 1];
+      if (p) this._map.setView(p, Math.max(this._map.getZoom(), 15));
+    }));
+  }
+
+  _drawLive() {
+    const lay = this._liveLayer;
+    if (!lay) return;
+    lay.clearLayers();
+    for (const x of this._live || []) {
+      if (this._liveOff?.has(x.user_id)) continue;
+      const col = this._liveCol?.get(x.user_id) || "#e53935";
+      const tr = x.track || [];
+      if (tr.length > 1) {
+        L.polyline(tr, { color: "#fff", weight: 8, opacity: 0.85, interactive: false }).addTo(lay);
+        L.polyline(tr, { color: col, weight: 5, opacity: 1, interactive: false }).addTo(lay);
+      }
+      if (x.lat != null && x.lon != null && !x.arrived) { // arrivo
+        L.marker([x.lat, x.lon], { interactive: false, icon: L.divIcon({ className: "", iconSize: [22, 22], iconAnchor: [11, 11],
+          html: `<div class="livedest" style="border-color:${col}">🏁</div>` }) }).addTo(lay);
+      }
+      const p = tr[tr.length - 1];
+      if (p) { // veicolo nella direzione di marcia, col nome
+        const v = x.vehicle || {};
+        const svg = v.type ? vehicleSvg(v) : uniqSvg(VEHICLE_SVG[x.mode] || CAR_SVG);
+        L.marker(p, { title: `${x.name || ""}${x.dest ? ` → ${x.dest}` : ""}`, zIndexOffset: 900, icon: L.divIcon({ className: "", iconSize: [60, 70], iconAnchor: [30, 26],
+          html: `<div class="livecar"><div class="lc" style="transform:rotate(${Math.round(x.dir || 0)}deg)">${svg}</div>
+            <div class="ln" style="background:${col}">${esc(x.name || "")}</div></div>` }) }).addTo(lay);
+      }
+    }
+    this._schedule3d();
   }
 
   // Archivio: tutti i viaggi per mese, con i totali; la casella mostra la traccia sulla mappa (più viaggi insieme, colori diversi)

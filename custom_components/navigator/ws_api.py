@@ -32,7 +32,7 @@ def async_setup(hass: HomeAssistant) -> None:
         return
     for handler in (ws_info, ws_search, ws_reverse, ws_route, ws_place_save, ws_place_delete, ws_recent_clear, ws_nearby,
                     ws_poi_tile, ws_live, ws_weather, ws_trip_save, ws_trips, ws_trip, ws_trip_delete, ws_garage,
-                    ws_garage_save, ws_trip_start, ws_trip_append, ws_trip_finish, ws_poi_tiles, ws_poi_info):
+                    ws_garage_save, ws_trip_start, ws_trip_append, ws_trip_finish, ws_poi_tiles, ws_poi_info, ws_live_all):
         websocket_api.async_register_command(hass, handler)
     hass.data[DATA_WS_REGISTERED] = True
 
@@ -257,15 +257,49 @@ def _user(connection) -> tuple[str, str]:
     vol.Optional("lat"): vol.Coerce(float),
     vol.Optional("lon"): vol.Coerce(float),
     vol.Optional("arrived", default=False): bool,
+    # per la scheda Live: dove sei adesso, verso dove vai, con che veicolo, il viaggio in corso
+    vol.Optional("plat"): vol.Coerce(float),
+    vol.Optional("plon"): vol.Coerce(float),
+    vol.Optional("dir"): vol.Coerce(float),
+    vol.Optional("speed"): vol.Coerce(float),
+    vol.Optional("from", default=""): str,
+    vol.Optional("trip_id", default=""): str,
+    vol.Optional("vehicle"): dict,
 })
 @websocket_api.async_response
 async def ws_live(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
     """Stato della guida dell'utente collegato: aggiorna i suoi sensori (arrivo, tempo e distanza rimanenti)."""
     async def go():
         uid, name = _user(connection)
-        data = {k: msg[k] for k in ("active", "eta", "minutes", "km", "dest", "address", "mode", "lat", "lon", "arrived") if k in msg}
+        data = {k: msg[k] for k in ("active", "eta", "minutes", "km", "dest", "address", "mode", "lat", "lon", "arrived",
+                                    "plat", "plon", "dir", "speed", "from", "trip_id") if k in msg}
+        v = msg.get("vehicle") or {}
+        data["vehicle"] = {k: str(v.get(k) or "")[:40] for k in ("name", "plate", "type", "icon", "color")}
         await _data(hass).live.update(uid, name, data)
         return {"ok": True}
+
+    await _run(connection, msg["id"], go())
+
+
+@websocket_api.websocket_command({vol.Required("type"): "navigator/live_all"})
+@websocket_api.async_response
+async def ws_live_all(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Guide in corso di tutti gli utenti (scheda Live): posizione, arrivo, veicolo e traccia percorsa finora."""
+    async def go():
+        uid, _name = _user(connection)
+        data = _data(hass)
+        out = []
+        for user_id, st in data.live.active().items():
+            track = []
+            if st.get("trip_id"):
+                t = data.trips.get(user_id, st["trip_id"])
+                track = list((t or {}).get("track") or [])[-600:]
+            if st.get("plat") is not None and st.get("plon") is not None:
+                track.append([round(st["plat"], 5), round(st["plon"], 5)])
+            out.append({**{k: v for k, v in st.items() if k != "trip_id"}, "user_id": user_id,
+                        "name": data.live.users.get(user_id, ""), "me": user_id == uid, "track": track})
+        out.sort(key=lambda x: x.get("eta") or 0)
+        return {"live": out}
 
     await _run(connection, msg["id"], go())
 

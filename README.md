@@ -189,6 +189,11 @@ vicina alla macchina; quando la valle si apre torna quella scelta); **◎** rime
   15 minuti senza aggiornamenti). Esempio: accendere il riscaldamento quando mancano 15 minuti a casa, o aprire il cancello a 2.
 - **Pulsanti all'arrivo** (⚙): entità a scelta (cancello, garage, serratura, luci, script…) che in guida, a meno di 500 m dalla
   destinazione, diventano tasti grandi nella barra in basso (di serie solo arrivando a Casa).
+- **Live** (scheda *📡 Live* del pannello): le guide in corso di **tutti gli utenti** di Home Assistant, aggiornate ogni 10 secondi:
+  chi guida, con che veicolo, da dove a dove, arrivo previsto, tempo e km che mancano, velocità e da quanto è arrivata l'ultima
+  posizione. Ognuna si può mostrare o togliere dalla mappa (2D e 3D) con la casella: traccia percorsa finora, veicolo col nome
+  nella direzione di marcia e bandierina dell'arrivo, ognuna col suo colore; toccando il nome la mappa va su quella persona. A guida
+  finita (Esci, o nessun aggiornamento per 15 minuti) sparisce dalla lista.
 - **Archivio** (scheda *🗂️ Archivio* del pannello): ogni guida viene salvata **man mano** per il tuo utente (punti GPS e totali ogni
   30 secondi e quando l'app va in secondo piano; senza **Esci** il viaggio resta, segnato "interrotto") con data, partenza e arrivo,
   veicolo, km, tempo, velocità media e massima e la traccia; viaggi raggruppati per mese con i totali, e si possono mostrare sulla

@@ -65,6 +65,12 @@ class Live:
             return {**st, "active": False}
         return st
 
+    def active(self) -> dict[str, dict[str, Any]]:
+        """Guide in corso adesso (non concluse, aggiornate negli ultimi 15 minuti)."""
+        now = time.time()
+        return {uid: st for uid, st in self.state.items()
+                if st.get("active") and now - st.get("updated", 0) <= STALE_S}
+
     @callback
     def _expire(self, _now: datetime) -> None:
         for uid, st in self.state.items():
