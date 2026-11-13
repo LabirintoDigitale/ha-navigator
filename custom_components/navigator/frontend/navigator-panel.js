@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.22";
+const PANEL_VERSION = "1.9.23";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1754,6 +1754,7 @@ class NavigatorPanel extends HTMLElement {
     const m = ms[k];
     const sh = rt.shape;
     const at = sh[Math.min(m.begin, sh.length - 1)];
+    const already = this._stepK != null; // si sta già scorrendo: la vista scelta a mano (distanza, inclinazione) resta
     this._stepK = k;
     this._stepRt = this._result.routes[this._sel];
     // barra in alto come in guida: distanza dall'indicazione di prima, freccia, testo, corsie
@@ -1788,8 +1789,8 @@ class NavigatorPanel extends HTMLElement {
       this._schedule3d();
       // come in guida: l'inclinazione e la distanza scelte dall'utente (non valori fissi), girata nel verso di marcia
       const g = this._g3;
-      const cam = this._clearCamera({ center: [at[1], at[0]], zoom: 16 + this._zoom3dOff(), bearing: dir ?? g.getBearing(),
-        pitch: this._pitch3d(), padding: { top: 0, bottom: 0, left: 0, right: 0 } });
+      const cam = this._clearCamera({ center: [at[1], at[0]], zoom: already ? g.getZoom() : 16 + this._zoom3dOff(), bearing: dir ?? g.getBearing(),
+        pitch: already ? g.getPitch() : this._pitch3d(), padding: { top: 0, bottom: 0, left: 0, right: 0 } });
       this._stepAnim = true; // durante il movimento la mappa 2D non deve riportare indietro la vista
       g.easeTo({ ...cam, duration: 800 });
       // finito il movimento la mappa 2D (nascosta) va nello stesso punto: altrimenti al primo aggiornamento riportava indietro la vista
@@ -1804,7 +1805,7 @@ class NavigatorPanel extends HTMLElement {
         this._freeRot = true;
         this._rot = dir;
       }
-      this._map.setView(at, Math.max(this._map.getZoom(), 17), { animate: false });
+      this._map.setView(at, already ? this._map.getZoom() : Math.max(this._map.getZoom(), 17), { animate: false });
       this._relayout();
       this._applyInteract();
     }
