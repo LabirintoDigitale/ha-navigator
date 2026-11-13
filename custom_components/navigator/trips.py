@@ -21,27 +21,42 @@ class Trips:
     def __init__(self, hass: HomeAssistant) -> None:
         self._store: Store[dict] = Store(hass, 1, f"{DOMAIN}.trips")
         self.data: dict[str, list[dict]] = {}
-        self.garage: dict[str, list[dict]] = {}
+        self.garage: list[dict] = []  # garage condiviso: gli stessi veicoli per tutti gli utenti di Home Assistant
         self.selected: dict[str, str] = {}  # utente -> veicolo scelto l'ultima volta ("base" o id del garage)
 
     async def async_load(self) -> None:
         stored = await self._store.async_load() or {}
         self.data = stored.get("users", {})
-        self.garage = stored.get("garage", {})
+        garage = stored.get("garage", [])
+        if isinstance(garage, dict):
+            # versioni fino alla 1.9.14: un garage per utente. Si uniscono in quello condiviso (stessa targa o stesso
+            # nome senza targa = stesso veicolo, tenuto una volta sola)
+            merged: list[dict] = []
+            seen: set[str] = set()
+            for vehicles in garage.values():
+                for v in vehicles:
+                    key = f"p:{v['plate']}" if v.get("plate") else f"n:{(v.get('name') or '').lower()}|{v.get('type')}"
+                    if key in seen or any(m["id"] == v.get("id") for m in merged):
+                        continue
+                    seen.add(key)
+                    merged.append(v)
+            garage = merged
+        self.garage = garage
         self.selected = stored.get("selected", {})
 
     def _save(self) -> None:
         self._store.async_delay_save(lambda: {"users": self.data, "garage": self.garage, "selected": self.selected}, 5)
 
-    def vehicles(self, user_id: str) -> list[dict]:
-        return self.garage.get(user_id, [])
+    def vehicles(self, user_id: str) -> list[dict]:  # noqa: ARG002 - garage uguale per tutti
+        return self.garage
 
     def select(self, user_id: str, vehicle_id: str) -> None:
         """Ricorda il veicolo scelto dall'utente: alla prossima apertura del pannello (su qualsiasi dispositivo) è già quello."""
         self.selected[user_id] = str(vehicle_id or "base")[:16]
         self._save()
 
-    def set_vehicles(self, user_id: str, vehicles: list[dict]) -> list[dict]:
+    def set_vehicles(self, user_id: str, vehicles: list[dict]) -> list[dict]:  # noqa: ARG002
+        """Salva il garage condiviso (lo può modificare ogni utente)."""
         clean = []
         for v in vehicles[:30]:
             item = {"id": str(v.get("id") or uuid.uuid4().hex[:8])[:16], "name": str(v.get("name") or "")[:40],
@@ -52,7 +67,7 @@ class Trips:
             if re.fullmatch(r"#[0-9a-fA-F]{6}", str(v.get("color") or "")):
                 item["color"] = str(v["color"]).lower()
             clean.append(item)
-        self.garage[user_id] = clean
+        self.garage = clean
         self._save()
         return clean
 

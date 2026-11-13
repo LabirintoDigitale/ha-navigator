@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.14";
+const PANEL_VERSION = "1.9.15";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -4221,6 +4221,14 @@ class NavigatorPanel extends HTMLElement {
   }
 
   _openSettings() {
+    // garage condiviso: si rilegge, così non si sovrascrivono le modifiche fatte da un altro utente nel frattempo
+    if (!this._garageFresh) {
+      this._garageFresh = true;
+      const before = JSON.stringify(this._garage || []);
+      this._loadGarage().then(() => {
+        if (JSON.stringify(this._garage || []) !== before && !this.$("setwrap").hidden) this._openSettings();
+      }).finally(() => setTimeout(() => { this._garageFresh = false; }, 1500));
+    }
     const s = this._settings;
     const wrap = this.$("setwrap");
     const sw = (key, label, note = "") => `<label class="line"><span>${label}${note ? `<div class="note">${note}</div>` : ""}</span>
@@ -5120,8 +5128,9 @@ class NavigatorPanel extends HTMLElement {
         </div></div>`;
     }).join("");
     return `<div class="grp"><h3>Garage</h3>
-      <div class="note">I tuoi veicoli (salvati per il tuo utente): scegli disegno e colore che vedrai sulla mappa; alla partenza scegli
-        quello usato nel menu Veicolo, e il diario dei viaggi lo ricorda. Con "Base" il mezzo si sceglie con i bottoni.</div>
+      <div class="note">Garage <b>condiviso</b> da tutti gli utenti di Home Assistant: chiunque può aggiungere o modificare i veicoli.
+        Scegli disegno e colore che vedrai sulla mappa; alla partenza ognuno sceglie il suo nel menu Veicolo (la scelta resta per
+        ogni utente) e il diario dei viaggi lo ricorda. Con "Base" il mezzo si sceglie con i bottoni.</div>
       ${rows}<button data-g="add">＋ Aggiungi veicolo</button></div>`;
   }
 
