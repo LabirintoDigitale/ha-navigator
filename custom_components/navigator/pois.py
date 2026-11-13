@@ -209,6 +209,43 @@ class Pois:
             return None
         return {"lat": lat, "lon": lon, "tags": e.get("tags", {}), "id": f"{e.get('type', 'n')[0]}{e.get('id')}"}
 
+    # ------------------------------------------------------------------ lavori e strade chiuse
+
+    async def roadworks(self, line: list[list[float]], radius: float) -> dict:
+        """Lavori in corso e strade chiuse al traffico lungo il percorso, da OpenStreetMap (Overpass).
+
+        kind: "lavori" (highway=construction) o "chiusa" (access/motor_vehicle/motorcar = no, oppure strada chiusa).
+        """
+        if not line:
+            return {"items": [], "source": "OpenStreetMap", "updated": int(time.time())}
+        boxes = _bbox_chunks(line, radius)
+        parts = []
+        for s_, w, n, e in boxes:
+            bb = f"{s_:.4f},{w:.4f},{n:.4f},{e:.4f}"
+            parts.append(f'way["highway"="construction"]({bb});')
+            parts.append(f'way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service)$"]["access"="no"]({bb});')
+            parts.append(f'way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service)$"]["motor_vehicle"="no"]({bb});')
+            parts.append(f'way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service)$"]["motorcar"="no"]({bb});')
+        q = "[out:json][timeout:25];(" + "".join(parts) + ");out center tags;"
+        try:
+            els = await self._overpass_race(q, 25)
+        except PoiError:
+            return {"items": [], "source": "OpenStreetMap", "updated": int(time.time()), "error": "Overpass non risponde"}
+        items = []
+        seen = set()
+        for e in els:
+            it = self._osm_item(e)
+            if not it or it["id"] in seen:
+                continue
+            seen.add(it["id"])
+            t = it.pop("tags")
+            closed = t.get("access") == "no" or t.get("motor_vehicle") == "no" or t.get("motorcar") == "no"
+            kind = "lavori" if t.get("highway") == "construction" and not closed else "chiusa"
+            items.append({"lat": it["lat"], "lon": it["lon"], "id": it["id"], "kind": kind,
+                          "name": t.get("name") or t.get("ref") or t.get("construction") or ""})
+        near = await self._exec(_near_line, items, line, radius)
+        return {"items": near, "source": "OpenStreetMap", "updated": int(time.time())}
+
     # ------------------------------------------------------------------ distributori
 
     async def _load_fuel(self) -> list[dict]:

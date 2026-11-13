@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.38";
+const PANEL_VERSION = "1.9.39";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -517,7 +517,7 @@ const SETTINGS_KEY = "navigator-panel-settings";
 const DEFAULT_SETTINGS = { voice: false, lang: "it", voiceSel: "f", out: "auto", autoZoom: true, beep: false,
   fuelBrands: [], fuelKind: "", camAlert: true, view3d: false, b3d: true, clouds3d: true, veh3d: true, terrainEx: "1.5", pitch3d: 60, tunnelFx: true, zoom3dOff: 0,
   voiceStyle: "normale", voiceRate: 1, voicePitch: 1, bldStyle: "colorati",
-  poiKinds: ["farmacia", "ospedale", "supermercato"], arrEntities: [], arrHomeOnly: true, nightMode: "auto", wxAlert: true, muteGuide: false };
+  poiKinds: ["farmacia", "ospedale", "supermercato"], arrEntities: [], arrHomeOnly: true, nightMode: "auto", wxAlert: true, muteGuide: false, trafficSensor: "" };
 // marche dei distributori (come nell'anagrafica del MIMIT)
 const FUEL_BRANDS = ["Agip Eni", "Api-Ip", "Q8", "Esso", "Tamoil", "Shell", "Retitalia", "Beyfin", "Costantin", "Europam", "Pompe bianche"];
 const BRAND_COLORS = { "agip eni": "#f7c600", "eni": "#f7c600", "api-ip": "#0057a8", "ip": "#0057a8", "q8": "#0a3a7a", "esso": "#d71920",
@@ -1157,6 +1157,8 @@ const STYLE = `
   .plist .fl .muted { color: var(--secondary-text-color); }
   .pmark { width: 26px; height: 26px; border-radius: 50%; border: 2px solid #fff; display: flex; align-items: center; justify-content: center;
     font-size: 14px; box-shadow: 0 1px 4px rgba(0,0,0,.45); }
+  .box.traffic { background: rgba(2,136,209,.12); border-left: 3px solid #0288d1; }
+  .rwm { font-size: 20px; line-height: 1; filter: drop-shadow(0 1px 2px rgba(0,0,0,.6)); text-align: center; }
   .navbot .lim { width: 30px; height: 30px; border-radius: 50%; border: 4px solid #d32f2f; background: #fff; color: #111;
     display: inline-flex; align-items: center; justify-content: center; font: 700 13px sans-serif; flex: none; box-sizing: border-box; }
   /* schermo intero: solo la mappa, sopra la barra laterale e l'intestazione di Home Assistant.
@@ -1283,6 +1285,8 @@ class NavigatorPanel extends HTMLElement {
     this._mode = "auto";
     this._avoid = { tolls: false, highways: false, ferries: false };
     this._excluded = []; // [{name, length_km, points:[{lat,lon}]}]
+    this._blocked = []; // chiusure/lavori sul percorso da evitare (punti {lat,lon})
+    this._roadworks = []; // lavori e chiusure vicino al percorso (per i marcatori)
     this._result = null;
     this._sel = 0;
     this._place = null; // luogo selezionato dalla ricerca o dalla mappa
@@ -1452,6 +1456,7 @@ class NavigatorPanel extends HTMLElement {
     this._wxLayer = L.layerGroup().addTo(this._map);     // meteo lungo il percorso
     this._tripLayer = L.layerGroup().addTo(this._map);   // traccia di un viaggio del diario
     this._liveLayer = L.layerGroup().addTo(this._map);   // guide in corso degli utenti (scheda Live)
+    this._rwLayer = L.layerGroup().addTo(this._map);     // lavori e strade chiuse sul percorso
     this._applyNight();
     this._loadTrips();
     this._loadGarage();
@@ -1520,6 +1525,7 @@ class NavigatorPanel extends HTMLElement {
     $("clear").addEventListener("click", () => {
       this._points = [this._homePoint(), null];
       this._excluded = [];
+      this._blocked = [];
       this._result = null;
       this._afterPointsChange(false);
       this._renderResults();
@@ -1777,7 +1783,7 @@ class NavigatorPanel extends HTMLElement {
     this.$("placecard").innerHTML = "";
     this.$("q").value = "";
     if (action === "close") { this._drawMarkers(); return; }
-    if (action === "dest") this._excluded = []; // nuova destinazione: le tratte tolte non valgono più
+    if (action === "dest") { this._excluded = []; this._blocked = []; } // nuova destinazione: tratte tolte e chiusure evitate non valgono più
     this._afterPointsChange();
   }
 
@@ -2191,6 +2197,18 @@ class NavigatorPanel extends HTMLElement {
       if (this._me) this._locate(false, e.target.value);
       if (this._result) this._renderResults();
     });
+  }
+
+  // tempo con traffico dal sensore scelto (Waze Travel Time o simili): { sec, name } oppure null
+  _trafficEta() {
+    const id = this._settings.trafficSensor;
+    const st = id && this._hass?.states?.[id];
+    if (!st) return null;
+    const v = parseFloat(st.state);
+    if (!isFinite(v) || v <= 0) return null;
+    const u = (st.attributes.unit_of_measurement || "min").toLowerCase();
+    const sec = u === "s" ? v : u === "h" ? v * 3600 : v * 60; // di norma i minuti
+    return { sec, name: st.attributes.friendly_name || id };
   }
 
   _navSectionHtml() {
@@ -3476,7 +3494,7 @@ class NavigatorPanel extends HTMLElement {
     g.getSource("lines").setData({ type: "FeatureCollection", features: feats });
     for (const m of this._g3markers) m.remove();
     this._g3markers = [];
-    for (const grp of [this._markerLayer, this._poiLayer, this._wxLayer, this._liveLayer, this._stepLayer].filter(Boolean)) {
+    for (const grp of [this._markerLayer, this._poiLayer, this._wxLayer, this._liveLayer, this._stepLayer, this._rwLayer].filter(Boolean)) {
       grp.eachLayer((l) => {
         const ic = l.options?.icon?.options;
         if (!(l instanceof L.Marker) || !ic?.html) return;
@@ -4780,6 +4798,20 @@ class NavigatorPanel extends HTMLElement {
         ${sw("beep", "Beep quando superi il limite", "Limiti da OpenStreetMap, per auto e moto; tolleranza di 3 km/h (5% sopra i 60)")}
         <div class="row" style="margin-top:6px"><button data-s="testbeep">▶ Prova il beep</button></div>
       </div>
+      <div class="grp"><h3>Traffico</h3>
+        <div class="note">Navigator non ha dati di traffico propri: i servizi liberi e senza chiave non li offrono. Puoi però mostrare il
+          <b>tempo con traffico</b> da un sensore di Home Assistant (es. l'integrazione gratuita <i>Waze Travel Time</i>). Vale per il
+          percorso fisso impostato in quel sensore (es. casa↔lavoro): se la destinazione è un'altra, il valore non corrisponde.</div>
+        <label class="line"><span>Sensore tempo con traffico</span><select data-s="trafficSensor"><option value="">Nessuno</option>${
+          Object.values(this._hass.states).filter((st) => {
+            const [d] = st.entity_id.split(".");
+            if (d !== "sensor") return false;
+            const u = (st.attributes.unit_of_measurement || "").toLowerCase();
+            return st.attributes.device_class === "duration" || ["min", "h", "s"].includes(u)
+              || /travel|traffic|traffico|duration|tempo/i.test(st.entity_id);
+          }).sort((a, b) => (a.attributes.friendly_name || a.entity_id).localeCompare(b.attributes.friendly_name || b.entity_id))
+            .map((st) => `<option value="${esc(st.entity_id)}" ${s.trafficSensor === st.entity_id ? "selected" : ""}>${esc(st.attributes.friendly_name || st.entity_id)}</option>`).join("")}</select></label>
+      </div>
       ${this._garageHtml()}
       <div class="grp"><h3>Pulsanti all'arrivo</h3>
         <div class="note">In guida, a meno di 500 m dalla destinazione, tasti grandi nella barra in basso per azionare queste entità
@@ -5030,7 +5062,7 @@ class NavigatorPanel extends HTMLElement {
         avoid_tolls: this._avoid.tolls,
         avoid_highways: this._avoid.highways,
         avoid_ferries: this._avoid.ferries,
-        exclude: this._excluded.flatMap((e) => e.points).slice(0, 40),
+        exclude: [...this._excluded.flatMap((e) => e.points), ...(this._blocked || [])].slice(0, 40),
         alternatives: !reroute && !this._nav,
         language: this._settings.lang,
       });
@@ -5051,9 +5083,54 @@ class NavigatorPanel extends HTMLElement {
       if (my === this._reqId) { btn.disabled = false; btn.textContent = "Calcola percorso"; }
     }
     this._renderResults();
+    if (!reroute && !this._nav && this._result) this._checkRoadworks();
+  }
+
+  // lavori e strade chiuse lungo il percorso: marcatori sulla mappa e, se una chiusura è proprio sul percorso, ricalcolo intorno
+  async _checkRoadworks() {
+    const r = this._result;
+    if (!r) return;
+    const rt = this._geom(r.routes[this._sel]);
+    const line = rt.shape.map((p) => [Math.round(p[0] * 1e5) / 1e5, Math.round(p[1] * 1e5) / 1e5]);
+    const step = Math.ceil(line.length / 7000);
+    let items = [];
+    try {
+      const res = await this._hass.callWS({ type: "navigator/nearby", category: "roadworks", radius: 30,
+        line: step > 1 ? line.filter((_, k) => k % step === 0 || k === line.length - 1) : line });
+      items = res.items || [];
+    } catch (e) { return; } // Overpass non risponde: si lascia il percorso com'è
+    if (this._result !== r || this._nav) return;
+    this._roadworks = items;
+    this._drawRoadworks();
+    // chiusure proprio sul percorso (entro ~22 m) non ancora evitate: le si esclude e si ricalcola intorno
+    const already = new Set((this._blocked || []).map((p) => `${p.lat.toFixed(4)},${p.lon.toFixed(4)}`));
+    const neu = items.filter((it) => it.off <= 22 && !already.has(`${it.lat.toFixed(4)},${it.lon.toFixed(4)}`));
+    if (neu.length && (this._blocked || []).length < 8) {
+      this._blocked = [...(this._blocked || []), ...neu.map((it) => ({ lat: it.lat, lon: it.lon }))];
+      this._msg(`⚠ Percorso rifatto per ${neu.length === 1 ? "lavori o una strada chiusa" : "lavori e strade chiuse"}`);
+      await this._compute(false);
+    } else {
+      this._renderResults(); // mostra il riepilogo dei lavori sul percorso
+    }
+  }
+
+  _drawRoadworks() {
+    const lay = this._rwLayer;
+    if (!lay) return;
+    lay.clearLayers();
+    if (this._nav && !this._isGuida()) return;
+    for (const it of this._roadworks || []) {
+      const [ico, label] = it.kind === "lavori" ? ["🚧", "Lavori in corso"] : ["⛔", "Strada chiusa"];
+      L.marker([it.lat, it.lon], { title: `${label}${it.name ? ` · ${it.name}` : ""}`, zIndexOffset: 800,
+        icon: L.divIcon({ className: "", html: `<div class="rwm">${ico}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] }) }).addTo(lay);
+    }
+    this._schedule3d();
   }
 
   _drawRoute() {
+    this._rwLayer?.clearLayers();
+    if (this._roadworks?.length && (!this._nav || this._isGuida())) this._drawRoadworks();
+
     this._routeLayer.clearLayers();
     this._schedule3d();
     this._scheduleArrows();
@@ -6121,7 +6198,21 @@ class NavigatorPanel extends HTMLElement {
           <div class="tags">${tags.join("")}</div></div>`;
       });
       html += `</div>`;
+      const tr = this._trafficEta();
+      if (tr) {
+        const base = r.routes[this._sel].summary.time;
+        const delay = Math.round((tr.sec - base) / 60);
+        html += `<div class="box traffic">🚗 <b>Senza traffico</b>: ${fmtTime(base)} · arrivo ${arrival(base)}<br>
+          🚦 <b>Con traffico</b>: ${fmtTime(tr.sec)} · arrivo ${arrival(tr.sec)}${delay >= 1 ? ` · <b>+${delay} min di coda</b>`
+            : delay <= -1 ? " · strada libera" : ""}<div class="muted" style="font-size:11px;margin-top:3px">da ${esc(tr.name)} · vale per il percorso impostato in quel sensore</div></div>`;
+      }
       for (const w of r.warnings || []) html += `<div class="box warn">${esc(w)}</div>`;
+      if (this._blocked?.length) html += `<div class="box ok">↩ Percorso ricalcolato per aggirare ${this._blocked.length === 1 ? "una strada chiusa o lavori" : "lavori e strade chiuse"}.</div>`;
+      if (this._roadworks?.length) {
+        const lav = this._roadworks.filter((x) => x.kind === "lavori").length, chi = this._roadworks.length - lav;
+        const parti = [lav ? `🚧 ${lav} ${lav === 1 ? "lavoro" : "lavori"}` : "", chi ? `⛔ ${chi} ${chi === 1 ? "strada chiusa" : "strade chiuse"}` : ""].filter(Boolean);
+        html += `<div class="box warn">${parti.join(" · ")} vicino al percorso (OpenStreetMap)</div>`;
+      }
 
       // tratte a pagamento
       if (rt.toll_segments.length) {

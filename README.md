@@ -47,6 +47,11 @@ categoria e sopra fluttua l'icona:
 - **Rotonde** con il numero dell'uscita ben visibile nell'icona, e **corsie** (auto e moto) sotto l'indicazione in guida, come in
   autostrada: le corsie da tenere sono chiare, le altre spente. Le corsie vengono da OSRM (dati di OpenStreetMap) e compaiono
   solo dove sono mappate.
+- **Lavori e strade chiuse** (OpenStreetMap): dopo il calcolo, i lavori e le strade chiuse vicino al percorso sono segnati sulla
+  mappa; se una **strada chiusa è proprio sul percorso**, Navigator ricalcola **aggirandola**. (Sono dati di OpenStreetMap, non il traffico del momento.)
+- **Tempo con traffico** (⚙ → Traffico): Navigator non ha dati di traffico propri (i servizi liberi senza chiave non li offrono), ma
+  può mostrare il tempo **con traffico** da un sensore di Home Assistant, es. l'integrazione gratuita *Waze Travel Time*, con i minuti
+  di coda rispetto al tempo senza traffico. Vale per il percorso fisso impostato in quel sensore.
 - **Navigazione** con la tua posizione: la mappa ti segue, in alto vedi la prossima manovra e la distanza, in basso tempo e km rimanenti e l'orario di arrivo. Nella barra c'è un tasto **🔊/🔇** che zittisce **solo la voce delle indicazioni** (gli avvisi di velocità, autovelox e meteo restano). La **barra delle indicazioni** si può spostare **più in alto o più in basso** tenendola premuta (resta sempre a tutta larghezza); l'altezza resta memorizzata per il tuo utente di Home Assistant (trascinala in cima per rimetterla al suo posto). Se esci dal percorso per qualche secondo compare il popup **"Ricalcolo del percorso…"** e Navigator rifà la strada da dove sei (con le stesse opzioni: pedaggi, tratte tolte, tappe ancora da raggiungere).
 - Apri il percorso in **Google Maps**, **Waze** o **OpenStreetMap**, oppure copia il riepilogo.
 - Mappe gratuite senza chiave: stradale, topografica, scura e satellite (Esri), escursionistica (OpenTopoMap).
@@ -113,6 +118,7 @@ Tutte le richieste partono da Home Assistant (nessuna chiave, nessun account):
 | Edifici 3D, gallerie | [OpenFreeMap](https://openfreemap.org) (dati OpenStreetMap, schema OpenMapTiles) | caricati dal browser, solo in 3D |
 | Meteo lungo il percorso | [Open-Meteo](https://open-meteo.com) | previsioni orarie nei punti del percorso, all'ora di passaggio |
 | Orari e contatti dei punti di interesse | OpenStreetMap tramite [Nominatim](https://nominatim.org) | una richiesta quando apri la scheda, in memoria |
+| Lavori e strade chiuse | OpenStreetMap tramite [Overpass](https://overpass-api.de) | lungo il percorso, dopo il calcolo |
 
 Sono servizi gratuiti offerti dalla comunità con limiti d'uso "ragionevole": Navigator è pensato per l'uso personale.
 Nelle **opzioni dell'integrazione** puoi indicare i tuoi server Valhalla, OSRM, Photon o Nominatim.

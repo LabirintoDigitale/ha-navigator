@@ -216,7 +216,7 @@ async def ws_cameras_area(hass: HomeAssistant, connection: websocket_api.ActiveC
 
 @websocket_api.websocket_command({
     vol.Required("type"): "navigator/nearby",
-    vol.Required("category"): vol.In(["fuel", "cameras", "parking"]),
+    vol.Required("category"): vol.In(["fuel", "cameras", "parking", "roadworks"]),
     vol.Optional("line"): vol.All([LATLON], vol.Length(min=1, max=8000)),
     vol.Optional("center"): POINT,
     vol.Optional("radius", default=500): vol.All(vol.Coerce(float), vol.Range(min=10, max=5000)),
@@ -233,6 +233,8 @@ async def ws_nearby(hass: HomeAssistant, connection: websocket_api.ActiveConnect
         line = msg.get("line") or [[msg["center"]["lat"], msg["center"]["lon"]]]
         if cat == "fuel":
             return await pois.fuel(line, msg["radius"])
+        if cat == "roadworks":
+            return await pois.roadworks(line, msg["radius"])
         return await pois.cameras(line, msg["radius"])
 
     await _run(connection, msg["id"], go())
