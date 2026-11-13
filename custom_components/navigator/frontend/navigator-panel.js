@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.16";
+const PANEL_VERSION = "1.9.17";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -867,6 +867,7 @@ const STYLE = `
   .mapwrap { flex: 1; position: relative; min-width: 0; min-height: 300px; }
   /* !important: se la mappa nasce prima che il pannello sia in pagina Leaflet scrive position: relative e l'altezza va a 0 */
   #map { position: absolute !important; inset: 0; background: #ddd; }
+  #map, #map3d { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; } /* tocco prolungato: niente selezione */
   @media (max-width: 800px) {
     :host { display: block; overflow-y: auto; }
     .main { flex-direction: column-reverse; }
@@ -1424,10 +1425,19 @@ class NavigatorPanel extends HTMLElement {
     this._poiTiles = new Map();
     this._map.on("moveend zoomend", () => this._schedulePois());
     setTimeout(() => this._schedulePois(), 1500); // anche all'apertura, senza aspettare che la mappa si muova
+    // tocco breve: il punto di interesse sotto il dito; tocco prolungato (o tasto destro): Parti da qui / Tappa / Arriva qui / ★
     this._map.on("click", (e) => {
       if (Date.now() - (this._gestEnd || 0) < 350) return; // fine di un trascinamento, non un tocco
+      if (Date.now() - (this._longAt || 0) < 900) return; // fine di un tocco prolungato
+      this._mapTap(e.originalEvent);
+    });
+    this._map.on("contextmenu", (e) => {
+      e.originalEvent?.preventDefault?.();
+      if (Date.now() - (this._longAt || 0) < 900) return; // già aperto dal tocco prolungato
+      this._longAt = Date.now();
       this._mapClick(this._rotated() && e.originalEvent ? this._unrotLatLng(e.originalEvent) : e.latlng);
     });
+    this._bindLongPress(this.$("map"), (ev) => (this._rotated() ? this._unrotLatLng(ev) : this._map.mouseEventToLatLng(ev)));
     this._map.on("dragstart", () => this._userMoved());
     this._bindGuidaGestures();
     this._ro = new ResizeObserver(() => this._relayout());
@@ -1710,6 +1720,59 @@ class NavigatorPanel extends HTMLElement {
     if (action === "close") { this._drawMarkers(); return; }
     if (action === "dest") this._excluded = []; // nuova destinazione: le tratte tolte non valgono più
     this._afterPointsChange();
+  }
+
+  _openPoi(it) {
+    this._showPlace({ name: it.name || POI_KINDS[it.k][0], address: POI_KINDS[it.k][0], lat: it.lat, lon: it.lon,
+      poi: { name: it.name || "", osm: /^[nwr]\d+$/.test(it.id || "") ? it.id : "" } }, false);
+  }
+
+  // tocco breve sulla mappa: apre il punto di interesse più vicino al dito (entro ~32 px: col dito non si centra l'icona)
+  _mapTap(ev) {
+    if (this._isGuida() || !ev) return;
+    const items = this._poiShown || [];
+    let best = null, bd = 32;
+    for (const it of items) {
+      let pt;
+      if (this._3d && this._g3) {
+        const r = this._g3.getCanvas().getBoundingClientRect();
+        const q = this._g3.project([it.lon, it.lat]);
+        pt = { x: q.x + r.left, y: q.y + r.top - 46 }; // in 3D l'icona fluttua sopra il punto
+      } else {
+        // sullo schermo, anche con la mappa ruotata: dal punto della mappa alla posizione del marcatore
+        const el = this._poiMarkerEl?.get(it.id);
+        if (!el) continue;
+        const r = el.getBoundingClientRect();
+        pt = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      }
+      const d = Math.hypot(pt.x - ev.clientX, pt.y - ev.clientY);
+      if (d < bd) { bd = d; best = it; }
+    }
+    if (best) this._openPoi(best);
+    else { this._map.closePopup(); this._popup3d?.remove(); this._popup3d = null; }
+  }
+
+  // tocco prolungato (circa mezzo secondo, fermo) su una mappa: come il clic di prima, con una piccola vibrazione
+  _bindLongPress(el, toLatLng) {
+    if (!el) return;
+    let t = null, start = null, n = 0;
+    const cancel = () => { clearTimeout(t); t = null; };
+    el.addEventListener("pointerdown", (e) => {
+      n++;
+      cancel();
+      if (n > 1 || e.button > 0 || this._isGuida()) return;
+      start = { x: e.clientX, y: e.clientY };
+      const ev = { clientX: e.clientX, clientY: e.clientY };
+      t = setTimeout(() => {
+        t = null;
+        if (Date.now() - (this._longAt || 0) < 900) return; // già aperto (menu del tasto destro / tocco lungo del telefono)
+        this._longAt = Date.now();
+        try { window.navigator.vibrate?.(25); } catch (err) { /* niente vibrazione */ }
+        this._mapClick(toLatLng(ev));
+      }, 550);
+    });
+    el.addEventListener("pointermove", (e) => { if (t && start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 10) cancel(); });
+    for (const k of ["pointerup", "pointercancel", "pointerleave"]) el.addEventListener(k, () => { n = Math.max(0, n - 1); cancel(); });
   }
 
   async _mapClick(latlng) {
@@ -2821,7 +2884,18 @@ class NavigatorPanel extends HTMLElement {
       this._from3d = true;
       try { this._map.setView([cc.lat, cc.lng], g.getZoom() + 1, { animate: false }); } finally { this._from3d = false; }
     });
-    g.on("click", (e) => this._mapClick(L.latLng(e.lngLat.lat, e.lngLat.lng)));
+    g.on("click", (e) => { if (Date.now() - (this._longAt || 0) >= 900) this._mapTap(e.originalEvent); });
+    g.on("contextmenu", (e) => {
+      e.originalEvent?.preventDefault?.();
+      if (Date.now() - (this._longAt || 0) < 900) return;
+      this._longAt = Date.now();
+      this._mapClick(L.latLng(e.lngLat.lat, e.lngLat.lng));
+    });
+    this._bindLongPress(this.$("map3d"), (ev) => {
+      const r = g.getCanvas().getBoundingClientRect();
+      const ll = g.unproject([ev.clientX - r.left, ev.clientY - r.top]);
+      return L.latLng(ll.lat, ll.lng);
+    });
     g.on("pitchend", () => this._placePitchCtl());
     g.on("sourcedata", (e) => {
       if (e.sourceId !== "ofm" || !e.isSourceLoaded) return;
@@ -5445,8 +5519,8 @@ class NavigatorPanel extends HTMLElement {
     this._poi3dMarkers?.forEach((mk) => mk.remove());
     this._poi3dMarkers = [];
     this._poiShown = items;
-    const open = (it) => this._showPlace({ name: it.name || POI_KINDS[it.k][0], address: POI_KINDS[it.k][0], lat: it.lat, lon: it.lon,
-      poi: { name: it.name || "", osm: /^[nwr]\d+$/.test(it.id || "") ? it.id : "" } }, false);
+    this._poiMarkerEl = new Map();
+    const open = (it) => this._openPoi(it);
     if (this._3d && this._g3 && window.maplibregl) {
       for (const it of items) {
         const [label, ico, col] = POI_KINDS[it.k];
@@ -5461,9 +5535,10 @@ class NavigatorPanel extends HTMLElement {
     } else {
       for (const it of items) {
         const [label, ico, col] = POI_KINDS[it.k];
-        L.marker([it.lat, it.lon], { title: `${it.name || label} · ${label}`,
+        const mk = L.marker([it.lat, it.lon], { title: `${it.name || label} · ${label}`,
           icon: L.divIcon({ className: "", html: `<div class="poim" style="background:${col}">${ico}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] }) })
           .on("click", () => open(it)).addTo(this._poiMapLayer);
+        this._poiMarkerEl.set(it.id, mk.getElement());
       }
     }
   }
