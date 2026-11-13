@@ -19,4 +19,5 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
-          ignore: brands
+          # la licenza PolyForm Strict non è tra quelle che GitHub riconosce: HACS la segnalerebbe come errore
+          ignore: brands license
