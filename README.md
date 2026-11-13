@@ -82,6 +82,19 @@ Nella barra laterale compare **Navigator** con l'icona della rosa dei venti.
 
 Copia la cartella `custom_components/navigator` nella cartella `config/custom_components/` di Home Assistant, riavvia e aggiungi l'integrazione.
 
+## App per Android (NaviHA)
+
+Oltre al pannello nella barra laterale, c'è un'**app per Android** che apre Navigator **direttamente sul telefono**, a tutto
+schermo e senza la barra di Home Assistant, così lo usi come un vero navigatore: **[NaviHA](https://github.com/LabirintoDigitale/naviha)**.
+
+- Accesso con **nome utente e password** di Home Assistant (anche con la verifica in due passaggi); la password non viene salvata.
+- Si apre **direttamente su Navigator** e usa il **GPS del telefono** anche quando Home Assistant è in `http://` in rete locale
+  (dove il browser non darebbe la posizione), con le **indicazioni a voce** di Android.
+- Funziona anche in **Android Auto**: la stessa guida passa sullo schermo dell'auto.
+
+Scarica l'ultimo `NaviHA-x.y.z.apk` dalle **[release di NaviHA](https://github.com/LabirintoDigitale/naviha/releases)** e installalo
+sul telefono (serve consentire le origini sconosciute). L'app ha bisogno dell'integrazione Navigator installata in Home Assistant.
+
 ## Servizi usati
 
 Tutte le richieste partono da Home Assistant (nessuna chiave, nessun account):
