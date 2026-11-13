@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.11";
+const PANEL_VERSION = "1.9.12";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -397,6 +397,105 @@ function vehicleSvg(v) {
 }
 const CAR_SVG = suvSvg();
 
+// ----------------------------------------------------------------- mezzo in 3D
+// Modellino "a blocchi" (volumi come gli edifici della vista 3D): misure vere in metri, x verso destra e y verso il muso;
+// ogni pezzo è un poligono con quota di base e di cima e un colore. Il pannello lo ingrandisce e lo gira nella direzione di marcia.
+function veh3dParts(kind, color) {
+  const c = color, dk = shade(c, -0.35), lt = shade(c, 0.18);
+  const GLASS = "#2a3a55", TYRE = "#161616", LIGHT = "#ffe28a", TAIL = "#e53935", GREY = "#aeb6bf";
+  const P = [];
+  // scatola con gli angoli smussati (ch = smusso in metri)
+  const box = (x1, y1, x2, y2, b, h, col, ch = 0) => P.push({ pts: ch
+    ? [[x1 + ch, y1], [x2 - ch, y1], [x2, y1 + ch], [x2, y2 - ch], [x2 - ch, y2], [x1 + ch, y2], [x1, y2 - ch], [x1, y1 + ch]]
+    : [[x1, y1], [x2, y1], [x2, y2], [x1, y2]], b, h, c: col });
+  const cyl = (cx, cy, r, b, h, col, n = 10) => P.push({ pts: Array.from({ length: n }, (_, k) =>
+    [cx + r * Math.cos((k / n) * 2 * Math.PI), cy + r * Math.sin((k / n) * 2 * Math.PI)]), b, h, c: col });
+  const wheels = (w, yf, yr, r = 0.33, t = 0.24) => {
+    for (const y of [yf, yr]) for (const s of [-1, 1]) box(s * w - t / 2, y - r, s * w + t / 2, y + r, 0, r * 2, TYRE);
+  };
+  const lights = (w, yF, yR, hb = 0.55) => {
+    box(-w + 0.12, yF - 0.06, -w + 0.42, yF + 0.02, hb, hb + 0.16, LIGHT); box(w - 0.42, yF - 0.06, w - 0.12, yF + 0.02, hb, hb + 0.16, LIGHT);
+    box(-w + 0.12, yR - 0.02, -w + 0.38, yR + 0.06, hb + 0.1, hb + 0.26, TAIL); box(w - 0.38, yR - 0.02, w - 0.12, yR + 0.06, hb + 0.1, hb + 0.26, TAIL);
+  };
+  // auto: scafo, abitacolo di vetro, tetto del colore della carrozzeria (cy1..cy2 = abitacolo), cofano e baule
+  const car = ({ L = 4.4, W = 0.9, hb = 0.95, ht = 1.45, cy1 = -1.3, cy2 = 0.7, roof = c, low = 0.28 }) => {
+    wheels(W - 0.08, L / 2 - 0.95, -L / 2 + 0.9);
+    box(-W, -L / 2, W, L / 2, low, hb, c, 0.32);
+    box(-W + 0.12, cy1, W - 0.12, cy2, hb, ht - 0.06, GLASS, 0.12);
+    box(-W + 0.16, cy1 + 0.12, W - 0.16, cy2 - 0.1, ht - 0.06, ht, roof, 0.1);
+    lights(W, L / 2, -L / 2, low + 0.3);
+  };
+  const rider = (y, col) => {
+    box(-0.26, y - 0.2, 0.26, y + 0.18, 0.75, 1.45, col, 0.08); // busto
+    cyl(0, y + 0.02, 0.16, 1.45, 1.75, shade(col, -0.45), 8); // casco
+    box(-0.4, y + 0.05, -0.28, y + 0.55, 1.05, 1.2, col); box(0.28, y + 0.05, 0.4, y + 0.55, 1.05, 1.2, col); // braccia
+  };
+  switch (kind) {
+    case "berlina": car({ L: 4.7, cy1: -1.1, cy2: 0.65, ht: 1.42 }); break;
+    case "utilitaria": car({ L: 3.6, W: 0.82, cy1: -1.25, cy2: 0.55, ht: 1.5 }); break;
+    case "station": car({ L: 4.7, cy1: -2.0, cy2: 0.6, ht: 1.48 }); box(-0.62, -1.85, -0.56, 0.45, 1.48, 1.56, "#cfd8dc"); box(0.56, -1.85, 0.62, 0.45, 1.48, 1.56, "#cfd8dc"); break;
+    case "sportiva":
+      car({ L: 4.5, W: 0.95, hb: 0.75, ht: 1.15, cy1: -0.9, cy2: 0.55, low: 0.18 });
+      box(-0.25, -2.25, -0.12, 2.25, 0.75, 0.77, "#ffffff"); box(0.12, -2.25, 0.25, 2.25, 0.75, 0.77, "#ffffff");
+      box(-0.9, -2.3, 0.9, -2.0, 1.05, 1.12, "#202020"); break; // alettone
+    case "jeep":
+      car({ L: 4.3, W: 0.92, hb: 1.1, ht: 1.85, cy1: -1.6, cy2: 0.65, low: 0.42 });
+      cyl(0, -2.3, 0.36, 0.7, 1.2, TYRE, 10); break; // ruota di scorta
+    case "pickup":
+      car({ L: 5.2, W: 0.95, hb: 1.05, ht: 1.8, cy1: -0.35, cy2: 1.0, low: 0.42 });
+      box(-0.85, -2.5, 0.85, -0.55, 1.05, 1.07, dk); // fondo del cassone (più scuro)
+      for (const s of [-1, 1]) box(s * 0.95 - 0.06, -2.55, s * 0.95 + 0.06, -0.5, 1.05, 1.4, c);
+      box(-0.95, -2.6, 0.95, -2.5, 1.05, 1.4, c); break;
+    case "furgone":
+      wheels(0.9, 1.6, -1.7, 0.34);
+      box(-0.98, -2.5, 0.98, 2.5, 0.3, 2.35, c, 0.25);
+      box(-0.9, 1.75, 0.9, 2.42, 1.15, 1.95, GLASS, 0.15); // parabrezza
+      box(-0.85, -2.3, 0.85, 1.6, 2.35, 2.42, shade(c, -0.08));
+      lights(0.98, 2.5, -2.5, 0.6); break;
+    case "camper":
+      wheels(0.95, 2.1, -1.8, 0.36);
+      box(-1.05, -3.3, 1.05, 3.3, 0.35, 2.9, c, 0.3);
+      box(-1.06, -3.0, 1.06, 2.2, 1.05, 1.25, "#c62828"); // riga sui fianchi
+      box(-0.95, 2.6, 0.95, 3.25, 1.2, 2.0, GLASS, 0.15);
+      box(-0.5, -0.6, 0.5, 0.6, 2.9, 3.0, "#24365c"); // pannello solare
+      box(-0.35, 1.4, 0.35, 2.0, 2.9, 3.05, "#a9bcd2"); // oblò
+      lights(1.05, 3.3, -3.3, 0.6); break;
+    case "moto": case "scooter": {
+      const sc = kind === "scooter";
+      box(-0.1, 0.55, 0.1, sc ? 1.05 : 1.15, 0, sc ? 0.48 : 0.62, TYRE); box(-0.11, sc ? -1.0 : -1.15, 0.11, -0.45, 0, sc ? 0.48 : 0.64, TYRE);
+      box(-0.24, -0.9, 0.24, 0.95, 0.35, sc ? 0.65 : 0.8, c, 0.12); // telaio, serbatoio o pedana
+      if (sc) box(-0.3, 0.7, 0.3, 0.95, 0.3, 1.15, c, 0.08); // scudo
+      box(-0.5, 0.75, 0.5, 0.82, 1.05, 1.1, "#222"); // manubrio
+      box(-0.18, -0.6, 0.18, -0.1, 0.8, 0.9, "#2b2b2b"); // sella
+      box(-0.08, 1.0, 0.08, 1.06, 0.7, 0.85, LIGHT);
+      rider(-0.25, dk); break;
+    }
+    case "bici":
+      box(-0.03, 0.4, 0.03, 1.05, 0, 0.66, TYRE); box(-0.03, -1.05, 0.03, -0.4, 0, 0.66, TYRE);
+      box(-0.04, -0.75, 0.04, 0.75, 0.55, 0.62, "#8a939c");
+      box(-0.32, 0.68, 0.32, 0.74, 0.98, 1.02, "#333");
+      rider(-0.2, c); break;
+    case "piedi":
+      cyl(-0.12, 0.12, 0.08, 0, 0.85, "#2a2a2a", 6); cyl(0.12, -0.12, 0.08, 0, 0.85, "#2a2a2a", 6); // gambe
+      box(-0.24, -0.13, 0.24, 0.13, 0.85, 1.45, c, 0.06); // busto
+      box(-0.34, -0.08, -0.25, 0.1, 0.95, 1.4, c); box(0.25, -0.08, 0.34, 0.1, 0.95, 1.4, c);
+      cyl(0, 0, 0.13, 1.45, 1.72, "#4e342e", 8); break;
+    default: // SUV blu e grigio (il disegno originale)
+      car({ L: 4.5, W: 0.92, hb: 1.05, ht: 1.78, cy1: -1.75, cy2: 0.55, roof: GREY, low: 0.38 });
+      box(-0.55, -1.6, -0.48, 0.4, 1.78, 1.85, lt); box(0.48, -1.6, 0.55, 0.4, 1.78, 1.85, lt);
+  }
+  return P;
+}
+// il modellino per il veicolo: quello del garage col suo colore, altrimenti quello del mezzo (Base)
+function veh3dFor(v, mode) {
+  if (v?.type) {
+    const k = vehIconsFor(v.type).includes(v.icon) ? v.icon : VEH_TYPE_ICON[v.type] || "suv";
+    return [k, okColor(v.color) ? v.color.toLowerCase() : VEH_ICONS[k][2]];
+  }
+  return { moto: ["moto", "#173a7a"], bici: ["bici", "#173a7a"], piedi: ["piedi", "#173a7a"] }[mode] || ["suv", "#173a7a"];
+}
+
+
 // persona a piedi vista dall'alto: piedi nel passo, braccia, spalle, testa col cappellino rivolto in avanti
 const PIEDI_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="30" height="30">
   <ellipse cx="14.5" cy="8.5" rx="2.6" ry="4.2" fill="#2a2a2a" stroke="#fff" stroke-width=".7"/>
@@ -413,7 +512,7 @@ const VEHICLE_SVG = { auto: CAR_SVG, moto: motoSvg(), bici: biciSvg(), piedi: PI
 // impostazioni salvate su questo dispositivo
 const SETTINGS_KEY = "navigator-panel-settings";
 const DEFAULT_SETTINGS = { voice: false, lang: "it", voiceSel: "f", out: "auto", autoZoom: true, beep: false,
-  fuelBrands: [], fuelKind: "", camAlert: true, view3d: false, b3d: true, clouds3d: true, terrainEx: "1.5", pitch3d: 60, tunnelFx: true, zoom3dOff: 0,
+  fuelBrands: [], fuelKind: "", camAlert: true, view3d: false, b3d: true, clouds3d: true, veh3d: true, terrainEx: "1.5", pitch3d: 60, tunnelFx: true, zoom3dOff: 0,
   voiceStyle: "normale", voiceRate: 1, voicePitch: 1, bldStyle: "colorati",
   poiKinds: ["farmacia", "ospedale", "supermercato"], arrEntities: [], arrHomeOnly: true, nightMode: "auto", wxAlert: true };
 // marche dei distributori (come nell'anagrafica del MIMIT)
@@ -2816,6 +2915,17 @@ class NavigatorPanel extends HTMLElement {
       : style === "semplici" ? { anchor: "viewport", color: "#ffffff", intensity: 0.5, position: [1.15, 210, 30] }
       : { anchor: "viewport", color: "#fff8ee", intensity: 0.45, position: [1.3, 230, 45] });
     try { g.setSky(this._skySpec()); } catch (e) { /* cielo non supportato */ }
+    // mezzo 3D: sopra edifici e percorso
+    if (!g.getSource("veh3d")) g.addSource("veh3d", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+    if (!g.getLayer("veh3d")) {
+      g.addLayer({ id: "veh3d", type: "fill-extrusion", source: "veh3d",
+        paint: { "fill-extrusion-color": ["get", "c"], "fill-extrusion-base": ["get", "b"], "fill-extrusion-height": ["get", "h"],
+          "fill-extrusion-opacity": 1, "fill-extrusion-vertical-gradient": true } });
+      g.on("zoom", () => { if (this._nav?.fix && this._settings.veh3d !== false) this._drawVeh3d(); });
+    } else {
+      g.moveLayer("veh3d");
+    }
+    this._veh3dKey = null;
     // nuvole in cielo: disegnate su un foglio sopra la mappa, in prospettiva con la telecamera
     if (!this._cloudHooked) {
       this._cloudHooked = true;
@@ -3124,6 +3234,14 @@ class NavigatorPanel extends HTMLElement {
     const f = this._nav?.fix;
     if (!this._3d || !g || !f) return;
     try { // un errore nella vista 3D non deve fermare la guida (chiamata a ogni posizione)
+      if (this._settings.veh3d !== false && g.getSource("veh3d")) {
+        this._me3d?.remove();
+        this._me3d = null;
+        this._drawVeh3d();
+        this._sync3d();
+        return;
+      }
+      g.getSource("veh3d")?.setData({ type: "FeatureCollection", features: [] });
       if (!this._me3d) {
         const el = document.createElement("div");
         el.innerHTML = `<div class="nav-car">${this._vehSvg()}</div>`;
@@ -3133,6 +3251,32 @@ class NavigatorPanel extends HTMLElement {
       this._me3d.setLngLat([f.lon, f.lat]).setRotation(this._nav.dir ?? 0);
     } catch (e) { this._recover3d(e); return; }
     this._sync3d();
+  }
+
+  // mezzo 3D: modellino ingrandito (più si è lontani più è grande, così sullo schermo resta di misura simile, ~50 px)
+  // e girato nella direzione di marcia
+  _drawVeh3d() {
+    const g = this._g3;
+    const f = this._nav?.fix;
+    const src = g?.getSource("veh3d");
+    if (!src || !f) return;
+    const v = this._curVehicle();
+    const [kind, color] = veh3dFor(v, this._mode);
+    const key = `${kind}|${color}|${this._nightOn ? 1 : 0}`;
+    if (this._veh3dKey !== key) { this._veh3dKey = key; this._veh3dParts = veh3dParts(kind, this._nightOn ? shade(color, -0.25) : color); }
+    // due ruote e pedone sono piccoli davvero: un po' più ingranditi, così si vedono come l'auto
+    const S = Math.max(1.5, Math.min(40, 4.6 * 2 ** (17 - g.getZoom()))) * (["moto", "scooter", "bici", "piedi"].includes(kind) ? 1.7 : 1);
+    const th = ((this._nav.dir ?? 0) * Math.PI) / 180, cs = Math.cos(th), sn = Math.sin(th);
+    const mLat = 1 / 111320, mLon = 1 / (111320 * Math.cos((f.lat * Math.PI) / 180));
+    const feats = this._veh3dParts.map((pt) => {
+      const ring = pt.pts.map(([x, y]) => {
+        const e = (x * cs + y * sn) * S, n = (-x * sn + y * cs) * S;
+        return [f.lon + e * mLon, f.lat + n * mLat];
+      });
+      ring.push(ring[0]);
+      return { type: "Feature", properties: { b: pt.b * S, h: pt.h * S, c: pt.c }, geometry: { type: "Polygon", coordinates: [ring] } };
+    });
+    src.setData({ type: "FeatureCollection", features: feats });
   }
 
   // la telecamera non deve finire sotto il terreno: inclinata sta dietro e più in basso del punto guardato, e le colline
@@ -4039,6 +4183,7 @@ class NavigatorPanel extends HTMLElement {
         <div class="note">Tasto <b>3D</b> sulla mappa e nella barra della guida: mappa inclinata con il rilievo del terreno. Usa la grafica del
           telefono e scarica anche le quote del terreno: consuma più batteria e dati della mappa piatta.</div>
         <label class="line"><span>Rilievo</span><select data-s="terrainEx">${TERRAIN_EX.map(([v, n]) => `<option value="${v}" ${String(s.terrainEx) === v ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+        ${sw("veh3d", "Veicolo in 3D", "Il tuo mezzo come modellino 3D (forma e colore del veicolo del garage); spento: il disegno piatto")}
         ${sw("b3d", "Edifici in 3D", "Da vicino, con l'altezza degli edifici dove è nota (OpenFreeMap, dati OpenStreetMap)")}
         ${s.b3d !== false ? `<label class="line"><span>Stile degli edifici</span><select data-s="bldStyle">${
           BLD_STYLES.map(([v, n]) => `<option value="${v}" ${(s.bldStyle || "colorati") === v ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>` : ""}
@@ -4084,6 +4229,7 @@ class NavigatorPanel extends HTMLElement {
     wrap.querySelectorAll("input[data-s]").forEach((el) => el.addEventListener("change", () => {
       s[el.dataset.s] = el.checked;
       this._saveSettings();
+      if (el.dataset.s === "veh3d") { this._me3d?.remove(); this._me3d = null; this._drawMe3d(); }
       if (el.dataset.s === "clouds3d") { this._cloudKey = null; this._scheduleClouds(true); }
       if (el.dataset.s === "b3d") { this._apply3dSettings(); this._openSettings(); } // compare o sparisce lo stile degli edifici
       if (el.dataset.s === "autoZoom3d") { this._g3key = null; this._sync3d(); }

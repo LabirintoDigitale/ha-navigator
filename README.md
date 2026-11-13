@@ -211,6 +211,10 @@ vicina alla macchina; quando la valle si apre torna quella scelta); **◎** rime
 - Dopo il calcolo, il **meteo previsto lungo il percorso all'ora in cui passerai** (Open-Meteo, gratuito e senza chiave): temperature
   e avvisi per neve, pioggia, ghiaccio, gelo, vento forte, nebbia e temporali, con le icone sulla mappa; in guida un avviso (anche a
   voce) quando uno di questi punti è a meno di 10 km (disattivabile in ⚙).
+- **Veicolo in 3D** (⚙ → Vista 3D): in guida il tuo mezzo è un modellino 3D "a blocchi" (con luci e ombre come gli edifici),
+  nella forma e nel colore del veicolo scelto nel garage (SUV, berlina, utilitaria, station wagon, sportiva, fuoristrada, pick-up,
+  furgone, camper, moto, scooter, bici) o del mezzo di Base, persona a piedi compresa; resta di misura simile sullo schermo a ogni zoom.
+  Spento, torna il disegno piatto.
 - **Nuvole in 3D** (⚙ → Vista 3D): con la vista inclinata, nuvole soffici a 500–1400 m sopra il terreno, che galleggiano sul
   paesaggio verso l'orizzonte, tante quanta la nuvolosità prevista nella zona (Open-Meteo, su ~18 km intorno) e lungo il percorso;
   grigie dove piove. La parte bassa dello schermo (la strada) resta sempre libera; dall'alto spariscono per non coprire la mappa. In 3D anche le icone del meteo lungo il percorso stanno sospese in cielo.
