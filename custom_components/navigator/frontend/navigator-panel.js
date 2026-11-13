@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.29";
+const PANEL_VERSION = "1.9.30";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -2137,7 +2137,8 @@ class NavigatorPanel extends HTMLElement {
     try { saved = localStorage.getItem(`${STORE_KEY}-navsrc`); } catch (e) { /* storage non disponibile */ }
     if (saved && list.some((s) => s.id === saved && s.ok)) return saved;
     // nell'app Android il GPS si può scegliere, ma di norma si parte dalla propria persona, che funziona sempre
-    if (this._companion() === "android") { const me = this._myPerson(list); if (me) return me.id; }
+    // (non in NaviHA, che passa il GPS del telefono alla pagina anche in http)
+    if (this._companion() === "android" && !this._isNaviHA()) { const me = this._myPerson(list); if (me) return me.id; }
     if (list[0]?.ok) return "gps";
     const uid = this._hass?.user?.id;
     const mine = list.find((s) => s.id.startsWith("person.") && this._hass.states[s.id].attributes.user_id === uid);
@@ -2183,7 +2184,7 @@ class NavigatorPanel extends HTMLElement {
           Navigator ricalcola la strada da dove sei.</div></div>`;
     }
     const list = this._navSources();
-    const hint = this._companion() === "android"
+    const hint = this._companion() === "android" && !this._isNaviHA()
       ? `<div class="muted" style="margin-top:6px">Nell'app Android puoi provare il GPS del dispositivo; se l'app non lo passa alla pagina
          scegli la tua persona. Per seguirti bene in auto con la persona attiva
          nell'app la posizione ad alta precisione (Impostazioni → App Companion → Gestisci sensori → Posizione in background →
@@ -4444,10 +4445,16 @@ class NavigatorPanel extends HTMLElement {
     return list.sort((a, b) => (b === mine) - (a === mine));
   }
 
+  // voce del browser: no nell'app Companion Android (la pagina non sa parlare), sì in NaviHA che fornisce
+  // speechSynthesis con la sintesi vocale di Android
+  _browserVoiceOk() {
+    return !!window.speechSynthesis && (this._isNaviHA() || this._companion() !== "android");
+  }
+
   // dove si sente la voce: browser (computer, iPhone) o app Companion (Android, la cui pagina non sa parlare)
   _voiceOut() {
     const sel = this._settings.out;
-    const browserOk = !!window.speechSynthesis && this._companion() !== "android";
+    const browserOk = this._browserVoiceOk();
     if (sel.startsWith("notify.")) return { kind: "notify", service: sel.slice(7) };
     if (sel === "browser") return { kind: browserOk ? "browser" : "none" };
     if (browserOk) return { kind: "browser" };
@@ -4549,7 +4556,7 @@ class NavigatorPanel extends HTMLElement {
     const vopts = [`<option value="f" ${s.voiceSel === "f" ? "selected" : ""}>Donna</option>`,
       `<option value="m" ${s.voiceSel === "m" ? "selected" : ""}>Uomo</option>`,
       ...voices.map((v) => `<option value="${esc(v.voiceURI)}" ${s.voiceSel === v.voiceURI ? "selected" : ""}>${esc(v.name)}</option>`)].join("");
-    const browserOk = !!window.speechSynthesis && this._companion() !== "android";
+    const browserOk = this._browserVoiceOk();
     const outs = [`<option value="auto" ${s.out === "auto" ? "selected" : ""}>Automatico</option>`,
       `<option value="browser" ${s.out === "browser" ? "selected" : ""} ${browserOk ? "" : "disabled"}>Questo dispositivo (browser)${browserOk ? "" : " – non disponibile"}</option>`,
       ...this._notifyServices().map((n) => `<option value="notify.${n}" ${s.out === `notify.${n}` ? "selected" : ""}>App Companion: ${esc(n.slice(11).replace(/_/g, " "))}</option>`)].join("");
