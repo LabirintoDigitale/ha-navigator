@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.34";
+const PANEL_VERSION = "1.9.35";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -987,8 +987,11 @@ const STYLE = `
   .navtop.moved { top: var(--nty); }
   .navtop.dragging { cursor: grabbing; opacity: .92; box-shadow: 0 6px 20px rgba(0,0,0,.5); user-select: none; transition: none; }
   .navtop { flex-wrap: wrap; }
-  .navtop .navmute { margin-left: auto; background: rgba(255,255,255,.18); color: #fff; border: none; border-radius: 10px;
-    width: 42px; height: 42px; font-size: 20px; flex: none; cursor: pointer; align-self: center; }
+  .navtop .navright { margin-left: auto; display: flex; align-items: center; gap: 10px; flex: none; }
+  .navtop .navmute { background: rgba(255,255,255,.18); color: #fff; border: none; border-radius: 10px;
+    width: 42px; height: 42px; font-size: 20px; flex: none; cursor: pointer; }
+  .navtop .lim { width: 40px; height: 40px; border-radius: 50%; border: 5px solid #d32f2f; background: #fff; color: #111;
+    display: inline-flex; align-items: center; justify-content: center; font: 700 16px sans-serif; flex: none; box-sizing: border-box; }
   .navtop .camrow { flex: 1 0 100%; display: flex; align-items: center; gap: 8px; background: #fff; color: #b71c1c; border-radius: 8px;
     padding: 4px 8px; font-weight: 700; font-size: 16px; position: relative; overflow: hidden; }
   .navtop .camrow .cico { font-size: 20px; }
@@ -4900,12 +4903,15 @@ class NavigatorPanel extends HTMLElement {
         ? `<div class="lanes" title="Corsie: quelle chiare sono quelle da tenere">${next.lanes.map((l) => `<span class="ln ${l.v ? "on" : ""}">${laneSvg(l.d)}</span>`).join("")}</div>` : "";
       top.innerHTML = `<span class="ic">${maneuverIcon(next)}</span><div><div class="d">${toNext < 15 ? "Ora" : fmtDist(toNext)}</div><div class="t">${esc(next.text)}</div>${lanes}</div>`;
     }
-    // tasto per zittire SOLO la voce delle indicazioni (gli avvisi di velocità, autovelox e meteo restano)
+    // a destra della barra: il cartello del limite di velocità e il tasto per zittire SOLO la voce delle indicazioni
+    let right = "";
+    if (nav.limit) right += `<span class="lim" title="Limite di velocità">${nav.limit}</span>`;
     if (this._settings.voice) {
       const muted = !!this._settings.muteGuide;
-      top.insertAdjacentHTML("beforeend", `<button class="navmute" data-a="mute"
-        title="${muted ? "Voce indicazioni disattivata — tocca per riattivarla (gli avvisi restano)" : "Zittisci la voce delle indicazioni (gli avvisi restano)"}">${muted ? "🔇" : "🔊"}</button>`);
+      right += `<button class="navmute" data-a="mute"
+        title="${muted ? "Voce indicazioni disattivata — tocca per riattivarla (gli avvisi restano)" : "Zittisci la voce delle indicazioni (gli avvisi restano)"}">${muted ? "🔇" : "🔊"}</button>`;
     }
+    if (right) top.insertAdjacentHTML("beforeend", `<div class="navright">${right}</div>`);
     // autovelox: striscia sotto l'indicazione (la svolta resta sempre visibile), distanza che scende fino a 0
     if (nav.cam && nav.fix && !nav.arrived) {
       const c = nav.cam;
@@ -4931,7 +4937,6 @@ class NavigatorPanel extends HTMLElement {
     const modeIco = (MODES.find((m) => m[0] === this._mode) || MODES[0])[1];
     bot.querySelector(".info").innerHTML = `<span title="Mezzo del percorso">${modeIco}</span><span class="rem">${fmtTime(remTime)}</span><span>${fmtKm(remM / 1000)} · arrivo ${arrival(remTime)}</span>
       ${kmh != null ? `<span class="spd ${nav.over ? "over" : ""}" title="Velocità">${kmh} km/h</span>` : ""}
-      ${nav.limit ? `<span class="lim" title="Limite di velocità">${nav.limit}</span>` : ""}
 `;
     const c = bot.querySelector('[data-n="center"]');
     c.classList.toggle("attn", !nav.follow);
