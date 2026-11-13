@@ -26,7 +26,9 @@ categoria e sopra fluttua l'icona:
 - **Ricerca** di indirizzi, città, attività e punti d'interesse con suggerimenti mentre scrivi.
 - **Itinerario** con partenza, destinazione e fino a 10 tappe intermedie: riordina, inverti, trascina i segnaposto sulla mappa.
 - Punti rapidi: **Casa** (posizione di Home Assistant), **la mia posizione** (GPS del dispositivo), zone e persone di Home Assistant, **preferiti** e **destinazioni recenti**.
-- Clic sulla mappa: *Parti da qui*, *Aggiungi tappa*, *Arriva qui*, *Salva nei preferiti*.
+- Clic sulla mappa, anche nella vista 3D: *Parti da qui*, *Aggiungi tappa*, *Arriva qui*, *Salva nei preferiti*.
+- **Mappa 2D che ruota con due dita**: girando due dita la mappa ruota (poi trascinamento, zoom e clic tengono conto della
+  rotazione); la bussola 🧭 in basso a destra la riporta col nord in alto. In guida la mappa gira da sola con la direzione di marcia.
 - Mezzo: **auto, moto, bici, a piedi**. Opzioni: evita pedaggi, autostrade, traghetti.
   A piedi e in bici sensi unici e rotonde delle auto non valgono (lo ricorda una nota sopra i percorsi); a piedi Navigator
   preferisce marciapiedi, percorsi pedonali e strisce quando in OpenStreetMap sono disegnati a parte.

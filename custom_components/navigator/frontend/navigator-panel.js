@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.7";
+const PANEL_VERSION = "1.9.8";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -921,7 +921,14 @@ const STYLE = `
   .nosleep { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
   .main.guida .mapwrap { flex: 1; height: auto; }
   .main.guida .leaflet-control-container { display: none; }
+  .pop3d .maplibregl-popup-content { border-radius: 12px; padding: 12px 14px; box-shadow: 0 3px 14px rgba(0,0,0,.4);
+    background: var(--card-background-color, #fff); color: var(--primary-text-color, #222); }
+  .pop3d.maplibregl-popup-anchor-bottom .maplibregl-popup-tip { border-top-color: var(--card-background-color, #fff); }
+  .pop3d.maplibregl-popup-anchor-top .maplibregl-popup-tip { border-bottom-color: var(--card-background-color, #fff); }
+  .pop3d .maplibregl-popup-close-button { display: none; }
   #map.rot { transition: transform .8s ease-out; }
+  #map.rot.free { transition: none; }
+  .northbtn svg { width: 22px; height: 22px; transition: transform .2s; }
   #map.rot.moving { transition: none; }
   .main.guida #map { touch-action: none; cursor: grab; }
   .main.guida #map.moving { cursor: grabbing; }
@@ -1256,6 +1263,7 @@ class NavigatorPanel extends HTMLElement {
           <div class="gattr" id="gattr" hidden></div>
           <div class="ctl br">
             <button id="modebtn" class="mode go" hidden>▶ Parti</button>
+            <button id="northbtn" class="northbtn" title="Nord in alto" hidden><svg viewBox="0 0 24 24"><path d="M12 2l4 10h-8z" fill="#e53935"/><path d="M12 22l-4-10h8z" fill="#9e9e9e"/></svg></button>
             <button id="locate" title="La mia posizione">◎</button>
             <button id="fit" title="Mostra tutto il percorso">⤢</button>
             <button id="b3dbtn" class="b3d" title="Vista 3D con rilievo ed edifici">3D</button>
@@ -1294,7 +1302,10 @@ class NavigatorPanel extends HTMLElement {
     this._poiTiles = new Map();
     this._map.on("moveend zoomend", () => this._schedulePois());
     setTimeout(() => this._schedulePois(), 1500); // anche all'apertura, senza aspettare che la mappa si muova
-    this._map.on("click", (e) => this._mapClick(e.latlng));
+    this._map.on("click", (e) => {
+      if (Date.now() - (this._gestEnd || 0) < 350) return; // fine di un trascinamento, non un tocco
+      this._mapClick(this._rotated() && e.originalEvent ? this._unrotLatLng(e.originalEvent) : e.latlng);
+    });
     this._map.on("dragstart", () => this._userMoved());
     this._bindGuidaGestures();
     this._ro = new ResizeObserver(() => this._relayout());
@@ -1317,6 +1328,7 @@ class NavigatorPanel extends HTMLElement {
     });
 
     // controlli
+    $("northbtn").addEventListener("click", () => this._resetNorth());
     $("locate").addEventListener("click", () => {
       if (!this._nav) { this._locate(true); return; }
       this._recenter(); // in navigazione: torna a seguire la posizione
@@ -1568,6 +1580,8 @@ class NavigatorPanel extends HTMLElement {
       return;
     }
     this._map.closePopup();
+    this._popup3d?.remove();
+    this._popup3d = null;
     this._place = null;
     this.$("placecard").innerHTML = "";
     this.$("q").value = "";
@@ -1583,12 +1597,21 @@ class NavigatorPanel extends HTMLElement {
     el.innerHTML = `<div class="n"><span class="loading"></span> Cerco l'indirizzo…</div><div class="a">${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}</div>
       <div class="row"><button data-a="start">Parti da qui</button><button data-a="stop">＋ Tappa</button>
       <button data-a="dest">Arriva qui</button><button data-a="fav">★</button></div>`;
-    // i popup di Leaflet vivono nello shadow DOM: servono gli stili del pannello
-    const popup = L.popup({ maxWidth: 300 }).setLatLng(latlng).setContent(el).openOn(this._map);
+    // i popup di Leaflet vivono nello shadow DOM: servono gli stili del pannello; in 3D il popup va sulla vista 3D
+    // (la mappa 2D sotto è nascosta: il popup c'era ma non si vedeva)
+    this._popup3d?.remove();
+    this._popup3d = null;
+    let popup = null;
+    if (this._3d && this._g3 && window.maplibregl) {
+      this._popup3d = new window.maplibregl.Popup({ maxWidth: "300px", className: "pop3d", focusAfterOpen: false })
+        .setLngLat([latlng.lng, latlng.lat]).setDOMContent(el).addTo(this._g3);
+    } else {
+      popup = L.popup({ maxWidth: 300 }).setLatLng(latlng).setContent(el).openOn(this._map);
+    }
     let place = { name: `${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}`, address: "", lat: latlng.lat, lon: latlng.lng };
     el.querySelectorAll("button").forEach((b) => b.addEventListener("click", (ev) => {
       L.DomEvent.stopPropagation(ev);
-      this._map.closePopup(popup);
+      if (popup) this._map.closePopup(popup);
       this._placeAction(b.dataset.a, place);
     }));
     try {
@@ -2360,24 +2383,11 @@ class NavigatorPanel extends HTMLElement {
 
   _applyView() {
     const g = this._isGuida();
-    const m = this._map;
     this.$("mainbox").classList.toggle("guida", g);
-    if (g) {
-      m.dragging.disable();
-      m.doubleClickZoom.disable();
-      m.options.scrollWheelZoom = "center"; // lo zoom resta sul centro: con la mappa ruotata il punto del mouse non torna
-      m.touchZoom.disable();
-      m.options.zoomSnap = 0.25;
-    } else {
-      m.dragging.enable();
-      m.doubleClickZoom.enable();
-      m.options.scrollWheelZoom = true;
-      m.touchZoom.enable();
-      if (m.options.zoomSnap !== 1) {
-        m.options.zoomSnap = 1;
-        m.setZoom(Math.round(m.getZoom()), { animate: false });
-      }
-    }
+    if (g) this._freeRot = false; // in guida la rotazione segue la direzione di marcia
+    else if (!this._freeRot) this._rot = 0; // uscendo dalla guida torna il nord in alto
+    this._layoutRot();
+    this._applyInteract();
     this.$("gattr").hidden = !g || !!this._3d; // in 3D le fonti le mostra la vista 3D
     if (g) this.$("gattr").innerHTML = LAYERS[this._layer][3];
     this._updateModeBtn();
@@ -2590,6 +2600,7 @@ class NavigatorPanel extends HTMLElement {
       b.classList.toggle("attn", !!this._3d);
       b.title = this._3d ? "Torna alla mappa piatta" : "Vista 3D con rilievo ed edifici";
     }
+    this._northBtn(); // la bussola della mappa 2D girata non serve in 3D
   }
 
   _baseSource() {
@@ -3230,18 +3241,67 @@ class NavigatorPanel extends HTMLElement {
     const wrap = this.$("mapwrap");
     const el = this.$("map");
     if (!wrap || !el) return;
-    if (this._isGuida()) {
+    if (this._rotated()) {
       const w = wrap.clientWidth;
       const h = wrap.clientHeight;
       const d = Math.ceil(Math.hypot(w, h));
       Object.assign(el.style, { width: `${d}px`, height: `${d}px`, left: `${(w - d) / 2}px`, top: `${(h - d) / 2}px`, right: "auto", bottom: "auto" });
       el.classList.add("rot");
+      el.classList.toggle("free", !this._isGuida());
       el.style.transform = `rotate(${-(this._rot || 0)}deg)`;
     } else {
       for (const k of ["width", "height", "left", "top", "right", "bottom", "transform"]) el.style[k] = "";
-      el.classList.remove("rot");
+      el.classList.remove("rot", "free");
       this._rot = 0;
     }
+    this._northBtn();
+  }
+
+  // mappa 2D ruotata: in guida (segue la direzione di marcia) o girata a mano con due dita
+  _rotated() {
+    return this._isGuida() || (!!this._freeRot && !!(this._rot % 360));
+  }
+
+  // bussola: compare quando la mappa 2D è girata a mano; toccandola torna il nord in alto
+  _northBtn() {
+    const b = this.$("northbtn");
+    if (!b) return;
+    const show = !this._isGuida() && !this._3d && this._rotated();
+    b.hidden = !show;
+    if (show) b.querySelector("svg").style.transform = `rotate(${-(this._rot || 0)}deg)`;
+  }
+
+  _resetNorth() {
+    this._freeRot = false;
+    this._rot = 0;
+    this._relayout();
+    this._applyInteract();
+  }
+
+  // con la mappa ruotata trascinamento e zoom con le dita li gestisce il pannello (Leaflet non sa della rotazione)
+  _applyInteract() {
+    const m = this._map;
+    if (!m) return;
+    const own = this._rotated();
+    if (own && m.touchZoom._zooming) m.touchZoom._zooming = false; // pinch di Leaflet già iniziato: da qui lo zoom lo fa il pannello
+    for (const h of ["dragging", "touchZoom", "doubleClickZoom"]) m[h][own ? "disable" : "enable"]();
+    m.options.scrollWheelZoom = own ? "center" : true; // lo zoom resta sul centro: con la mappa ruotata il punto del mouse non torna
+    // zoom con le dita senza scatti sulla mappa ruotata; dritta torna a livelli interi
+    const snap = own ? 0.25 : 1;
+    if (m.options.zoomSnap !== snap) {
+      m.options.zoomSnap = snap;
+      if (snap === 1) m.setZoom(Math.round(m.getZoom()), { animate: false });
+    }
+  }
+
+  // punto della mappa sotto il dito/mouse con la mappa ruotata (Leaflet lo calcolerebbe come se non lo fosse)
+  _unrotLatLng(ev) {
+    const el = this.$("map");
+    const rc = el.getBoundingClientRect();
+    const vx = ev.clientX - (rc.left + rc.width / 2), vy = ev.clientY - (rc.top + rc.height / 2);
+    const r = ((this._rot || 0) * Math.PI) / 180;
+    const mx = vx * Math.cos(r) - vy * Math.sin(r), my = vx * Math.sin(r) + vy * Math.cos(r);
+    return this._map.containerPointToLatLng([el.offsetWidth / 2 + mx, el.offsetHeight / 2 + my]);
   }
 
   _applyRotation() {
@@ -3302,35 +3362,65 @@ class NavigatorPanel extends HTMLElement {
     }
   }
 
-  // trascinamento (mouse o un dito) e zoom con due dita sulla mappa ruotata della guida
+  // trascinamento (mouse o un dito) e zoom con due dita sulla mappa ruotata (guida o girata a mano);
+  // fuori guida, due dita che ruotano girano la mappa 2D (Leaflet da solo non sa ruotare)
   _bindGuidaGestures() {
     const el = this.$("map");
     const pts = new Map();
     let prev = null;
     let moved = false;
     let pinch0 = null; // distanza e zoom all'inizio del pinch: lo zoom si calcola da lì, non a piccoli passi
+    let twist0 = null; // angolo fra le due dita all'inizio: la rotazione parte solo oltre una soglia
+    const mine = () => this._rotated(); // gesti gestiti qui (non da Leaflet)
+    const canTwist = () => !this._isGuida() && !this._3d;
     const state = () => {
       const a = [...pts.values()];
       const c = a.length >= 2 ? { x: (a[0].x + a[1].x) / 2, y: (a[0].y + a[1].y) / 2 } : { x: a[0].x, y: a[0].y };
       const d = a.length >= 2 ? Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) : 0;
-      return { c, d, n: a.length, zoom: this._map.getZoom() };
+      const ang = a.length >= 2 ? (Math.atan2(a[1].y - a[0].y, a[1].x - a[0].x) * 180) / Math.PI : 0;
+      return { c, d, ang, n: a.length, zoom: this._map.getZoom() };
     };
+    const angDiff = (a, b) => ((((a - b) % 360) + 540) % 360) - 180;
     el.addEventListener("pointerdown", (e) => {
-      if (!this._isGuida() || e.button > 0) return;
-      try { el.setPointerCapture(e.pointerId); } catch (err) { /* puntatore simulato */ }
+      if (e.button > 0 || (!mine() && !canTwist())) return;
+      if (mine()) { try { el.setPointerCapture(e.pointerId); } catch (err) { /* puntatore simulato */ } }
       pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       prev = state();
       if (pts.size === 1) moved = false;
       pinch0 = pts.size >= 2 ? { d: prev.d, zoom: prev.zoom } : null;
+      twist0 = pts.size >= 2 ? prev.ang : null;
     });
     el.addEventListener("pointermove", (e) => {
-      if (!this._isGuida() || !pts.has(e.pointerId)) return;
+      if (!pts.has(e.pointerId)) return;
       pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       const now = state();
-      if (now.n !== prev.n) { prev = now; pinch0 = now.n >= 2 ? { d: now.d, zoom: now.zoom } : null; return; }
+      if (now.n !== prev.n) { prev = now; pinch0 = now.n >= 2 ? { d: now.d, zoom: now.zoom } : null; twist0 = now.n >= 2 ? now.ang : null; return; }
+      // mappa dritta: si guarda solo se le due dita ruotano abbastanza (15°), poi la mappa diventa "girata a mano"
+      if (!mine()) {
+        if (!canTwist() || now.n < 2 || twist0 == null || Math.abs(angDiff(now.ang, twist0)) < 15) { prev = now; return; }
+        this._freeRot = true;
+        this._rot = (this._rot || 0) - angDiff(now.ang, twist0);
+        this._map.stop?.();
+        this._relayout();
+        this._applyInteract();
+        el.classList.add("moving");
+        try { for (const id of pts.keys()) el.setPointerCapture(id); } catch (err) { /* puntatore simulato */ }
+        moved = true;
+        pinch0 = { d: now.d, zoom: this._map.getZoom() };
+        prev = { ...now, zoom: this._map.getZoom() };
+        return;
+      }
       const dx = now.c.x - prev.c.x;
       const dy = now.c.y - prev.c.y;
       const pinch = now.n >= 2 && pinch0 && pinch0.d > 0;
+      if (now.n >= 2 && canTwist()) { // rotazione con due dita
+        const da = angDiff(now.ang, prev.ang);
+        if (da) {
+          this._rot = (this._rot || 0) - da;
+          el.style.transform = `rotate(${-this._rot}deg)`;
+          this._northBtn();
+        }
+      }
       if (!moved) {
         if (Math.hypot(dx, dy) < 4 && !(pinch && Math.abs(now.d - pinch0.d) > 4)) return;
         moved = true;
@@ -3353,8 +3443,17 @@ class NavigatorPanel extends HTMLElement {
     });
     const end = (e) => {
       if (!pts.delete(e.pointerId)) return;
-      if (pts.size) { prev = state(); pinch0 = pts.size >= 2 ? { d: prev.d, zoom: prev.zoom } : null; }
-      else { el.classList.remove("moving"); pinch0 = null; }
+      if (pts.size) { prev = state(); pinch0 = pts.size >= 2 ? { d: prev.d, zoom: prev.zoom } : null; twist0 = pts.size >= 2 ? prev.ang : null; }
+      else {
+        el.classList.remove("moving");
+        pinch0 = twist0 = null;
+        if (moved) this._gestEnd = Date.now();
+        // girata fino quasi al nord: si raddrizza da sola
+        if (this._freeRot && !this._isGuida()) {
+          const r = ((((this._rot || 0) % 360) + 540) % 360) - 180;
+          if (Math.abs(r) < 6) this._resetNorth();
+        }
+      }
     };
     el.addEventListener("pointerup", end);
     el.addEventListener("pointercancel", end);
