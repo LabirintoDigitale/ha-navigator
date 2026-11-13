@@ -22,17 +22,24 @@ class Trips:
         self._store: Store[dict] = Store(hass, 1, f"{DOMAIN}.trips")
         self.data: dict[str, list[dict]] = {}
         self.garage: dict[str, list[dict]] = {}
+        self.selected: dict[str, str] = {}  # utente -> veicolo scelto l'ultima volta ("base" o id del garage)
 
     async def async_load(self) -> None:
         stored = await self._store.async_load() or {}
         self.data = stored.get("users", {})
         self.garage = stored.get("garage", {})
+        self.selected = stored.get("selected", {})
 
     def _save(self) -> None:
-        self._store.async_delay_save(lambda: {"users": self.data, "garage": self.garage}, 5)
+        self._store.async_delay_save(lambda: {"users": self.data, "garage": self.garage, "selected": self.selected}, 5)
 
     def vehicles(self, user_id: str) -> list[dict]:
         return self.garage.get(user_id, [])
+
+    def select(self, user_id: str, vehicle_id: str) -> None:
+        """Ricorda il veicolo scelto dall'utente: alla prossima apertura del pannello (su qualsiasi dispositivo) è già quello."""
+        self.selected[user_id] = str(vehicle_id or "base")[:16]
+        self._save()
 
     def set_vehicles(self, user_id: str, vehicles: list[dict]) -> list[dict]:
         clean = []

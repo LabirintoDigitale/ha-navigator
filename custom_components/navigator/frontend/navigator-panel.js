@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.12";
+const PANEL_VERSION = "1.9.13";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1202,6 +1202,11 @@ const STYLE = `
   .wxlist { margin: 4px 0 0; padding: 0; list-style: none; font-size: 13px; }
   .wxlist li { padding: 3px 0; }
   /* diario dei viaggi */
+  .plate3d { display: flex; align-items: stretch; height: 1.5em; background: #fbfbf8; border: 1px solid #333; border-radius: 2px;
+    box-shadow: 0 1px 2px rgba(0,0,0,.5); overflow: hidden; pointer-events: none; font-family: "Arial Narrow", Arial, sans-serif; }
+  .plate3d .eu { width: 0.9em; background: #1f3fa8; color: #fff; font-size: 0.55em; display: flex; align-items: flex-end; justify-content: center;
+    padding-bottom: 0.1em; flex: none; }
+  .plate3d b { flex: 1; text-align: center; color: #111; letter-spacing: 0.04em; line-height: 1.5em; white-space: nowrap; overflow: hidden; }
   .livecar { display: flex; flex-direction: column; align-items: center; width: 60px; }
   .livecar .lc { width: 40px; height: 44px; display: flex; align-items: center; justify-content: center; }
   .livecar .lc svg { max-height: 40px; width: auto; filter: drop-shadow(0 1px 3px rgba(0,0,0,.55)); }
@@ -1952,7 +1957,7 @@ class NavigatorPanel extends HTMLElement {
     const vb = this.$("vehsec");
     const sb = this.$("srcbox");
     if (!vb || !sb) return;
-    const curV = vb.querySelector("#navveh")?.value || this._vehicleId();
+    const curV = this._vehicleId();
     vb.innerHTML = `<h3>Veicolo <span class="vprev"></span></h3><select class="inp" id="navveh">${this._vehicles().map((v) => `<option value="${esc(v.id)}" ${v.id === curV ? "selected" : ""}>${
       v.type ? vehIcon(v.type) : "🧭"} ${esc(v.name || "Veicolo")}${v.plate ? ` · ${esc(v.plate)}` : ""}</option>`).join("")}</select>`;
     const list = this._navSources();
@@ -1964,6 +1969,8 @@ class NavigatorPanel extends HTMLElement {
         x.ageText ? ` · ${x.age > STALE_MS ? "⚠ " : ""}${esc(x.ageText)}` : ""}</option>`).join("")}</select>`;
     vb.querySelector("#navveh").addEventListener("change", (e) => {
       try { localStorage.setItem(`${STORE_KEY}-veh`, e.target.value); } catch (err) { /* storage non disponibile */ }
+      this._vehSel = e.target.value;
+      this._hass.callWS({ type: "navigator/garage_select", vehicle_id: e.target.value }).catch(() => { /* integrazione vecchia */ });
       this._applyVehicle(true);
       if (this._result) this._renderResults();
     });
@@ -2061,6 +2068,9 @@ class NavigatorPanel extends HTMLElement {
     this._meMarker = this._accCircle = null;
     this._me3d?.remove();
     this._me3d = null;
+    this._g3?.getSource("veh3d")?.setData({ type: "FeatureCollection", features: [] });
+    this._plate3dAt = null;
+    this._placePlate3d();
     this._carRot = null;
     this._closeNearby();
     for (const id of ["navtop", "navbot", "navpop"]) this.$(id).hidden = true;
@@ -2654,6 +2664,7 @@ class NavigatorPanel extends HTMLElement {
     this._me3d = null;
     this._cloudCanvas = null;
     this._cloudHooked = false;
+    this._plate3d = null;
     const el = this.$("map3d");
     if (el) el.innerHTML = "";
   }
@@ -2922,6 +2933,7 @@ class NavigatorPanel extends HTMLElement {
         paint: { "fill-extrusion-color": ["get", "c"], "fill-extrusion-base": ["get", "b"], "fill-extrusion-height": ["get", "h"],
           "fill-extrusion-opacity": 1, "fill-extrusion-vertical-gradient": true } });
       g.on("zoom", () => { if (this._nav?.fix && this._settings.veh3d !== false) this._drawVeh3d(); });
+      g.on("move", () => this._placePlate3d()); // inclinazione e rotazione cambiano altezza e verso della targa
     } else {
       g.moveLayer("veh3d");
     }
@@ -3242,6 +3254,8 @@ class NavigatorPanel extends HTMLElement {
         return;
       }
       g.getSource("veh3d")?.setData({ type: "FeatureCollection", features: [] });
+      this._plate3dAt = null;
+      this._placePlate3d();
       if (!this._me3d) {
         const el = document.createElement("div");
         el.innerHTML = `<div class="nav-car">${this._vehSvg()}</div>`;
@@ -3265,7 +3279,7 @@ class NavigatorPanel extends HTMLElement {
     const key = `${kind}|${color}|${this._nightOn ? 1 : 0}`;
     if (this._veh3dKey !== key) { this._veh3dKey = key; this._veh3dParts = veh3dParts(kind, this._nightOn ? shade(color, -0.25) : color); }
     // due ruote e pedone sono piccoli davvero: un po' più ingranditi, così si vedono come l'auto
-    const S = Math.max(1.5, Math.min(40, 4.6 * 2 ** (17 - g.getZoom()))) * (["moto", "scooter", "bici", "piedi"].includes(kind) ? 1.7 : 1);
+    const S = Math.max(1.5, Math.min(50, 6 * 2 ** (17 - g.getZoom()))) * (["moto", "scooter", "bici", "piedi"].includes(kind) ? 1.7 : 1);
     const th = ((this._nav.dir ?? 0) * Math.PI) / 180, cs = Math.cos(th), sn = Math.sin(th);
     const mLat = 1 / 111320, mLon = 1 / (111320 * Math.cos((f.lat * Math.PI) / 180));
     const feats = this._veh3dParts.map((pt) => {
@@ -3276,7 +3290,50 @@ class NavigatorPanel extends HTMLElement {
       ring.push(ring[0]);
       return { type: "Feature", properties: { b: pt.b * S, h: pt.h * S, c: pt.c }, geometry: { type: "Polygon", coordinates: [ring] } };
     });
+    // targa: placchetta bianca sul retro (geometria) e il testo in un'etichetta attaccata lì sopra
+    const plate = (v.type && v.plate) ? v.plate : "";
+    if (plate) {
+      const rear = Math.min(...this._veh3dParts.flatMap((pt) => pt.pts.map((q) => q[1])));
+      const two = ["moto", "scooter", "bici"].includes(kind);
+      const pw = two ? 0.22 : 0.42, zb = two ? 0.62 : kind === "camper" ? 0.62 : 0.45, zt = zb + (two ? 0.2 : 0.2);
+      const ring = [[-pw, rear - 0.04], [pw, rear - 0.04], [pw, rear + 0.02], [-pw, rear + 0.02]].map(([x, y]) => {
+        const e = (x * cs + y * sn) * S, n = (-x * sn + y * cs) * S;
+        return [f.lon + e * mLon, f.lat + n * mLat];
+      });
+      ring.push(ring[0]);
+      feats.push({ type: "Feature", properties: { b: zb * S, h: zt * S, c: "#f4f4f4" }, geometry: { type: "Polygon", coordinates: [ring] } });
+      // centro del retro (x = 0, y = rear)
+      this._plate3dAt = { lon: f.lon + (rear * sn * S) * mLon, lat: f.lat + (rear * cs * S) * mLat, z: (zb + zt) / 2 * S, w: pw * 2 * S, text: plate };
+    } else {
+      this._plate3dAt = null;
+    }
     src.setData({ type: "FeatureCollection", features: feats });
+    this._placePlate3d();
+  }
+
+  // etichetta della targa sul retro del mezzo 3D: misura e altezza calcolate dallo zoom e dall'inclinazione;
+  // nascosta quando il retro non guarda verso la telecamera
+  _placePlate3d() {
+    const g = this._g3;
+    const at = this._plate3dAt;
+    const show = !!(g && at && this._3d && this._nav?.fix && this._settings.veh3d !== false);
+    if (!show) { this._plate3d?.remove(); this._plate3d = null; return; }
+    if (!this._plate3d) {
+      const el = document.createElement("div");
+      el.className = "plate3d";
+      this._plate3d = new window.maplibregl.Marker({ element: el, anchor: "center" }).setLngLat([at.lon, at.lat]).addTo(g);
+    }
+    const el = this._plate3d.getElement();
+    if (el.dataset.t !== at.text) { el.dataset.t = at.text; el.innerHTML = `<span class="eu">I</span><b>${esc(at.text)}</b><span class="eu"></span>`; }
+    const mpp = (40075016.686 * Math.cos((at.lat * Math.PI) / 180)) / (512 * 2 ** g.getZoom()); // metri per pixel
+    const pitch = (g.getPitch() * Math.PI) / 180;
+    // più grande del vero (come il modellino), e mai sotto i 64 px: deve leggersi
+    const wpx = Math.max(64, Math.min(150, (at.w / mpp) * 1.9));
+    el.style.width = `${wpx}px`;
+    el.style.fontSize = `${Math.max(9, Math.min(20, wpx * 0.13))}px`;
+    const away = Math.abs(((((this._nav.dir ?? 0) - g.getBearing()) % 360) + 540) % 360 - 180) > 100;
+    el.style.visibility = away ? "hidden" : "";
+    this._plate3d.setLngLat([at.lon, at.lat]).setOffset([0, -(at.z / mpp) * Math.sin(pitch)]);
   }
 
   // la telecamera non deve finire sotto il terreno: inclinata sta dietro e più in basso del punto guardato, e le colline
@@ -4949,7 +5006,15 @@ class NavigatorPanel extends HTMLElement {
   // ----------------------------------------------------------------- garage
 
   async _loadGarage() {
-    try { this._garage = (await this._hass.callWS({ type: "navigator/garage" })).vehicles || []; } catch (e) { this._garage = []; }
+    try {
+      const r = await this._hass.callWS({ type: "navigator/garage" });
+      this._garage = r.vehicles || [];
+      // il veicolo scelto l'ultima volta da questo utente di Home Assistant (anche su un altro dispositivo)
+      if (r.selected && this._vehicles().some((v) => v.id === r.selected)) {
+        try { localStorage.setItem(`${STORE_KEY}-veh`, r.selected); } catch (e) { /* storage non disponibile */ }
+        this._vehSel = r.selected;
+      }
+    } catch (e) { this._garage = []; }
     this._renderPlanSel();
     if (this._result) this._renderResults();
   }
@@ -4989,8 +5054,8 @@ class NavigatorPanel extends HTMLElement {
   }
 
   _vehicleId() {
-    let id = null;
-    try { id = localStorage.getItem(`${STORE_KEY}-veh`); } catch (e) { /* storage non disponibile */ }
+    let id = this._vehSel || null;
+    try { id = id || localStorage.getItem(`${STORE_KEY}-veh`); } catch (e) { /* storage non disponibile */ }
     const list = this._vehicles();
     return list.some((v) => v.id === id) ? id : list[0].id;
   }

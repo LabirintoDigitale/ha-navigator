@@ -204,7 +204,8 @@ vicina alla macchina; quando la valle si apre torna quella scelta); **◎** rime
   auto) e sulla mappa compare il suo disegno visto dall'alto. Per ogni veicolo scegli il **disegno** (SUV, berlina, utilitaria,
   station wagon, sportiva, fuoristrada, pick-up, furgone, camper; moto e scooter; bici) e accanto il **colore**: cambia tutta la
   carrozzeria, tranne nel SUV blu e grigio originale dove cambia solo il blu. L'anteprima colorata si vede nel garage e accanto al
-  menu Veicolo. Il veicolo usato resta nell'archivio.
+  menu Veicolo. Il veicolo scelto viene ricordato per il tuo utente di Home Assistant (anche su altri dispositivi) e resta
+  nell'archivio.
 
 ### Meteo lungo il percorso e modalità notte
 
@@ -214,7 +215,7 @@ vicina alla macchina; quando la valle si apre torna quella scelta); **◎** rime
 - **Veicolo in 3D** (⚙ → Vista 3D): in guida il tuo mezzo è un modellino 3D "a blocchi" (con luci e ombre come gli edifici),
   nella forma e nel colore del veicolo scelto nel garage (SUV, berlina, utilitaria, station wagon, sportiva, fuoristrada, pick-up,
   furgone, camper, moto, scooter, bici) o del mezzo di Base, persona a piedi compresa; resta di misura simile sullo schermo a ogni zoom.
-  Spento, torna il disegno piatto.
+  Dietro c'è la **targa** del veicolo del garage (stile targa italiana). Spento, torna il disegno piatto.
 - **Nuvole in 3D** (⚙ → Vista 3D): con la vista inclinata, nuvole soffici a 500–1400 m sopra il terreno, che galleggiano sul
   paesaggio verso l'orizzonte, tante quanta la nuvolosità prevista nella zona (Open-Meteo, su ~18 km intorno) e lungo il percorso;
   grigie dove piove. La parte bassa dello schermo (la strada) resta sempre libera; dall'alto spariscono per non coprire la mappa. In 3D anche le icone del meteo lungo il percorso stanno sospese in cielo.
