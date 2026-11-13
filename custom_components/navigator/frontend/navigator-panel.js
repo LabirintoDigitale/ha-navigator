@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.31";
+const PANEL_VERSION = "1.9.32";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -2279,6 +2279,9 @@ class NavigatorPanel extends HTMLElement {
     this._plate3dAt = null;
     this._placePlate3d();
     this._carRot = null;
+    cancelAnimationFrame(this._carRaf); // ferma lo scorrimento del mezzo 3D
+    this._carAnim = null;
+    this._carDisp = null;
     this._closeNearby();
     for (const id of ["navtop", "navbot", "navpop"]) this.$(id).hidden = true;
     this._placePitchCtl();
@@ -2357,6 +2360,7 @@ class NavigatorPanel extends HTMLElement {
     nav.snap = snap;
     this._routeProgress();
     nav.dir = this._direction(rt, snap, fix, limit);
+    this._carGlide(prev, fix, nav.dir ?? nav.heading ?? 0, now); // mezzo 3D fluido tra una posizione e l'altra
     this._drawMe();
     this._applyRotation();
     if (nav.follow) this._followView();
@@ -3469,9 +3473,36 @@ class NavigatorPanel extends HTMLElement {
 
   // posizione del mezzo 3D: quella della guida, altrimenti quella seguita ("La mia posizione", prima di partire)
   _veh3dPos() {
-    if (this._nav?.fix) return { lat: this._nav.fix.lat, lon: this._nav.fix.lon, dir: this._nav.dir ?? 0 };
+    if (this._nav?.fix) return this._carDisp ? { ...this._carDisp } : { lat: this._nav.fix.lat, lon: this._nav.fix.lon, dir: this._nav.dir ?? 0 };
     if (this._me && !this._nav) return { lat: this._me.lat, lon: this._me.lon, dir: this._meDir ?? 0 };
     return null;
+  }
+
+  // movimento fluido del mezzo 3D: scorre dalla posizione mostrata a quella nuova nel tempo tra due posizioni (rAF),
+  // invece di saltare a ogni aggiornamento del GPS
+  _carGlide(prev, fix, dir, now) {
+    const from = this._carDisp
+      || (prev ? { lat: prev.lat, lon: prev.lon, dir: this._nav?.heading ?? dir } : { lat: fix.lat, lon: fix.lon, dir });
+    cancelAnimationFrame(this._carRaf);
+    // primo punto, salto grande (ricalcolo/teletrasporto) o fermo: niente scorrimento
+    if (!prev || distM([from.lat, from.lon], [fix.lat, fix.lon]) > 120) {
+      this._carAnim = null;
+      this._carDisp = { lat: fix.lat, lon: fix.lon, dir };
+      return;
+    }
+    const dd = ((((dir - from.dir) % 360) + 540) % 360) - 180; // giro più corto per la direzione
+    const dur = Math.max(300, Math.min(1400, prev.time ? now - prev.time : 700));
+    this._carAnim = { t0: performance.now(), dur, from, to: { lat: fix.lat, lon: fix.lon }, dir0: from.dir, dd };
+    const step = () => {
+      const a = this._carAnim;
+      if (!a || !this._nav) return;
+      const t = Math.min(1, (performance.now() - a.t0) / a.dur);
+      const e = t * (2 - t); // partenza e arrivo morbidi
+      this._carDisp = { lat: a.from.lat + (a.to.lat - a.from.lat) * e, lon: a.from.lon + (a.to.lon - a.from.lon) * e, dir: a.dir0 + a.dd * e };
+      if (this._3d && this._g3 && this._g3ok && this._settings.veh3d !== false) { try { this._drawVeh3d(); } catch (err) { /* vista 3D ricreata */ } }
+      if (t < 1) this._carRaf = requestAnimationFrame(step);
+    };
+    this._carRaf = requestAnimationFrame(step);
   }
 
   _drawMe3d() {
@@ -3676,6 +3707,18 @@ class NavigatorPanel extends HTMLElement {
     try { this._sync3dCam(); } catch (e) { this._recover3d(e); }
   }
 
+  // in guida la posizione sta nel terzo basso dello schermo, ma mai sotto la barra in basso:
+  // il veicolo (centro della vista) resta sempre un po' sopra la barra della guida.
+  // Si usa sia il margine in alto sia quello in basso, così anche con una barra alta il veicolo si solleva quanto basta.
+  _guidaPad() {
+    const H = this.$("mapwrap")?.clientHeight || 0;
+    const bot = this.$("navbot");
+    const barZone = bot && !bot.hidden ? bot.offsetHeight + 20 + 14 : 0; // altezza della barra (bottom:20px) + margine
+    const wantY = Math.min(H * 0.725, H - barZone); // posizione del veicolo sullo schermo (72,5% o appena sopra la barra)
+    const delta = 2 * wantY - H;                    // centro Y = (top + H − bottom) / 2 = wantY
+    return { top: Math.max(0, delta), bottom: Math.max(0, -delta), left: 0, right: 0 };
+  }
+
   _sync3dCam() {
     const g = this._g3;
     if (!this._3d || !g || this._from3d || this._g3gest?.size || this._stepAnim || this._stepK != null) return; // gesto con le dita o anteprima aperta: non si tocca la vista
@@ -3685,12 +3728,13 @@ class NavigatorPanel extends HTMLElement {
     const none = { top: 0, bottom: 0, left: 0, right: 0 };
     if (nav?.fix && nav.follow) {
       const guida = this._isGuida();
-      const key = `${nav.fix.lat},${nav.fix.lon},${z},${nav.dir},${guida},${this._pitch3d()}`;
+      const pad = guida ? this._guidaPad() : null;
+      const key = `${nav.fix.lat},${nav.fix.lon},${z},${nav.dir},${guida},${this._pitch3d()},${pad ? Math.round(pad.top) + "/" + Math.round(pad.bottom) : ""}`;
       if (key === this._g3key) return;
       this._g3key = key;
       const cam = this._clearCamera({ center: [nav.fix.lon, nav.fix.lat], zoom: z,
         bearing: guida && nav.dir != null ? nav.dir : g.getBearing(), pitch: guida ? this._pitch3d() : g.getPitch(),
-        padding: guida ? { ...none, top: this.$("mapwrap").clientHeight * 0.45 } : none });
+        padding: pad || none });
       g.easeTo({ ...cam, duration: 700, easing: (t) => t });
     } else {
       this._g3key = null;
