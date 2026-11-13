@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.10";
+const PANEL_VERSION = "1.9.11";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -934,6 +934,10 @@ const STYLE = `
   /* mappa 2D girata a mano: i gesti li gestisce il pannello. Senza questo, spenti i gesti di Leaflet, il browser si prendeva
      trascinamento e zoom con le dita (e la mappa restava ferma) */
   #map.rot.free { touch-action: none; cursor: grab; }
+  /* mappa ruotata: i popup girano al contrario intorno alla punta, così restano dritti e la punta resta sul punto toccato */
+  #map.rot .leaflet-popup-content-wrapper { transform: rotate(var(--maprot, 0deg)); transform-origin: 50% calc(100% + 19px); }
+  #map.rot .leaflet-popup-tip-container { transform: rotate(var(--maprot, 0deg)); transform-origin: 50% 100%; }
+  #map.rot .leaflet-popup-close-button { display: none; }
   .main.guida #map.moving { cursor: grabbing; }
   .ctl button.mode { width: auto; height: 42px; padding: 0 12px; font-size: 14px; font-weight: 600; white-space: nowrap; }
   .ctl button.mode.go { background: #0b6e3a; color: #fff; }
@@ -3263,8 +3267,10 @@ class NavigatorPanel extends HTMLElement {
       el.classList.add("rot");
       el.classList.toggle("free", !this._isGuida());
       el.style.transform = `rotate(${-(this._rot || 0)}deg)`;
+      el.style.setProperty("--maprot", `${this._rot || 0}deg`); // per raddrizzare i popup
     } else {
       for (const k of ["width", "height", "left", "top", "right", "bottom", "transform"]) el.style[k] = "";
+      el.style.removeProperty("--maprot");
       el.classList.remove("rot", "free");
       this._rot = 0;
     }
@@ -3324,6 +3330,7 @@ class NavigatorPanel extends HTMLElement {
     const delta = ((((this._nav.dir - cur) % 360) + 540) % 360) - 180; // giro più corto
     this._rot = cur + delta;
     this.$("map").style.transform = `rotate(${-this._rot}deg)`;
+    this.$("map").style.setProperty("--maprot", `${this._rot}deg`);
   }
 
   // centra la mappa sulla posizione; in guida la posizione sta nel terzo basso dello schermo, con la strada davanti
@@ -3432,6 +3439,7 @@ class NavigatorPanel extends HTMLElement {
         if (da) {
           this._rot = (this._rot || 0) - da;
           el.style.transform = `rotate(${-this._rot}deg)`;
+          el.style.setProperty("--maprot", `${this._rot}deg`);
           this._northBtn();
         }
       }
