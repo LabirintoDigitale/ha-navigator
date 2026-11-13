@@ -130,6 +130,11 @@ Dopo aver calcolato un percorso, nella sezione **Navigazione** scegli da dove pr
   concesse: lì Navigator parte di norma dalla tua persona e, se il GPS non risponde, propone di usarla.
 - **Una persona o un dispositivo di Home Assistant** (`person.…`, `device_tracker.…`): la posizione inviata dall'**app Companion**, funziona anche in http.
   Per aggiornamenti ogni pochi secondi attiva nell'app *Impostazioni → App Companion → Gestisci sensori → Posizione in background → Modalità alta precisione*.
+  **Navigator lo fa da solo**: se la posizione del telefono è vecchia, prima di partire gli chiede di mandarne una nuova
+  (comando `request_location_update` dell'app Companion, tramite il servizio `notify.mobile_app_…`) e aspetta fino a 25 secondi;
+  in guida accende la **modalità alta precisione** (Android) e la spegne a Esci, e se le posizioni smettono di arrivare ne
+  richiede una. Sul telefono serve solo il permesso di posizione **Consenti sempre** per l'app Companion, senza risparmio
+  energetico per l'app.
 
 Con un percorso calcolato premi **▶ Parti** (sulla mappa o nella sezione *Navigazione*): la mappa passa a tutto schermo e
 **ruota con la direzione di marcia** (avanti è sempre in alto, la destra è la destra del veicolo). Il veicolo, visto dall'alto,

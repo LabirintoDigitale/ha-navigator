@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.20";
+const PANEL_VERSION = "1.9.21";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -2166,7 +2166,12 @@ class NavigatorPanel extends HTMLElement {
     if (source !== "gps" && !force) {
       const st = this._hass?.states?.[source];
       const age = st ? Date.now() - Date.parse(st.last_updated) : 0;
-      if (age > STALE_MS) { this._staleHelp(source, age); return; }
+      if (age > STALE_MS) {
+        // telefono con l'app Companion: prima gli si chiede la posizione (arriva in pochi secondi se l'app è installata)
+        if (this._phoneOf(source)) { this._askPhoneThenStart(source, age); return; }
+        this._staleHelp(source, age);
+        return;
+      }
     }
     if (source === "gps" && !(window.isSecureContext && window.navigator.geolocation)) {
       this._msg("Il GPS del browser richiede Home Assistant in HTTPS: scegli la posizione dell'app Companion");
@@ -2189,6 +2194,7 @@ class NavigatorPanel extends HTMLElement {
     this._applyView();
     this._renderNav();
     this._updateAwake(); // schermo acceso durante la guida
+    if (source !== "gps") this._phoneGuida(true);
     if (source === "gps") {
       this._nav.watch = window.navigator.geolocation.watchPosition(
         (pos) => this._onFix({ lat: pos.coords.latitude, lon: pos.coords.longitude, acc: pos.coords.accuracy || 0,
@@ -2210,6 +2216,7 @@ class NavigatorPanel extends HTMLElement {
     this._tripEnd(nav);
     this._hass.callWS({ type: "navigator/live", active: false }).catch(() => { /* sensori non aggiornati */ });
     if (nav.watch != null) window.navigator.geolocation.clearWatch(nav.watch);
+    this._phoneGuida(false, nav);
     clearTimeout(nav.popTimer);
     this._nav = null;
     this._updateAwake();
@@ -3954,9 +3961,93 @@ class NavigatorPanel extends HTMLElement {
     });
   }
 
+  // ----------------------------------------------------------------- telefono con l'app Companion
+  // Home Assistant può mandare comandi all'app con il servizio di notifica (notify.mobile_app_…):
+  // "request_location_update" (manda subito la posizione) e, solo Android, "command_high_accuracy_mode" (posizione ogni
+  // pochi secondi). Così la guida riceve posizioni fresche senza dover cambiare impostazioni sul telefono.
+
+  // servizio di notifica del telefono di una persona o di un dispositivo: { svc, ios, name } oppure null
+  _phoneOf(source) {
+    const h = this._hass;
+    const st = h?.states?.[source];
+    if (!st) return null;
+    let tracker = source;
+    if (source.startsWith("person.")) {
+      const list = [st.attributes.source, ...(st.attributes.device_trackers || [])].filter((x) => x?.startsWith?.("device_tracker."));
+      tracker = list.find((t) => this._phoneOf(t)) || list[0];
+    }
+    if (!tracker?.startsWith("device_tracker.")) return null;
+    const svcs = Object.keys(h.services?.notify || {});
+    const dev = h.devices?.[h.entities?.[tracker]?.device_id];
+    const slug = (x) => String(x || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+    const cands = [`mobile_app_${tracker.split(".")[1]}`, dev && `mobile_app_${slug(dev.name_by_user || dev.name)}`, dev && `mobile_app_${slug(dev.name)}`];
+    const svc = cands.find((c) => c && svcs.includes(c));
+    if (!svc) return null;
+    return { svc, tracker, ios: /apple/i.test(dev?.manufacturer || "") || /iphone|ipad/i.test(dev?.model || ""),
+      name: h.states[tracker]?.attributes?.friendly_name || dev?.name || tracker };
+  }
+
+  _phoneCmd(ph, message, data) {
+    return this._hass.callService("notify", ph.svc, data ? { message, data } : { message })
+      .catch((e) => console.debug("[Navigator GPS] comando al telefono non riuscito:", message, e?.message || e));
+  }
+
+  // posizione vecchia: si chiede al telefono e si aspetta fino a 25 s che ne arrivi una nuova, poi si parte
+  async _askPhoneThenStart(source, age) {
+    const ph = this._phoneOf(source);
+    const st0 = this._hass.states[source];
+    const el = this.$("navpop");
+    el.className = "navpop";
+    el.innerHTML = `<div class="big"><span class="loading"></span></div>Chiedo la posizione a <b>${esc(ph.name)}</b>…
+      <div style="font-size:13px;opacity:.8;margin-top:6px">L'app Companion la manda in pochi secondi</div>
+      <div class="acts" style="margin-top:10px"><button class="close" data-h="close">Annulla</button></div>`;
+    el.hidden = false;
+    let cancelled = false;
+    el.querySelector('[data-h="close"]').addEventListener("click", () => { cancelled = true; el.hidden = true; });
+    this._phoneCmd(ph, "request_location_update");
+    if (!ph.ios) this._phoneCmd(ph, "command_high_accuracy_mode", { command: "turn_on" }); // il GPS si accende già adesso
+    const t0 = Date.now();
+    while (!cancelled && Date.now() - t0 < 25000) {
+      await new Promise((ok) => setTimeout(ok, 1000));
+      const st = this._hass.states[source];
+      if (st && st.last_updated !== st0?.last_updated && Date.now() - Date.parse(st.last_updated) < 60000) {
+        el.hidden = true;
+        console.debug("[Navigator GPS] posizione nuova dal telefono in", Math.round((Date.now() - t0) / 1000), "s");
+        this._startNav(source, true);
+        return;
+      }
+    }
+    if (cancelled) return;
+    if (!ph.ios) this._phoneCmd(ph, "command_high_accuracy_mode", { command: "turn_off" });
+    this._staleHelp(source, Date.now() - Date.parse(this._hass.states[source]?.last_updated || 0), true);
+  }
+
+  // in guida: alta precisione accesa (Android) e, se le posizioni smettono di arrivare per 40 s, se ne chiede una
+  _phoneGuida(on, nav = this._nav) {
+    if (!nav) return;
+    clearInterval(nav.phoneTimer);
+    const ph = nav.phone || (on ? this._phoneOf(nav.source) : null);
+    if (!ph) return;
+    if (!on) {
+      if (!ph.ios) this._phoneCmd(ph, "command_high_accuracy_mode", { command: "turn_off" });
+      return;
+    }
+    nav.phone = ph;
+    if (!ph.ios) this._phoneCmd(ph, "command_high_accuracy_mode", { command: "turn_on" });
+    nav.phoneTimer = setInterval(() => {
+      if (this._nav !== nav) { clearInterval(nav.phoneTimer); return; }
+      const st = this._hass.states[nav.source];
+      const age = st ? Date.now() - Date.parse(st.last_updated) : Infinity;
+      if (age > 40000 && Date.now() - (nav.phoneAsk || 0) > 60000) {
+        nav.phoneAsk = Date.now();
+        this._phoneCmd(ph, "request_location_update");
+      }
+    }, 10000);
+  }
+
   // app Companion Android: spesso la sua WebView non passa il GPS alle pagine, anche con tutte le autorizzazioni concesse.
   // La posizione arriva a Home Assistant dal sensore dell'app, nella propria persona.
-  _staleHelp(source, age) {
+  _staleHelp(source, age, asked = false) {
     const st = this._hass.states[source];
     const name = st?.attributes?.friendly_name || source;
     const gps = window.isSecureContext && !!window.navigator.geolocation;
@@ -3964,9 +4055,10 @@ class NavigatorPanel extends HTMLElement {
     clearTimeout(this._nav?.popTimer);
     el.className = "navpop help";
     el.innerHTML = `<div class="big">🕘</div><h4>Posizione vecchia</h4>
-      <div>L'ultima posizione di <b>${esc(name)}</b> è arrivata <b>${esc(fmtAge(age))}</b>: Home Assistant non ne riceve di nuove
-        (di solito l'app Companion è chiusa o ha la posizione in background disattivata). La guida partirebbe da lì e si
-        muoverebbe solo quando arriva una posizione nuova.</div>
+      <div>L'ultima posizione di <b>${esc(name)}</b> è arrivata <b>${esc(fmtAge(age))}</b>${asked
+        ? " e il telefono non ha risposto alla richiesta di una posizione nuova (25 s)" : ": Home Assistant non ne riceve di nuove"}
+        (di solito l'app Companion non ha il permesso di posizione <b>Consenti sempre</b>, o il risparmio energetico la blocca).
+        La guida partirebbe da lì e si muoverebbe solo quando arriva una posizione nuova.</div>
       <ol>
         <li>Apri l'app Companion sul telefono (manda subito la posizione) o riattiva la <b>Posizione in background</b>.</li>
         <li>Oppure usa il <b>GPS di questo dispositivo</b> (nel browser serve Home Assistant in HTTPS).</li>
