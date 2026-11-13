@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.23";
+const PANEL_VERSION = "1.9.24";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1781,10 +1781,18 @@ class NavigatorPanel extends HTMLElement {
     L.marker(at, { interactive: false, zIndexOffset: 1500, icon: L.divIcon({ className: "", iconSize: [36, 48], iconAnchor: [18, 47],
       html: `<div class="steppin"><svg viewBox="0 0 36 48"><path d="M18 47C14 37 3 29 3 17a15 15 0 0 1 30 0c0 12-11 20-15 30z" fill="#1f2a37" stroke="#fff" stroke-width="2"/>
         <circle cx="18" cy="17" r="10.5" fill="#fff"/></svg><img src="${ICON}" alt=""></div>` }) }).addTo(this._stepLayer);
-    // verso di marcia all'arrivo sulla manovra: la mappa si gira così, "come se guidassi"
+    // verso di marcia: la direzione della strada DAVANTI al punto della manovra (come in guida: la strada davanti è in alto),
+    // mediata sui ~30 m successivi così in rotatoria non punta sulla tangente della curva
     let dir = null;
-    for (let i = m.begin; i > 0 && dir == null; i--) if (distM(sh[i - 1], at) > 3) dir = bearing(sh[i - 1], at);
-    if (dir == null && sh[m.begin + 1]) dir = bearing(at, sh[m.begin + 1]);
+    { let x = 0, y = 0, d = 0;
+      for (let i = m.begin; i + 1 < sh.length && d < 30; i++) {
+        const b = bearing(sh[i], sh[i + 1]); const seg = distM(sh[i], sh[i + 1]); d += seg;
+        x += Math.cos((b * Math.PI) / 180) * seg; y += Math.sin((b * Math.PI) / 180) * seg;
+      }
+      if (x || y) dir = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+    }
+    // manovra in fondo al percorso (niente strada davanti): si usa la direzione di arrivo
+    if (dir == null) for (let i = m.begin; i > 0 && dir == null; i--) if (distM(sh[i - 1], at) > 3) dir = bearing(sh[i - 1], at);
     if (this._3d && this._g3) {
       this._schedule3d();
       // come in guida: l'inclinazione e la distanza scelte dall'utente (non valori fissi), girata nel verso di marcia
