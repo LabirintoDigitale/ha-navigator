@@ -212,7 +212,7 @@ vicina alla macchina; quando la valle si apre torna quella scelta); **◎** rime
 - Dopo il calcolo, il **meteo previsto lungo il percorso all'ora in cui passerai** (Open-Meteo, gratuito e senza chiave): temperature
   e avvisi per neve, pioggia, ghiaccio, gelo, vento forte, nebbia e temporali, con le icone sulla mappa; in guida un avviso (anche a
   voce) quando uno di questi punti è a meno di 10 km (disattivabile in ⚙).
-- **Veicolo in 3D** (⚙ → Vista 3D): in guida il tuo mezzo è un modellino 3D "a blocchi" (con luci e ombre come gli edifici),
+- **Veicolo in 3D** (⚙ → Vista 3D): in guida, e prima di partire sulla posizione seguita, il tuo mezzo è un modellino 3D "a blocchi" (con luci e ombre come gli edifici),
   nella forma e nel colore del veicolo scelto nel garage (SUV, berlina, utilitaria, station wagon, sportiva, fuoristrada, pick-up,
   furgone, camper, moto, scooter, bici) o del mezzo di Base, persona a piedi compresa; resta di misura simile sullo schermo a ogni zoom.
   Dietro c'è la **targa** del veicolo del garage (stile targa italiana). Spento, torna il disegno piatto.

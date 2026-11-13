@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.13";
+const PANEL_VERSION = "1.9.14";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1268,6 +1268,7 @@ class NavigatorPanel extends HTMLElement {
     // punto blu legato a una persona o a un dispositivo: segue le sue posizioni nuove
     const ms = this._me?.src && this._me.src !== "gps" ? hass.states?.[this._me.src] : null;
     if (ms && ms.last_updated !== this._me.upd && ms.attributes.latitude != null && this._markerLayer) {
+      this._meTurn(ms.attributes.latitude, ms.attributes.longitude);
       this._me = { lat: ms.attributes.latitude, lon: ms.attributes.longitude, src: this._me.src, upd: ms.last_updated };
       this._drawMarkers();
     }
@@ -1852,7 +1853,7 @@ class NavigatorPanel extends HTMLElement {
       const src = this._me.src && this._me.src !== "gps" ? this._hass?.states?.[this._me.src]?.attributes?.friendly_name : "";
       L.marker([this._me.lat, this._me.lon], { title: src ? `${src} (posizione da Home Assistant)` : "Questo dispositivo",
         icon: L.divIcon({ className: "", html: `<div class="nav-car">${this._vehSvg()}</div>`,
-          iconSize: [47, 47], iconAnchor: [23.5, 23.5] }), zIndexOffset: 900 }).addTo(this._markerLayer);
+          iconSize: [47, 47], iconAnchor: [23.5, 23.5] }), zIndexOffset: 900, isMe: true }).addTo(this._markerLayer);
     }
   }
 
@@ -1869,6 +1870,7 @@ class NavigatorPanel extends HTMLElement {
     if (src && src !== "gps") {
       const st = this._hass?.states?.[src];
       if (st?.attributes?.latitude != null) {
+        this._meTurn(st.attributes.latitude, st.attributes.longitude);
         this._me = { lat: st.attributes.latitude, lon: st.attributes.longitude, src, upd: st.last_updated };
         this._drawMarkers();
         if (fly) this._map.flyTo([this._me.lat, this._me.lon], 15, { duration: 0.8 });
@@ -2681,11 +2683,11 @@ class NavigatorPanel extends HTMLElement {
 
   // distanza della vista 3D in guida: scostamento (in livelli di zoom) dallo zoom automatico, memorizzato
   _zoom3dOff() {
-    return Math.max(-5, Math.min(3, Number(this._settings.zoom3dOff) || 0));
+    return Math.max(-6, Math.min(6, Number(this._settings.zoom3dOff) || 0));
   }
 
   _setZoom3dOff(v) {
-    this._settings.zoom3dOff = Math.max(-5, Math.min(3, Math.round(v * 4) / 4));
+    this._settings.zoom3dOff = Math.max(-6, Math.min(6, Math.round(v * 4) / 4));
     this._saveSettings();
   }
 
@@ -2932,7 +2934,7 @@ class NavigatorPanel extends HTMLElement {
       g.addLayer({ id: "veh3d", type: "fill-extrusion", source: "veh3d",
         paint: { "fill-extrusion-color": ["get", "c"], "fill-extrusion-base": ["get", "b"], "fill-extrusion-height": ["get", "h"],
           "fill-extrusion-opacity": 1, "fill-extrusion-vertical-gradient": true } });
-      g.on("zoom", () => { if (this._nav?.fix && this._settings.veh3d !== false) this._drawVeh3d(); });
+      g.on("zoom", () => { if (this._settings.veh3d !== false && this._veh3dPos()) this._drawVeh3d(); });
       g.on("move", () => this._placePlate3d()); // inclinazione e rotazione cambiano altezza e verso della targa
     } else {
       g.moveLayer("veh3d");
@@ -3227,6 +3229,7 @@ class NavigatorPanel extends HTMLElement {
       grp.eachLayer((l) => {
         const ic = l.options?.icon?.options;
         if (!(l instanceof L.Marker) || !ic?.html) return;
+        if (l.options.isMe && this._settings.veh3d !== false) return; // in 3D c'è il modellino
         const el = document.createElement("div");
         el.innerHTML = ic.html;
         const a = ic.iconAnchor || [0, 0];
@@ -3241,9 +3244,24 @@ class NavigatorPanel extends HTMLElement {
   }
 
   // il veicolo: disegnato sul piano della mappa, così si inclina con la vista e gira con la direzione di marcia
+  // direzione della posizione seguita prima di partire: dallo spostamento rispetto alla posizione di prima (oltre 15 m)
+  _meTurn(lat, lon) {
+    if (this._me && lat != null && lon != null && distM([this._me.lat, this._me.lon], [lat, lon]) > 15) {
+      this._meDir = bearing([this._me.lat, this._me.lon], [lat, lon]);
+    }
+  }
+
+  // posizione del mezzo 3D: quella della guida, altrimenti quella seguita ("La mia posizione", prima di partire)
+  _veh3dPos() {
+    if (this._nav?.fix) return { lat: this._nav.fix.lat, lon: this._nav.fix.lon, dir: this._nav.dir ?? 0 };
+    if (this._me && !this._nav) return { lat: this._me.lat, lon: this._me.lon, dir: this._meDir ?? 0 };
+    return null;
+  }
+
   _drawMe3d() {
     const g = this._g3;
     const f = this._nav?.fix;
+    if (this._3d && g && !this._nav && this._settings.veh3d !== false && g.getSource("veh3d")) { this._drawVeh3d(); return; }
     if (!this._3d || !g || !f) return;
     try { // un errore nella vista 3D non deve fermare la guida (chiamata a ogni posizione)
       if (this._settings.veh3d !== false && g.getSource("veh3d")) {
@@ -3271,39 +3289,39 @@ class NavigatorPanel extends HTMLElement {
   // e girato nella direzione di marcia
   _drawVeh3d() {
     const g = this._g3;
-    const f = this._nav?.fix;
     const src = g?.getSource("veh3d");
-    if (!src || !f) return;
+    const f = this._veh3dPos();
+    if (!src) return;
+    if (!f || this._settings.veh3d === false) {
+      src.setData({ type: "FeatureCollection", features: [] });
+      this._plate3dAt = null;
+      this._placePlate3d();
+      return;
+    }
     const v = this._curVehicle();
     const [kind, color] = veh3dFor(v, this._mode);
     const key = `${kind}|${color}|${this._nightOn ? 1 : 0}`;
     if (this._veh3dKey !== key) { this._veh3dKey = key; this._veh3dParts = veh3dParts(kind, this._nightOn ? shade(color, -0.25) : color); }
-    // due ruote e pedone sono piccoli davvero: un po' più ingranditi, così si vedono come l'auto
-    const S = Math.max(1.5, Math.min(50, 6 * 2 ** (17 - g.getZoom()))) * (["moto", "scooter", "bici", "piedi"].includes(kind) ? 1.7 : 1);
-    const th = ((this._nav.dir ?? 0) * Math.PI) / 180, cs = Math.cos(th), sn = Math.sin(th);
+    const S = this._veh3dScale(kind);
+    const th = (f.dir * Math.PI) / 180, cs = Math.cos(th), sn = Math.sin(th);
     const mLat = 1 / 111320, mLon = 1 / (111320 * Math.cos((f.lat * Math.PI) / 180));
+    const toLL = (x, y) => [f.lon + (x * cs + y * sn) * S * mLon, f.lat + (-x * sn + y * cs) * S * mLat];
     const feats = this._veh3dParts.map((pt) => {
-      const ring = pt.pts.map(([x, y]) => {
-        const e = (x * cs + y * sn) * S, n = (-x * sn + y * cs) * S;
-        return [f.lon + e * mLon, f.lat + n * mLat];
-      });
+      const ring = pt.pts.map(([x, y]) => toLL(x, y));
       ring.push(ring[0]);
       return { type: "Feature", properties: { b: pt.b * S, h: pt.h * S, c: pt.c }, geometry: { type: "Polygon", coordinates: [ring] } };
     });
     // targa: placchetta bianca sul retro (geometria) e il testo in un'etichetta attaccata lì sopra
-    const plate = (v.type && v.plate) ? v.plate : "";
+    const plate = v.type && v.plate ? v.plate : "";
     if (plate) {
       const rear = Math.min(...this._veh3dParts.flatMap((pt) => pt.pts.map((q) => q[1])));
       const two = ["moto", "scooter", "bici"].includes(kind);
-      const pw = two ? 0.22 : 0.42, zb = two ? 0.62 : kind === "camper" ? 0.62 : 0.45, zt = zb + (two ? 0.2 : 0.2);
-      const ring = [[-pw, rear - 0.04], [pw, rear - 0.04], [pw, rear + 0.02], [-pw, rear + 0.02]].map(([x, y]) => {
-        const e = (x * cs + y * sn) * S, n = (-x * sn + y * cs) * S;
-        return [f.lon + e * mLon, f.lat + n * mLat];
-      });
+      const pw = two ? 0.22 : 0.42, zb = two || kind === "camper" ? 0.62 : 0.45, zt = zb + 0.2;
+      const ring = [[-pw, rear - 0.04], [pw, rear - 0.04], [pw, rear + 0.02], [-pw, rear + 0.02]].map(([x, y]) => toLL(x, y));
       ring.push(ring[0]);
       feats.push({ type: "Feature", properties: { b: zb * S, h: zt * S, c: "#f4f4f4" }, geometry: { type: "Polygon", coordinates: [ring] } });
-      // centro del retro (x = 0, y = rear)
-      this._plate3dAt = { lon: f.lon + (rear * sn * S) * mLon, lat: f.lat + (rear * cs * S) * mLat, z: (zb + zt) / 2 * S, w: pw * 2 * S, text: plate };
+      // in misure del modellino (non ingrandite): l'etichetta si ricalcola con lo zoom del momento
+      this._plate3dAt = { kind, rear, z: (zb + zt) / 2, w: pw * 2, text: plate };
     } else {
       this._plate3dAt = null;
     }
@@ -3311,29 +3329,40 @@ class NavigatorPanel extends HTMLElement {
     this._placePlate3d();
   }
 
-  // etichetta della targa sul retro del mezzo 3D: misura e altezza calcolate dallo zoom e dall'inclinazione;
+  // ingrandimento del modellino: più si è lontani più è grande, così sullo schermo resta di misura simile;
+  // due ruote e pedone sono piccoli davvero: un po' più ingranditi
+  _veh3dScale(kind) {
+    return Math.max(1.5, Math.min(50, 6 * 2 ** (17 - this._g3.getZoom()))) * (["moto", "scooter", "bici", "piedi"].includes(kind) ? 1.7 : 1);
+  }
+
+  // etichetta della targa sul retro del mezzo 3D, ricalcolata a ogni movimento con lo zoom e l'inclinazione del momento;
   // nascosta quando il retro non guarda verso la telecamera
   _placePlate3d() {
     const g = this._g3;
     const at = this._plate3dAt;
-    const show = !!(g && at && this._3d && this._nav?.fix && this._settings.veh3d !== false);
+    const f = this._veh3dPos();
+    const show = !!(g && at && f && this._3d && this._settings.veh3d !== false);
     if (!show) { this._plate3d?.remove(); this._plate3d = null; return; }
     if (!this._plate3d) {
       const el = document.createElement("div");
       el.className = "plate3d";
-      this._plate3d = new window.maplibregl.Marker({ element: el, anchor: "center" }).setLngLat([at.lon, at.lat]).addTo(g);
+      this._plate3d = new window.maplibregl.Marker({ element: el, anchor: "center" }).setLngLat([f.lon, f.lat]).addTo(g);
     }
     const el = this._plate3d.getElement();
     if (el.dataset.t !== at.text) { el.dataset.t = at.text; el.innerHTML = `<span class="eu">I</span><b>${esc(at.text)}</b><span class="eu"></span>`; }
-    const mpp = (40075016.686 * Math.cos((at.lat * Math.PI) / 180)) / (512 * 2 ** g.getZoom()); // metri per pixel
+    const S = this._veh3dScale(at.kind);
+    const th = (f.dir * Math.PI) / 180;
+    const lat = f.lat + at.rear * Math.cos(th) * S / 111320;
+    const lon = f.lon + (at.rear * Math.sin(th) * S) / (111320 * Math.cos((f.lat * Math.PI) / 180));
+    const mpp = (40075016.686 * Math.cos((f.lat * Math.PI) / 180)) / (512 * 2 ** g.getZoom()); // metri per pixel
     const pitch = (g.getPitch() * Math.PI) / 180;
     // più grande del vero (come il modellino), e mai sotto i 64 px: deve leggersi
-    const wpx = Math.max(64, Math.min(150, (at.w / mpp) * 1.9));
+    const wpx = Math.max(64, Math.min(150, ((at.w * S) / mpp) * 1.9));
     el.style.width = `${wpx}px`;
     el.style.fontSize = `${Math.max(9, Math.min(20, wpx * 0.13))}px`;
-    const away = Math.abs(((((this._nav.dir ?? 0) - g.getBearing()) % 360) + 540) % 360 - 180) > 100;
+    const away = Math.abs(((((f.dir - g.getBearing()) % 360) + 540) % 360) - 180) > 100;
     el.style.visibility = away ? "hidden" : "";
-    this._plate3d.setLngLat([at.lon, at.lat]).setOffset([0, -(at.z / mpp) * Math.sin(pitch)]);
+    this._plate3d.setLngLat([lon, lat]).setOffset([0, -((at.z * S) / mpp) * Math.sin(pitch)]);
   }
 
   // la telecamera non deve finire sotto il terreno: inclinata sta dietro e più in basso del punto guardato, e le colline
@@ -4286,7 +4315,7 @@ class NavigatorPanel extends HTMLElement {
     wrap.querySelectorAll("input[data-s]").forEach((el) => el.addEventListener("change", () => {
       s[el.dataset.s] = el.checked;
       this._saveSettings();
-      if (el.dataset.s === "veh3d") { this._me3d?.remove(); this._me3d = null; this._drawMe3d(); }
+      if (el.dataset.s === "veh3d") { this._me3d?.remove(); this._me3d = null; this._drawVeh3d(); this._drawMe3d(); this._schedule3d(); }
       if (el.dataset.s === "clouds3d") { this._cloudKey = null; this._scheduleClouds(true); }
       if (el.dataset.s === "b3d") { this._apply3dSettings(); this._openSettings(); } // compare o sparisce lo stile degli edifici
       if (el.dataset.s === "autoZoom3d") { this._g3key = null; this._sync3d(); }
