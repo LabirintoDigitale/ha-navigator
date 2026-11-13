@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.35";
+const PANEL_VERSION = "1.9.36";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -12,6 +12,9 @@ const MAPLIBRE_JS = new URL("./maplibre/maplibre-gl.js", import.meta.url).href;
 const MAPLIBRE_CSS = new URL("./maplibre/maplibre-gl.css", import.meta.url).href;
 const ICON = new URL("./icon.png", import.meta.url).href;
 const STORE_KEY = "navigator-panel-state";
+// larghezza della riga del percorso in 3D: parte dallo spessore base (w) e cresce con lo zoom, così da vicino copre la carreggiata.
+// Sotto zoom 15 resta lo spessore base; sopra 20 arriva a 9 volte (fermo lì). La crescita (esponenziale) segue circa la strada.
+const LINE_WIDTH_3D = ["interpolate", ["exponential", 1.75], ["zoom"], 14, ["get", "w"], 20, ["*", ["get", "w"], 11]];
 
 // Fonti delle mappe gratuite e senza chiave. I server di OpenStreetMap bloccano le richieste che arrivano da un
 // Home Assistant in rete locale ("Access blocked", 403) e CARTO risponde con "API KEY REQUIRED": come in MeshCore BBS
@@ -2986,9 +2989,9 @@ class NavigatorPanel extends HTMLElement {
           { id: "hs", type: "hillshade", source: "hs", paint: { "hillshade-exaggeration": 0.3, "hillshade-shadow-color": "#3e3a36" } },
           { id: "lines", type: "line", source: "lines", filter: ["!=", ["get", "d"], 1],
             layout: { "line-join": "round", "line-cap": "round", "line-sort-key": ["get", "i"] },
-            paint: { "line-color": ["get", "c"], "line-width": ["get", "w"], "line-opacity": ["get", "o"] } },
+            paint: { "line-color": ["get", "c"], "line-width": LINE_WIDTH_3D, "line-opacity": ["get", "o"] } },
           { id: "lines-d", type: "line", source: "lines", filter: ["==", ["get", "d"], 1], layout: { "line-join": "round" },
-            paint: { "line-color": ["get", "c"], "line-width": ["get", "w"], "line-opacity": ["get", "o"], "line-dasharray": [1.4, 1.4] } },
+            paint: { "line-color": ["get", "c"], "line-width": LINE_WIDTH_3D, "line-opacity": ["get", "o"], "line-dasharray": [1.4, 1.4] } },
         ],
         terrain: { source: "dem", exaggeration: +this._settings.terrainEx || 1.5 },
         sky: this._skySpec(),
@@ -5049,8 +5052,8 @@ class NavigatorPanel extends HTMLElement {
     if (done > 0) {
       L.polyline(this._sliceAlong(rt, 0, done), { color: "#90a4ae", weight: 6, opacity: 0.55, interactive: false }).addTo(this._routeLayer);
     }
-    L.polyline(ahead, { color: "#fff", weight: 10, opacity: 0.9, interactive: false }).addTo(this._routeLayer);
-    L.polyline(ahead, { color, weight: 6, opacity: 1, interactive: false, arrows: true }).addTo(this._routeLayer);
+    L.polyline(ahead, { color: "#fff", weight: 13, opacity: 0.9, interactive: false }).addTo(this._routeLayer);
+    L.polyline(ahead, { color, weight: 9, opacity: 1, interactive: false, arrows: true }).addTo(this._routeLayer);
     // tratti da un indice all'altro del percorso, solo per la parte ancora da fare
     const part = (i0, i1) => {
       const a = Math.max(done, rt._cum[i0]);
