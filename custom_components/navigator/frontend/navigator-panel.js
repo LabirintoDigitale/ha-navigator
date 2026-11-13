@@ -977,11 +977,15 @@ const STYLE = `
   select.inp { width: 100%; font: inherit; font-size: 14px; padding: 8px; border-radius: 8px; border: 1px solid var(--divider-color);
     background: var(--secondary-background-color, #f5f5f5); color: var(--primary-text-color); }
   .navtop { position: absolute; z-index: 1001; top: 10px; left: 54px; right: 10px; display: flex; align-items: center; gap: 12px;
-    background: #0b6e3a; color: #fff; border-radius: 12px; padding: 10px 14px; box-shadow: 0 2px 10px rgba(0,0,0,.35); }
+    background: #0b6e3a; color: #fff; border-radius: 12px; padding: 10px 14px; box-shadow: 0 2px 10px rgba(0,0,0,.35);
+    cursor: grab; touch-action: none; } /* tieni premuto per spostarlo */
   .navtop .ic { font-size: 34px; width: 40px; text-align: center; flex: none; }
   .navtop .d { font-size: 24px; font-weight: 700; white-space: nowrap; }
   .navtop .t { font-size: 15px; line-height: 1.25; }
   .navtop.wait { background: #37474f; }
+  /* spostato a mano (tieni premuto): posizione libera, memorizzata per utente */
+  .navtop.moved { left: var(--ntx); top: var(--nty); right: auto; width: max-content; max-width: min(94%, 520px); }
+  .navtop.dragging { cursor: grabbing; opacity: .92; box-shadow: 0 6px 20px rgba(0,0,0,.5); user-select: none; transition: none; }
   .navtop { flex-wrap: wrap; }
   .navtop .camrow { flex: 1 0 100%; display: flex; align-items: center; gap: 8px; background: #fff; color: #b71c1c; border-radius: 8px;
     padding: 4px 8px; font-weight: 700; font-size: 16px; position: relative; overflow: hidden; }
@@ -1468,6 +1472,7 @@ class NavigatorPanel extends HTMLElement {
     this._bindLongPress(this.$("map"), (ev) => (this._rotated() ? this._unrotLatLng(ev) : this._map.mouseEventToLatLng(ev)));
     this._map.on("dragstart", () => this._userMoved());
     this._bindGuidaGestures();
+    this._bindNavTopDrag();
     this._ro = new ResizeObserver(() => this._relayout());
     this._ro.observe($("mapwrap"));
     setTimeout(() => this._map.invalidateSize(), 300);
@@ -1783,6 +1788,7 @@ class NavigatorPanel extends HTMLElement {
     const lanes = m.lanes ? `<div class="lanes">${m.lanes.map((l) => `<span class="ln ${l.v ? "on" : ""}">${laneSvg(l.d)}</span>`).join("")}</div>` : "";
     top.className = "navtop preview";
     top.hidden = false;
+    this._applyNavTopPos();
     top.innerHTML = `<button class="pv" data-pv="-1" title="Indicazione precedente" ${k === 0 ? "disabled" : ""}>‹</button>
       <span class="ic">${maneuverIcon(m)}</span>
       <div style="flex:1;min-width:0"><div class="d">${k === 0 ? "Partenza" : fmtDist(prevD)}</div><div class="t">${esc(m.text)}</div>${lanes}
@@ -3697,6 +3703,7 @@ class NavigatorPanel extends HTMLElement {
   _relayout() {
     const m = this._map;
     if (!m) return;
+    this._applyNavTopPos();
     const c = m.getCenter();
     this._layoutRot();
     m.invalidateSize({ pan: false });
@@ -4430,6 +4437,91 @@ class NavigatorPanel extends HTMLElement {
     }
   }
 
+  // ----------------------------------------------------------------- pannello delle indicazioni spostabile
+  // Tieni premuto il pannello verde in alto per spostarlo sulla mappa; la posizione resta per il tuo utente di
+  // Home Assistant (salvata come frazione, così vale a ogni dimensione dello schermo). Trascinalo in cima per rimetterlo a posto.
+
+  _navTopKey() {
+    return `${STORE_KEY}-navtop-${this._hass?.user?.id || "def"}`;
+  }
+
+  _navTopPos() {
+    try {
+      const p = JSON.parse(localStorage.getItem(this._navTopKey()) || "null");
+      if (p && typeof p.x === "number" && typeof p.y === "number") return p;
+    } catch (e) { /* storage non disponibile */ }
+    return null;
+  }
+
+  // mette il pannello dove l'utente l'ha lasciato (se spostato), tenendolo dentro la mappa
+  _applyNavTopPos() {
+    const top = this.$("navtop");
+    const wrap = this.$("mapwrap");
+    if (!top || !wrap || top.hidden) return;
+    const pos = this._navTopPos();
+    if (!pos) { top.classList.remove("moved"); top.style.removeProperty("--ntx"); top.style.removeProperty("--nty"); return; }
+    top.classList.add("moved");
+    requestAnimationFrame(() => {
+      const ew = top.offsetWidth, eh = top.offsetHeight;
+      const x = Math.max(4, Math.min(Math.max(4, wrap.clientWidth - ew - 4), pos.x * wrap.clientWidth));
+      const y = Math.max(4, Math.min(Math.max(4, wrap.clientHeight - eh - 4), pos.y * wrap.clientHeight));
+      top.style.setProperty("--ntx", `${x}px`);
+      top.style.setProperty("--nty", `${y}px`);
+    });
+  }
+
+  _bindNavTopDrag() {
+    const top = this.$("navtop");
+    const wrap = this.$("mapwrap");
+    if (!top || !wrap) return;
+    let timer = null, drag = false, sx = 0, sy = 0, ox = 0, oy = 0;
+    top.addEventListener("pointerdown", (e) => {
+      if (e.button > 0 || top.hidden) return;
+      sx = e.clientX; sy = e.clientY; drag = false;
+      clearTimeout(timer);
+      timer = setTimeout(() => { // tieni premuto ~0,45 s: inizia lo spostamento
+        timer = null; drag = true;
+        try { top.setPointerCapture(e.pointerId); } catch (err) { /* puntatore simulato */ }
+        const r = top.getBoundingClientRect(), wr = wrap.getBoundingClientRect();
+        top.classList.add("moved", "dragging");
+        top.style.setProperty("--ntx", `${r.left - wr.left}px`);
+        top.style.setProperty("--nty", `${r.top - wr.top}px`);
+        ox = e.clientX - r.left; oy = e.clientY - r.top;
+        try { window.navigator.vibrate?.(20); } catch (err) { /* niente vibrazione */ }
+      }, 450);
+    });
+    top.addEventListener("pointermove", (e) => {
+      if (timer && !drag && Math.hypot(e.clientX - sx, e.clientY - sy) > 10) { clearTimeout(timer); timer = null; }
+      if (!drag) return;
+      e.preventDefault();
+      const wr = wrap.getBoundingClientRect();
+      const x = Math.max(4, Math.min(wrap.clientWidth - top.offsetWidth - 4, e.clientX - wr.left - ox));
+      const y = Math.max(4, Math.min(wrap.clientHeight - top.offsetHeight - 4, e.clientY - wr.top - oy));
+      top.style.setProperty("--ntx", `${x}px`);
+      top.style.setProperty("--nty", `${y}px`);
+    });
+    const end = () => {
+      clearTimeout(timer); timer = null;
+      if (!drag) return;
+      drag = false;
+      top.classList.remove("dragging");
+      this._longAt = Date.now(); // evita che parta un clic sui bottoni subito dopo
+      const x = parseFloat(top.style.getPropertyValue("--ntx")) || 0;
+      const y = parseFloat(top.style.getPropertyValue("--nty")) || 0;
+      // rilasciato in cima: torna al posto predefinito (barra a tutta larghezza)
+      if (y < 24) {
+        try { localStorage.removeItem(this._navTopKey()); } catch (err) { /* storage non disponibile */ }
+        top.classList.remove("moved");
+        top.style.removeProperty("--ntx"); top.style.removeProperty("--nty");
+        this._msg("Indicazioni rimesse in alto");
+        return;
+      }
+      try { localStorage.setItem(this._navTopKey(), JSON.stringify({ x: x / wrap.clientWidth, y: y / wrap.clientHeight })); } catch (err) { /* storage non disponibile */ }
+    };
+    top.addEventListener("pointerup", end);
+    top.addEventListener("pointercancel", end);
+  }
+
   // ----------------------------------------------------------------- impostazioni, voce e beep
 
   _saveSettings() {
@@ -4785,6 +4877,7 @@ class NavigatorPanel extends HTMLElement {
     const c = bot.querySelector('[data-n="center"]');
     c.classList.toggle("attn", !nav.follow);
     c.title = nav.follow ? "La mappa segue la tua posizione" : "Torna sulla tua posizione";
+    this._applyNavTopPos(); // dopo i cambi di className: rimette il pannello dove l'utente l'ha spostato
   }
 
   // barra in basso della guida: tempi e, sotto, zoom, centra, tipo di mappa ed Esci

@@ -47,7 +47,7 @@ categoria e sopra fluttua l'icona:
 - **Rotonde** con il numero dell'uscita ben visibile nell'icona, e **corsie** (auto e moto) sotto l'indicazione in guida, come in
   autostrada: le corsie da tenere sono chiare, le altre spente. Le corsie vengono da OSRM (dati di OpenStreetMap) e compaiono
   solo dove sono mappate.
-- **Navigazione** con la tua posizione: la mappa ti segue, in alto vedi la prossima manovra e la distanza, in basso tempo e km rimanenti e l'orario di arrivo. Se esci dal percorso per qualche secondo compare il popup **"Ricalcolo del percorso…"** e Navigator rifà la strada da dove sei (con le stesse opzioni: pedaggi, tratte tolte, tappe ancora da raggiungere).
+- **Navigazione** con la tua posizione: la mappa ti segue, in alto vedi la prossima manovra e la distanza, in basso tempo e km rimanenti e l'orario di arrivo. Il **pannello delle indicazioni** si può spostare dove vuoi sulla mappa **tenendolo premuto**; la posizione resta memorizzata per il tuo utente di Home Assistant (trascinalo in cima per rimetterlo al suo posto). Se esci dal percorso per qualche secondo compare il popup **"Ricalcolo del percorso…"** e Navigator rifà la strada da dove sei (con le stesse opzioni: pedaggi, tratte tolte, tappe ancora da raggiungere).
 - Apri il percorso in **Google Maps**, **Waze** o **OpenStreetMap**, oppure copia il riepilogo.
 - Mappe gratuite senza chiave: stradale, topografica, scura e satellite (Esri), escursionistica (OpenTopoMap).
 - **Vista 3D** con rilievo del terreno ed edifici, anche in guida, con la prospettiva regolabile ([dettagli](#vista-3d)).
