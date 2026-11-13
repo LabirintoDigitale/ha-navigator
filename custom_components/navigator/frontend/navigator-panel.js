@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.24";
+const PANEL_VERSION = "1.9.25";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1243,6 +1243,7 @@ const STYLE = `
   /* notte: satellite ed escursionistica più scuri */
   #map.night .leaflet-tile-pane { filter: brightness(.6) contrast(1.1) saturate(.8); }
   /* schede del pannello laterale: Viaggio e Archivio */
+  .sidetabs.solo { display: none; } /* app NaviHA: solo Viaggio, niente barra delle schede */
   .sidetabs { display: flex; gap: 0; position: sticky; top: 0; z-index: 5; background: var(--card-background-color, var(--primary-background-color));
     border-bottom: 1px solid var(--divider-color); }
   .sidetabs button { flex: 1; border: none; border-radius: 0; background: transparent; padding: 12px 8px; font-size: 15px; font-weight: 600;
@@ -1443,6 +1444,11 @@ class NavigatorPanel extends HTMLElement {
     this._loadTrips();
     this._loadGarage();
     this._renderPlanSel();
+    // nell'app NaviHA restano solo Viaggio: Live e Archivio sono nascosti
+    if (this._isNaviHA()) {
+      for (const t of ["live", "archivio"]) $("sidetabs").querySelector(`[data-tab="${t}"]`)?.remove();
+      $("sidetabs").classList.add("solo");
+    }
     $("sidetabs").querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => this._showTab(b.dataset.tab)));
     this._poiTiles = new Map();
     this._map.on("moveend zoomend", () => this._schedulePois());
@@ -3915,7 +3921,13 @@ class NavigatorPanel extends HTMLElement {
   }
 
   // app Companion: Android espone window.externalApp, iPhone window.webkit.messageHandlers.externalBus
+  // app NaviHA (quella del repo naviha): user agent "NaviHA/…" o i suoi ponti JavaScript
+  _isNaviHA() {
+    return /NaviHA\//i.test(window.navigator.userAgent || "") || !!window.NaviHAGeo || !!window.NaviHATTS;
+  }
+
   _companion() {
+    if (this._isNaviHA()) return "android";
     if (window.externalApp?.externalBus) return "android";
     if (window.webkit?.messageHandlers?.externalBus) return "ios";
     const ua = window.navigator.userAgent || "";
