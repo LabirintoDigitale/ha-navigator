@@ -4,12 +4,20 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.61";
+const PANEL_VERSION = "1.9.62";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
 const MAPLIBRE_JS = new URL("./maplibre/maplibre-gl.js", import.meta.url).href;
 const MAPLIBRE_CSS = new URL("./maplibre/maplibre-gl.css", import.meta.url).href;
+// modello 3D del mezzo (carrozzeria + targa in un unico blocco): Three.js (MIT), incluso e caricato solo quando serve
+const THREE_JS = new URL("./three/three.module.min.js", import.meta.url).href;
+let threeLoading = null;
+function loadThree() {
+  if (window.__naviTHREE) return Promise.resolve(window.__naviTHREE);
+  if (!threeLoading) threeLoading = import(THREE_JS).then((m) => { window.__naviTHREE = m; return m; }).catch((e) => { threeLoading = null; throw e; });
+  return threeLoading;
+}
 const ICON = new URL("./icon.png", import.meta.url).href;
 const STORE_KEY = "navigator-panel-state";
 // larghezza della riga del percorso in 3D: parte dallo spessore base (w) e cresce con lo zoom, così da vicino copre la carreggiata.
@@ -2962,6 +2970,10 @@ class NavigatorPanel extends HTMLElement {
     cancelAnimationFrame(this._cloudRaf); this._cloudRaf = 0;
     cancelAnimationFrame(this._plateRaf); this._plateRaf = 0;
     this._plate3d = null;
+    // modello 3D del mezzo: la vista è stata ricreata, va reinizializzato sul nuovo contesto
+    if (this._car3d?.mesh) this._disposeMesh(this._car3d.mesh);
+    this._car3dReady = false; this._car3dInit = false; this._car3dMeshKey = null;
+    this._carScene = null; this._carCam = null; this._carRenderer = null; this._car3d = null;
     const el = this.$("map3d");
     if (el) el.innerHTML = "";
   }
@@ -3653,6 +3665,18 @@ class NavigatorPanel extends HTMLElement {
     const src = g?.getSource("veh3d");
     const f = this._veh3dPos();
     if (!src) return;
+    // modello 3D vero (Three.js): auto + targa in un unico blocco. Si carica alla prima occasione;
+    // finché non è pronto (o se non disponibile) resta il mezzo a estrusioni qui sotto.
+    if (!this._car3dReady && !this._car3dInit && this._settings.veh3d !== false) this._initCar3d();
+    const kind3d = f ? veh3dFor(this._curVehicle(), this._mode)[0] : null;
+    const carLike = !["moto", "scooter", "bici", "piedi"].includes(kind3d);
+    if (this._car3dReady && carLike) {
+      src.setData({ type: "FeatureCollection", features: [] }); // niente estrusione del mezzo
+      if (this._plate3dAt) { this._plate3dAt = null; this._placePlate3d(); } // niente targa HTML
+      this._updateCar3d();
+      return;
+    }
+    if (this._car3d) { this._car3d.visible = false; this._g3?.triggerRepaint?.(); } // moto/bici/piedi: via il modello auto
     if (!f || this._settings.veh3d === false) {
       src.setData({ type: "FeatureCollection", features: [] });
       this._plate3dAt = null;
@@ -3688,6 +3712,165 @@ class NavigatorPanel extends HTMLElement {
     }
     src.setData({ type: "FeatureCollection", features: feats });
     this._schedulePlate3d();
+  }
+
+  // ---------------------------------------------------------------- modello 3D del mezzo (Three.js)
+  // L'auto è un unico oggetto solido (carrozzeria, abitacolo, vetri, ruote, fari) con la TARGA come
+  // faccia verticale texturata sul retro: tutto un blocco che si muove insieme. Caricato solo quando
+  // serve; se Three.js non è disponibile, resta il mezzo a estrusioni.
+  async _initCar3d() {
+    if (this._car3dReady || this._car3dInit) return;
+    this._car3dInit = true;
+    let THREE;
+    try { THREE = await loadThree(); } catch (e) { this._car3dInit = false; return; }
+    const g = this._g3;
+    if (!g || !this._g3ok) { this._car3dInit = false; return; }
+    this._THREE = THREE;
+    this._car3d = { visible: false, lon: 0, lat: 0, dirRad: 0, elev: 0, meters: 2, mesh: null };
+    const self = this;
+    const layer = {
+      id: "car3d", type: "custom", renderingMode: "2d",
+      onAdd(map, gl) {
+        const sc = new THREE.Scene();
+        sc.add(new THREE.AmbientLight(0xffffff, 1.55));
+        const d1 = new THREE.DirectionalLight(0xffffff, 1.5); d1.position.set(0.5, 1.0, 0.7); sc.add(d1);
+        const d2 = new THREE.DirectionalLight(0xcad8ff, 0.5); d2.position.set(-0.6, 0.4, -0.5); sc.add(d2);
+        self._carScene = sc;
+        self._carCam = new THREE.Camera();
+        self._carRenderer = new THREE.WebGLRenderer({ canvas: map.getCanvas(), context: gl, antialias: true });
+        self._carRenderer.autoClear = false;
+      },
+      render(gl, args) {
+        const c = self._car3d;
+        if (!c || !c.mesh || !c.visible || !self._carRenderer) return;
+        // MapLibre v5 passa un oggetto (matrice in defaultProjectionData.mainMatrix); versioni vecchie un array
+        const mtx = Array.isArray(args) ? args : (args?.defaultProjectionData?.mainMatrix || args?.modelViewProjectionMatrix);
+        if (!mtx) return;
+        const tr = self._g3.transform;
+        const ml = window.maplibregl;
+        const mc = ml.MercatorCoordinate.fromLngLat([c.lon, c.lat], c.elev || 0);
+        const s = mc.meterInMercatorCoordinateUnits() * c.meters; // metri → unità mercatore (× ingrandimento)
+        // ricetta classica: base mercatore→schermo × [posizione · scala(Y ribaltato) · 90°X (Y-su→Z-su) · direzione]
+        const base = tr.mercatorMatrix ? new THREE.Matrix4().fromArray(Array.from(tr.mercatorMatrix)) : new THREE.Matrix4().fromArray(mtx);
+        const l = new THREE.Matrix4()
+          .makeTranslation(mc.x, mc.y, mc.z)
+          .scale(new THREE.Vector3(s, -s, s))
+          .multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2))
+          .multiply(new THREE.Matrix4().makeRotationY(c.dirRad));
+        self._carCam.projectionMatrix = base.multiply(l);
+        const r = self._carRenderer;
+        r.resetState();
+        r.clearDepth(); // il mezzo si occlude da solo correttamente e resta sopra la mappa
+        r.render(self._carScene, self._carCam);
+        // mantiene il disegno vivo mentre si guida (e ancora un attimo dopo l'ultimo movimento); da fermi si spegne
+        if (self._g3.isMoving?.() || Date.now() - (c.lastMove || 0) < 2500) self._g3.triggerRepaint();
+      },
+    };
+    try {
+      g.addLayer(layer);
+      this._car3dReady = true;
+      this._car3dMeshKey = null;
+      this._drawVeh3d();
+    } catch (e) { this._car3dInit = false; }
+  }
+
+  // texture della targa (placca bianca + banda UE blu + numero) disegnata su tela
+  _plateTexture(text) {
+    const THREE = this._THREE;
+    const W = 512, H = Math.round(W * 0.2);
+    const c = document.createElement("canvas"); c.width = W; c.height = H;
+    const x = c.getContext("2d");
+    const r = Math.round(H * 0.12), euW = Math.round(H * 0.5), bd = Math.round(H * 0.05);
+    const rr = (xx, yy, ww, hh, rad) => { x.beginPath(); x.moveTo(xx + rad, yy); x.arcTo(xx + ww, yy, xx + ww, yy + hh, rad); x.arcTo(xx + ww, yy + hh, xx, yy + hh, rad); x.arcTo(xx, yy + hh, xx, yy, rad); x.arcTo(xx, yy, xx + ww, yy, rad); x.closePath(); };
+    x.fillStyle = "#2b2b2b"; rr(0, 0, W, H, r + bd); x.fill();
+    x.fillStyle = "#fbfbf8"; rr(bd, bd, W - 2 * bd, H - 2 * bd, r); x.fill();
+    x.save(); rr(bd, bd, euW, H - 2 * bd, r); x.clip(); x.fillStyle = "#1f3fa8"; x.fillRect(bd, bd, euW, H); x.restore();
+    x.fillStyle = "#fff"; x.font = `bold ${Math.round(H * 0.3)}px Arial`; x.textAlign = "center"; x.textBaseline = "alphabetic";
+    x.fillText("I", bd + euW / 2, H - Math.round(H * 0.22));
+    x.fillStyle = "#111"; x.font = `bold ${Math.round(H * 0.62)}px "Arial Narrow", Arial, sans-serif`; x.textAlign = "center"; x.textBaseline = "middle";
+    x.fillText(text, euW + (W - euW) / 2, H / 2 + Math.round(H * 0.03));
+    const tex = new THREE.CanvasTexture(c);
+    // il piano della targa è ruotato di 180° (guarda all'indietro): si de-specchia la texture così il numero si legge dritto
+    tex.wrapS = THREE.RepeatWrapping; tex.repeat.x = -1; tex.offset.x = 1;
+    tex.anisotropy = 8; tex.needsUpdate = true;
+    return tex;
+  }
+
+  // costruisce il mezzo come un unico gruppo di forme solide, con la targa sul retro
+  _buildCar3dMesh(kind, color) {
+    const THREE = this._THREE;
+    const night = this._nightOn;
+    const grp = new THREE.Group();
+    const dim = { suv: [4.7, 2.0, 1.78], jeep: [4.4, 1.95, 1.9], camper: [6.0, 2.25, 2.75], furgone: [5.2, 2.05, 2.4],
+      auto: [4.4, 1.82, 1.5], car: [4.4, 1.82, 1.5] }[kind] || [4.5, 1.85, 1.6];
+    const [L, W, H] = dim;
+    const lam = (c, o = {}) => new THREE.MeshLambertMaterial({ color: new THREE.Color(c), side: THREE.DoubleSide, ...o });
+    const body = lam(color || "#173a7a");
+    const addBox = (w, h, l, m, y, z = 0) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, l), m); b.position.set(0, y, z); grp.add(b); return b; };
+    const wheelR = Math.min(0.38, H * 0.25), floor = wheelR * 0.95;
+    // corpo basso e abitacolo (asse Z = avanti, Y = alto, X = larghezza)
+    addBox(W, H * 0.46, L * 0.98, body, floor + H * 0.23);
+    const cabH = H * 0.44, cabL = L * 0.52;
+    addBox(W * 0.9, cabH, cabL, body, floor + H * 0.46 + cabH / 2, -L * 0.03);
+    // vetri
+    const glass = lam(night ? "#0f1d33" : "#20314d");
+    addBox(W * 0.92, cabH * 0.6, cabL * 0.99, glass, floor + H * 0.46 + cabH * 0.62, -L * 0.03);
+    // ruote
+    const wgeo = new THREE.CylinderGeometry(wheelR, wheelR, W * 0.12, 18); const wmat = lam("#141414");
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      const wm = new THREE.Mesh(wgeo, wmat); wm.rotation.z = Math.PI / 2;
+      wm.position.set(sx * (W / 2 - W * 0.05), wheelR, sz * L * 0.31); grp.add(wm);
+    }
+    // fari: bianchi davanti, rossi dietro
+    for (const sx of [-1, 1]) {
+      addBox(W * 0.16, H * 0.1, 0.08, lam(night ? "#fff6c8" : "#eef2f5"), floor + H * 0.28, L * 0.485 + sx * 0 + 0);
+      addBox(W * 0.16, H * 0.1, 0.06, lam("#c21a1a"), floor + H * 0.3, -L * 0.49);
+    }
+    // targa: faccia verticale texturata sul retro (un pezzo solo col mezzo)
+    const v = this._curVehicle();
+    const plate = v?.type && v?.plate ? v.plate : "";
+    if (plate && !["moto", "scooter", "bici", "piedi"].includes(kind)) {
+      const tex = this._plateTexture(plate);
+      const pw = Math.min(W * 0.46, 0.52), ph = pw * 0.2;
+      const pm = new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide });
+      const pl = new THREE.Mesh(new THREE.PlaneGeometry(pw, ph), pm);
+      pl.position.set(0, floor + H * 0.22, -L * 0.5 - 0.015);
+      pl.rotation.y = Math.PI; grp.add(pl);
+      grp.userData.plateTex = tex;
+    }
+    return grp;
+  }
+
+  // aggiorna posizione/direzione del modello 3D e lo ricostruisce quando cambia tipo/colore/targa
+  _updateCar3d() {
+    const c = this._car3d;
+    const f = this._veh3dPos();
+    if (!c || !this._carScene) return;
+    if (!f || this._settings.veh3d === false) { if (c.visible) { c.visible = false; this._g3?.triggerRepaint?.(); } return; }
+    const v = this._curVehicle();
+    const [kind, color] = veh3dFor(v, this._mode);
+    const plate = v?.type && v?.plate ? v.plate : "";
+    const key = `${kind}|${color}|${this._nightOn ? 1 : 0}|${plate}`;
+    if (this._car3dMeshKey !== key) {
+      this._car3dMeshKey = key;
+      if (c.mesh) { this._carScene.remove(c.mesh); this._disposeMesh(c.mesh); }
+      c.mesh = this._buildCar3dMesh(kind, color);
+      this._carScene.add(c.mesh);
+    }
+    c.lon = f.lon; c.lat = f.lat;
+    c.dirRad = -((f.dir || 0) * Math.PI) / 180; // verso di marcia
+    let elev = 0; try { elev = this._g3.queryTerrainElevation([f.lon, f.lat]) || 0; } catch (e) { /* quota non pronta */ }
+    c.elev = elev;
+    c.visible = true;
+    c.lastMove = Date.now();
+    this._g3?.triggerRepaint?.();
+  }
+
+  _disposeMesh(obj) {
+    obj?.traverse?.((o) => {
+      if (o.geometry) o.geometry.dispose?.();
+      if (o.material) { (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => { m.map?.dispose?.(); m.dispose?.(); }); }
+    });
   }
 
   // ingrandimento del modellino: più si è lontani più è grande, così sullo schermo resta di misura simile;
