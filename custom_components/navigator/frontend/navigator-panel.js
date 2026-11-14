@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.42";
+const PANEL_VERSION = "1.9.43";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1239,6 +1239,7 @@ const STYLE = `
   .wxm { font-size: 20px; line-height: 1; filter: drop-shadow(0 1px 2px rgba(0,0,0,.6)); }
   .wx3d .wxm { font-size: 30px; }
   .clouds3d { position: absolute; left: 0; top: 0; pointer-events: none; }
+  #map3d.g3busy .poi3d { display: none; } /* punti di interesse nascosti durante un gesto con le dita */
   .wxlist { margin: 4px 0 0; padding: 0; list-style: none; font-size: 13px; }
   .wxlist li { padding: 3px 0; }
   /* diario dei viaggi */
@@ -3223,8 +3224,8 @@ class NavigatorPanel extends HTMLElement {
       this._cloudHooked = true;
       // durante un gesto dell'utente (trascinamento/zoom/rotazione/inclinazione) il ridisegno delle nuvole si ferma: si
       // riprende quando la mappa smette di muoversi, così il gesto resta fluido
-      for (const ev of ["dragstart", "zoomstart", "rotatestart", "pitchstart"]) g.on(ev, (e) => { if (e.originalEvent) this._g3interacting = true; });
-      g.on("moveend", () => { this._g3interacting = false; this._drawClouds(); });
+      for (const ev of ["dragstart", "zoomstart", "rotatestart", "pitchstart"]) g.on(ev, (e) => { if (e.originalEvent) { this._g3interacting = true; this._g3Heavy(false); } });
+      g.on("moveend", () => { this._g3interacting = false; this._g3Heavy(true); this._drawClouds(); });
       g.on("render", () => { if (!this._g3interacting) this._scheduleCloudDraw(); });
       g.on("resize", () => this._drawClouds());
     }
@@ -3656,6 +3657,18 @@ class NavigatorPanel extends HTMLElement {
   _schedulePlate3d() {
     if (this._plateRaf) return;
     this._plateRaf = requestAnimationFrame(() => { this._plateRaf = 0; this._placePlate3d(); });
+  }
+
+  // durante un gesto con le dita in 3D: nasconde edifici e punti di interesse (pesanti da ridisegnare a ogni fotogramma);
+  // li rimette appena si molla, così la rotazione/lo spostamento resta fluido
+  _g3Heavy(on) {
+    const g = this._g3;
+    if (g && this._g3ok) {
+      for (const id of ["bld", "bld-roof", "poi-bld"]) {
+        if (g.getLayer(id)) { try { g.setLayoutProperty(id, "visibility", on ? "visible" : "none"); } catch (e) { /* vista ricreata */ } }
+      }
+    }
+    this.$("map3d")?.classList.toggle("g3busy", !on);
   }
 
   // etichetta della targa sul retro del mezzo 3D, ricalcolata a ogni movimento con lo zoom e l'inclinazione del momento;
