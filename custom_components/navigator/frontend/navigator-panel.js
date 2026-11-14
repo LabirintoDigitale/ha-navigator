@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.55";
+const PANEL_VERSION = "1.9.56";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -3760,30 +3760,57 @@ class NavigatorPanel extends HTMLElement {
     if (!g || !ml || !g.getTerrain() || typeof g.transform?.clone !== "function") return opts;
     // Prima si abbassa l'inclinazione (5° alla volta, fino a 20°): la telecamera sale e si avvicina, la distanza scelta resta.
     // Allontanarsi (zoom indietro) in una valle stretta la portava sopra le montagne dietro, sempre più lontano.
+    const baseBearing = opts.bearing != null ? opts.bearing : g.getBearing();
     let z = opts.zoom;
     let pitch = opts.pitch ?? g.getPitch();
+    let bearing = baseBearing;
     try {
       const center = ml.LngLat.convert(opts.center);
       let elev = null;
       try { elev = g.queryTerrainElevation(center); } catch (e) { /* quota del centro non pronta */ }
-      for (let k = 0; k < 20; k++) {
+      const clr = (p, zz, br) => {
         const tr = g.transform.clone();
         if (opts.padding) tr.setPadding(opts.padding);
-        if (opts.bearing != null) tr.setBearing(opts.bearing);
-        tr.setPitch(pitch);
-        tr.setZoom(z);
+        tr.setBearing(br);
+        tr.setPitch(p);
+        tr.setZoom(zz);
         tr.setCenter(center);
         if (elev != null && Number.isFinite(elev)) tr.setElevation(elev);
-        const cl = this._camClearance(tr, min);
-        if (cl == null || cl >= 0) break;
-        if (pitch > 20) pitch = Math.max(20, pitch - 5);
-        else z -= 0.25; // pareti ripidissime: anche a 20° non basta
+        return this._camClearance(tr, min);
+      };
+      // cerca l'angolo più piccolo (fra i due lati, quello con più margine) che libera la vista a una data inclinazione
+      const tryRotate = (p) => {
+        for (const off of [25, 45, 65, 90]) {
+          let best = null;
+          for (const s of [1, -1]) {
+            const c = clr(p, z, baseBearing + s * off);
+            if (c != null && c >= 0 && (best == null || c > best.cl)) best = { br: baseBearing + s * off, cl: c };
+          }
+          if (best) return best;
+        }
+        return null;
+      };
+      // 1) si abbassa un po' l'inclinazione (fino a 30°): la telecamera sale e si avvicina. Basta per le colline.
+      let cl = clr(pitch, z, bearing);
+      while (cl != null && cl < 0 && pitch > 30) { pitch = Math.max(30, pitch - 5); cl = clr(pitch, z, bearing); }
+      // 2) ancora dentro la montagna (tornanti): si RUOTA l'inquadratura verso il lato libero (la valle), lasciando
+      //    la montagna di lato, senza appiattire oltre la vista. Appena il tornante gira, al GPS successivo si
+      //    rivaluta e ruota dall'altra parte.
+      if (cl != null && cl < 0) { const r = tryRotate(pitch); if (r) { bearing = r.br; cl = r.cl; } }
+      // 3) se ruotare non basta: si continua ad abbassare l'inclinazione (fino a 20°) e si riprova a ruotare
+      while (cl != null && cl < 0 && pitch > 20) {
+        pitch = Math.max(20, pitch - 5);
+        cl = clr(pitch, z, bearing);
+        if (cl != null && cl < 0) { const r = tryRotate(pitch); if (r) { bearing = r.br; cl = r.cl; } }
       }
+      // 4) gole strettissime: ultima risorsa, ci si allontana
+      for (let k = 0; k < 16 && cl != null && cl < 0; k++) { z -= 0.25; cl = clr(pitch, z, bearing); }
     } catch (e) {
       z = opts.zoom; // controllo non riuscito: si va dove richiesto
       pitch = opts.pitch ?? g.getPitch();
+      bearing = baseBearing;
     }
-    return { ...opts, zoom: z, pitch };
+    return { ...opts, zoom: z, pitch, bearing };
   }
 
   // margine (metri) fra la telecamera e il terreno, già tolto il minimo richiesto: negativo = troppo bassa.
