@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.59";
+const PANEL_VERSION = "1.9.61";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -3750,16 +3750,21 @@ class NavigatorPanel extends HTMLElement {
     // dimensione e alzata in base alla SCALA del mezzo (dipende SOLO dallo zoom, non dalla rotazione):
     // così la targa non cambia e non "balla" quando ruoti la mappa a mezzo fermo. Larghezza automatica:
     // mostra sempre tutto il numero, grande quanto il retro.
-    const targetW = Math.max(30, Math.min(120, (at.w * S) / mpp));
+    // scala LOCALE in pixel vicino al mezzo (corretta in prospettiva): quanto misura in pixel 1 unità del modellino
+    // proprio lì dove sta l'auto. Così dimensione e alzata crescono bene anche da molto vicino, e la targa sale sul retro.
+    const mLon = 1 / (111320 * Math.cos((f.lat * Math.PI) / 180));
+    const pos = g.project([lon, lat]);
+    const sideP = g.project([lon + Math.cos(th) * S * mLon, lat - (Math.sin(th) * S) / 111320]);
+    const pxPerUnit = Math.hypot(sideP.x - pos.x, sideP.y - pos.y) || (S / mpp);
+    const targetW = Math.max(30, Math.min(160, at.w * pxPerUnit));
     const ems = 1.9 + (at.text ? at.text.length : 7) * 0.52; // 2 bandiere UE + cifre (font stretto)
     el.style.width = "";
-    el.style.fontSize = `${Math.max(6, Math.min(16, targetW / ems)).toFixed(2)}px`;
+    el.style.fontSize = `${Math.max(6, Math.min(22, targetW / ems)).toFixed(2)}px`;
     const away = Math.abs(((((f.dir - g.getBearing()) % 360) + 540) % 360) - 180) > 100;
-    const pos = g.project([lon, lat]);
     const offscreen = pos.x < -60 || pos.y < -60 || pos.x > g.getCanvas().clientWidth + 60 || pos.y > g.getCanvas().clientHeight + 60;
     el.style.visibility = away || offscreen ? "hidden" : "";
     const pitch = (g.getPitch() * Math.PI) / 180;
-    this._plate3d.setLngLat([lon, lat]).setRotation(0).setOffset([0, -((at.z * S) / mpp) * Math.sin(pitch)]);
+    this._plate3d.setLngLat([lon, lat]).setRotation(0).setOffset([0, -at.z * pxPerUnit * Math.sin(pitch)]);
   }
 
   // la telecamera non deve finire sotto il terreno: inclinata sta dietro e più in basso del punto guardato, e le colline
