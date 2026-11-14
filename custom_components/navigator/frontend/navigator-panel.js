@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.49";
+const PANEL_VERSION = "1.9.50";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -3832,7 +3832,8 @@ class NavigatorPanel extends HTMLElement {
 
   _sync3dCam() {
     const g = this._g3;
-    if (!this._3d || !g || this._from3d || this._g3gest?.size || this._stepAnim || this._stepK != null) return; // gesto con le dita o anteprima aperta: non si tocca la vista
+    // con le dita sullo schermo (_g3interacting) non si riposiziona la telecamera: il ricentro a ogni GPS bloccava il gesto da vicino
+    if (!this._3d || !g || this._from3d || this._g3interacting || this._g3gest?.size || this._stepAnim || this._stepK != null) return;
     const nav = this._nav;
     // MapLibre misura lo zoom con riquadri da 512 pixel, Leaflet da 256; in guida si aggiunge la distanza scelta dall'utente
     const z = nav?.fix && nav.follow && this._isGuida() ? this._base3dZoom() + this._zoom3dOff() : this._map.getZoom() - 1;
