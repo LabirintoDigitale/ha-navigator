@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.51";
+const PANEL_VERSION = "1.9.52";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1370,7 +1370,7 @@ class NavigatorPanel extends HTMLElement {
       <link rel="stylesheet" href="${LEAFLET_CSS}">
       <style>${STYLE}</style>
       <div class="toolbar"><ha-menu-button></ha-menu-button>
-        <div class="title"><span class="brand"><img src="${ICON}" alt=""> Navigator</span><span class="ver">versione ${PANEL_VERSION}</span></div>
+        <div class="title"><span class="brand" id="brand"><img src="${ICON}" alt=""> Navigator</span><span class="ver">versione ${PANEL_VERSION}</span></div>
         <button class="tbtn" id="settingsbtn" title="Impostazioni">⚙</button></div>
       <div class="setwrap" id="setwrap" hidden></div>
       <div class="setwrap" id="nearwrap" hidden></div>
@@ -1489,6 +1489,16 @@ class NavigatorPanel extends HTMLElement {
     this._bindLongPress(this.$("map"), (ev) => (this._rotated() ? this._unrotLatLng(ev) : this._map.mouseEventToLatLng(ev)));
     this._map.on("dragstart", () => this._userMoved());
     this._bindGuidaGestures();
+    // logo in alto a sinistra: nell'app NaviHA chiede se uscire e chiude l'app; in Home Assistant (browser) non fa nulla
+    const brand = $("brand");
+    if (brand && this._isNaviHA()) {
+      brand.style.cursor = "pointer";
+      brand.addEventListener("click", () => {
+        if (window.confirm("Vuoi uscire da NaviHA?")) {
+          try { window.NaviHAApp?.exit(); } catch (e) { /* ponte non disponibile */ }
+        }
+      });
+    }
     this._bindNavTopDrag();
     // tasto mute nella barra delle indicazioni (delega: la barra viene ridisegnata a ogni posizione)
     this.$("navtop").addEventListener("click", (e) => {
@@ -3693,11 +3703,6 @@ class NavigatorPanel extends HTMLElement {
   // etichetta della targa sul retro del mezzo 3D, ricalcolata a ogni movimento con lo zoom e l'inclinazione del momento;
   // nascosta quando il retro non guarda verso la telecamera
   _placePlate3d() {
-    // targa come etichetta sovrapposta disattivata: a certe angolazioni si staccava. Resta la placchetta bianca sul
-    // retro del modellino 3D. (Per un numero sempre corretto servirebbe un modello 3D con texture: progetto a parte.)
-    this._plate3d?.remove();
-    this._plate3d = null;
-    return; // eslint-disable-line no-unreachable
     const g = this._g3;
     const at = this._plate3dAt;
     const f = this._veh3dPos();
@@ -5089,7 +5094,7 @@ class NavigatorPanel extends HTMLElement {
         <button data-n="3d" class="b3d" title="Vista 3D con rilievo ed edifici">3D</button>
         <button data-n="full" title="Schermo intero">${FS_ON}</button>
         <select data-n="layer" title="Tipo di mappa">${opts}</select>
-        <button class="stop" data-n="stop" title="Esci dalla navigazione">■ Esci</button>
+        <button class="stop" data-n="stop" title="Ferma la navigazione">■ Ferma</button>
       </div>`;
     // + e −: in 3D, mentre la vista segue, cambiano la distanza memorizzata; altrimenti lo zoom come sempre
     const zoomBtn = (d) => {
