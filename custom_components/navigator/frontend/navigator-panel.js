@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.45";
+const PANEL_VERSION = "1.9.46";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -3057,14 +3057,10 @@ class NavigatorPanel extends HTMLElement {
       g.on(ev, (e) => {
         if (!e.originalEvent) return;
         if (followGuida()) {
-          if (ev === "dragstart") {
-            // anche il pinch sposta un po' la mappa: si aspetta un attimo per capire se è un trascinamento vero
-            clearTimeout(this._g3dragT);
-            this._g3dragT = setTimeout(() => { if (!this._g3gest.size) this._userMoved(); }, 250);
-          } else {
-            clearTimeout(this._g3dragT);
-            this._g3gest.add(ev.replace("start", ""));
-          }
+          // muovendo il 3D non si smette subito di seguire: si tiene la TUA inquadratura finché il mezzo resta sullo schermo;
+          // se esce dall'inquadratura, _sync3dCam interrompe il tracciamento (◎ lo riprende)
+          if (this._nav) this._nav.userFrame = true;
+          if (ev !== "dragstart") { clearTimeout(this._g3dragT); this._g3gest.add(ev.replace("start", "")); }
           return;
         }
         if (ev === "zoomstart" && this._nav) this._nav.manualZoomUntil = Date.now() + 20000;
@@ -3649,7 +3645,10 @@ class NavigatorPanel extends HTMLElement {
   // ingrandimento del modellino: più si è lontani più è grande, così sullo schermo resta di misura simile;
   // due ruote e pedone sono piccoli davvero: un po' più ingranditi
   _veh3dScale(kind) {
-    return Math.max(1.5, Math.min(60, 8 * 2 ** (17 - this._g3.getZoom()))) * (["moto", "scooter", "bici", "piedi"].includes(kind) ? 1.7 : 1);
+    const z = this._g3.getZoom();
+    // misura ~costante sullo schermo; da lontano (mappa piccola) un po' più piccola, così non sembra troppo grande
+    const shrink = Math.max(0.6, Math.min(1, (z - 12) / 3));
+    return Math.max(1.2, Math.min(50, 6.5 * 2 ** (17 - z))) * shrink * (["moto", "scooter", "bici", "piedi"].includes(kind) ? 1.7 : 1);
   }
 
   // nuvole e targa: al massimo una volta per fotogramma (più eventi "render"/"move" nello stesso frame non le ridisegnano più volte)
@@ -3686,27 +3685,32 @@ class NavigatorPanel extends HTMLElement {
     if (!this._plate3d) {
       const el = document.createElement("div");
       el.className = "plate3d";
-      // decalco appoggiato sul piano della mappa (come dipinto a terra dietro il mezzo): MapLibre lo tiene incollato e lo
-      // inclina/ruota da solo a ogni angolazione, senza che si stacchi mai
-      this._plate3d = new window.maplibregl.Marker({ element: el, rotationAlignment: "map", pitchAlignment: "map", anchor: "center" })
-        .setLngLat([f.lon, f.lat]).addTo(g);
+      this._plate3d = new window.maplibregl.Marker({ element: el, anchor: "center" }).setLngLat([f.lon, f.lat]).addTo(g);
     }
     const el = this._plate3d.getElement();
     if (el.dataset.t !== at.text) { el.dataset.t = at.text; el.innerHTML = `<span class="eu">I</span><b>${esc(at.text)}</b><span class="eu"></span>`; }
+    // sul retro verticale del mezzo: posizione geografica del retro, misura dalla larghezza del retro proiettata (prospettiva),
+    // alzata sulla targa secondo l'inclinazione; tenuta vicino al mezzo anche in primissimo piano
     const S = this._veh3dScale(at.kind);
-    const th = (f.dir * Math.PI) / 180, mLat = 1 / 111320, mLon = 1 / (111320 * Math.cos((f.lat * Math.PI) / 180));
-    // posizione sul retro del mezzo (un po' più indietro, così la targa esce appena dietro il paraurti)
-    const back = at.rear - 0.4;
-    const lat = f.lat + back * Math.cos(th) * S * mLat;
-    const lon = f.lon + back * Math.sin(th) * S * mLon;
-    // larghezza in pixel pari alla larghezza reale della targa a questo zoom: segue il mezzo e resta in proporzione
-    const pxPerM = (512 * 2 ** g.getZoom()) / (40075016.686 * Math.cos((f.lat * Math.PI) / 180));
-    const wpx = Math.max(40, Math.min(180, at.w * S * pxPerM * 1.5));
+    const th = (f.dir * Math.PI) / 180;
+    const lat = f.lat + (at.rear * Math.cos(th) * S) / 111320;
+    const lon = f.lon + (at.rear * Math.sin(th) * S) / (111320 * Math.cos((f.lat * Math.PI) / 180));
+    const mLon = 1 / (111320 * Math.cos((f.lat * Math.PI) / 180));
+    const side = (x) => [lon + x * Math.cos(th) * S * mLon, lat - (x * Math.sin(th) * S) / 111320];
+    let px = 0;
+    try { const a = g.project(side(-0.9)), b = g.project(side(0.9)); px = Math.hypot(a.x - b.x, a.y - b.y); } catch (e) { /* fuori dai dati */ }
+    const mpp = (40075016.686 * Math.cos((f.lat * Math.PI) / 180)) / (512 * 2 ** g.getZoom());
+    const base = (1.8 * S) / mpp;
+    const ratio = px > 0 ? Math.max(0.5, Math.min(2, px / base)) : 1; // prospettiva, ma senza valori estremi in primissimo piano
+    const wpx = Math.max(40, Math.min(130, (px || base) * 1.3));
     el.style.width = `${wpx}px`;
-    el.style.fontSize = `${Math.max(7, Math.min(22, wpx * 0.2))}px`;
-    el.style.visibility = "";
-    // giace sul piano e ruota col mezzo (il testo si legge dal retro, nel verso di marcia)
-    this._plate3d.setLngLat([lon, lat]).setRotation(((f.dir + 180) % 360));
+    el.style.fontSize = `${Math.max(7, Math.min(17, wpx * 0.145))}px`;
+    const away = Math.abs(((((f.dir - g.getBearing()) % 360) + 540) % 360) - 180) > 100;
+    const pos = g.project([lon, lat]);
+    const offscreen = pos.x < -60 || pos.y < -60 || pos.x > g.getCanvas().clientWidth + 60 || pos.y > g.getCanvas().clientHeight + 60;
+    el.style.visibility = away || offscreen ? "hidden" : "";
+    const pitch = (g.getPitch() * Math.PI) / 180;
+    this._plate3d.setLngLat([lon, lat]).setRotation(0).setOffset([0, -((at.z * S) / mpp) * Math.sin(pitch) * ratio]);
   }
 
   // la telecamera non deve finire sotto il terreno: inclinata sta dietro e più in basso del punto guardato, e le colline
@@ -3816,6 +3820,17 @@ class NavigatorPanel extends HTMLElement {
       const guida = this._isGuida();
       const pad = guida ? this._guidaPad() : null;
       const pos = this._navPos(); // all'avvio l'inizio della linea, poi il GPS reale
+      // hai spostato tu la vista (userFrame): finché il mezzo resta nell'inquadratura non la si tocca; se esce, si smette di seguire
+      if (nav.userFrame && guida) {
+        const pt = g.project([pos.lon, pos.lat]);
+        const cv = g.getCanvas();
+        const inView = pt.x >= 0 && pt.y >= 0 && pt.x <= cv.clientWidth && pt.y <= cv.clientHeight;
+        if (inView) return;
+        nav.follow = false;
+        nav.userFrame = false;
+        this._renderNav();
+        return;
+      }
       const key = `${pos.lat},${pos.lon},${z},${nav.dir},${guida},${this._pitch3d()},${pad ? Math.round(pad.top) + "/" + Math.round(pad.bottom) : ""}`;
       if (key === this._g3key) return;
       this._g3key = key;
@@ -3956,6 +3971,7 @@ class NavigatorPanel extends HTMLElement {
     }
     this._lastCenter = Date.now();
     nav.follow = true;
+    nav.userFrame = false; // ◎: riprende a seguire e ricentra, anche se avevi tenuto una tua inquadratura
     nav.manualZoomUntil = 0;
     const z = this._autoZoomOn() && nav.speed != null ? zoomForSpeed(nav.speed * 3.6) : 17;
     this._map.setZoom(z, { animate: false });
