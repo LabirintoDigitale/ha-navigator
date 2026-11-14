@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.43";
+const PANEL_VERSION = "1.9.44";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -3083,8 +3083,10 @@ class NavigatorPanel extends HTMLElement {
     g.on("moveend", (e) => {
       if (!e.originalEvent || (this._nav?.follow)) return;
       const cc = g.getCenter();
+      // il 3D muove la mappa 2D (nascosta), ma la sincronizzazione inversa non deve rimettere la telecamera dove stava:
+      // _from3d resta attivo oltre il moveend asincrono della mappa 2D, così la vista resta dove l'hai lasciata
       this._from3d = true;
-      try { this._map.setView([cc.lat, cc.lng], g.getZoom() + 1, { animate: false }); } finally { this._from3d = false; }
+      try { this._map.setView([cc.lat, cc.lng], g.getZoom() + 1, { animate: false }); } finally { setTimeout(() => { this._from3d = false; }, 0); }
     });
     g.on("click", (e) => { if (Date.now() - (this._longAt || 0) >= 900) this._mapTap(e.originalEvent); });
     g.on("contextmenu", (e) => {
@@ -3682,34 +3684,27 @@ class NavigatorPanel extends HTMLElement {
     if (!this._plate3d) {
       const el = document.createElement("div");
       el.className = "plate3d";
-      this._plate3d = new window.maplibregl.Marker({ element: el, anchor: "center" }).setLngLat([f.lon, f.lat]).addTo(g);
+      // decalco appoggiato sul piano della mappa (come dipinto a terra dietro il mezzo): MapLibre lo tiene incollato e lo
+      // inclina/ruota da solo a ogni angolazione, senza che si stacchi mai
+      this._plate3d = new window.maplibregl.Marker({ element: el, rotationAlignment: "map", pitchAlignment: "map", anchor: "center" })
+        .setLngLat([f.lon, f.lat]).addTo(g);
     }
     const el = this._plate3d.getElement();
     if (el.dataset.t !== at.text) { el.dataset.t = at.text; el.innerHTML = `<span class="eu">I</span><b>${esc(at.text)}</b><span class="eu"></span>`; }
-    // appiccicata al retro del mezzo: posizione geografica sul retro, misura dalla larghezza vera del retro proiettata
-    // (con la prospettiva), alzata sulla targa verticale secondo l'inclinazione. Si ricalcola al massimo una volta per fotogramma.
     const S = this._veh3dScale(at.kind);
-    const th = (f.dir * Math.PI) / 180;
-    const lat = f.lat + (at.rear * Math.cos(th) * S) / 111320;
-    const lon = f.lon + (at.rear * Math.sin(th) * S) / (111320 * Math.cos((f.lat * Math.PI) / 180));
-    const mLon = 1 / (111320 * Math.cos((f.lat * Math.PI) / 180));
-    const side = (x) => [lon + x * Math.cos(th) * S * mLon, lat - (x * Math.sin(th) * S) / 111320];
-    let px = 0;
-    try {
-      const a = g.project(side(-0.9)), b = g.project(side(0.9));
-      px = Math.hypot(a.x - b.x, a.y - b.y);
-    } catch (e) { /* fuori dai dati del rilievo */ }
-    const mpp = (40075016.686 * Math.cos((f.lat * Math.PI) / 180)) / (512 * 2 ** g.getZoom());
-    const ratio = px > 0 ? px / ((1.8 * S) / mpp) : 1;
-    const wpx = Math.max(40, Math.min(130, (px || (1.8 * S) / mpp) * 1.35));
+    const th = (f.dir * Math.PI) / 180, mLat = 1 / 111320, mLon = 1 / (111320 * Math.cos((f.lat * Math.PI) / 180));
+    // posizione sul retro del mezzo (un po' più indietro, così la targa esce appena dietro il paraurti)
+    const back = at.rear - 0.4;
+    const lat = f.lat + back * Math.cos(th) * S * mLat;
+    const lon = f.lon + back * Math.sin(th) * S * mLon;
+    // larghezza in pixel pari alla larghezza reale della targa a questo zoom: segue il mezzo e resta in proporzione
+    const pxPerM = (512 * 2 ** g.getZoom()) / (40075016.686 * Math.cos((f.lat * Math.PI) / 180));
+    const wpx = Math.max(40, Math.min(180, at.w * S * pxPerM * 1.5));
     el.style.width = `${wpx}px`;
-    el.style.fontSize = `${Math.max(7, Math.min(17, wpx * 0.145))}px`;
-    const away = Math.abs(((((f.dir - g.getBearing()) % 360) + 540) % 360) - 180) > 100;
-    const pos = g.project([lon, lat]);
-    const off = pos.x < -50 || pos.y < -50 || pos.x > g.getCanvas().clientWidth + 50 || pos.y > g.getCanvas().clientHeight + 50;
-    el.style.visibility = away || off ? "hidden" : "";
-    const pitch = (g.getPitch() * Math.PI) / 180;
-    this._plate3d.setLngLat([lon, lat]).setOffset([0, -((at.z * S) / mpp) * Math.sin(pitch) * ratio]);
+    el.style.fontSize = `${Math.max(7, Math.min(22, wpx * 0.2))}px`;
+    el.style.visibility = "";
+    // giace sul piano e ruota col mezzo (il testo si legge dal retro, nel verso di marcia)
+    this._plate3d.setLngLat([lon, lat]).setRotation(((f.dir + 180) % 360));
   }
 
   // la telecamera non deve finire sotto il terreno: inclinata sta dietro e più in basso del punto guardato, e le colline
