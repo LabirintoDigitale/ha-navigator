@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.52";
+const PANEL_VERSION = "1.9.53";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -3992,9 +3992,11 @@ class NavigatorPanel extends HTMLElement {
     const nav = this._nav;
     if (!nav) return;
     // in 3D la distanza scelta resta; premuto due volte di seguito torna quella predefinita
+    let far3d = false;
     if (this._3d && Date.now() - (this._lastCenter || 0) < 1500 && this._zoom3dOff() !== 0) {
       this._setZoom3dOff(0);
       this._msg("Vista 3D: distanza predefinita");
+      far3d = true;
     }
     this._lastCenter = Date.now();
     nav.follow = true;
@@ -4004,9 +4006,38 @@ class NavigatorPanel extends HTMLElement {
     this._map.setZoom(z, { animate: false });
     this._g3key = null;
     if (nav.fix) this._followView();
-    // in 3D ricentra DIRETTAMENTE la telecamera sul mezzo (non si affida alla sincronizzazione con la mappa 2D, che restava distante)
-    if (this._3d && this._g3 && this._g3ok) this._sync3d();
+    // in 3D ricentra DIRETTAMENTE la telecamera sul mezzo, vicino e inclinato di 40°
+    if (this._3d && this._g3 && this._g3ok && nav.fix) this._recenter3d(far3d);
     this._renderNav();
+  }
+
+  // ◎ in 3D: porta la telecamera vicino al mezzo (~2 metri) con 40° di inclinazione.
+  // Agisce direttamente, senza affidarsi alla sincronizzazione con la mappa 2D (che restava
+  // distante) e azzerando eventuali stati di gesto rimasti "aperti" sul telefono, che
+  // altrimenti facevano uscire subito la sincronizzazione e il ricentro non partiva.
+  _recenter3d(far = false) {
+    const g = this._g3;
+    const nav = this._nav;
+    if (!g || !nav?.fix) return;
+    // sblocca gesti eventualmente rimasti attivi (il tocco a volte non si "chiude" sul telefono)
+    this._g3interacting = false;
+    this._g3downs = 0;
+    this._g3gest?.clear?.();
+    this._g3Heavy(true);
+    // inclinazione a 40° come richiesto; la vista ravvicinata si memorizza così la guida la mantiene
+    this._settings.pitch3d = 40;
+    if (far) this._saveSettings(); else this._setZoom3dOff(2);
+    this._g3key = null;
+    const guida = this._isGuida();
+    const pos = this._navPos() || { lat: nav.fix.lat, lon: nav.fix.lon };
+    const z = this._base3dZoom() + this._zoom3dOff();
+    const cam = this._clearCamera({
+      center: [pos.lon, pos.lat], zoom: z,
+      bearing: guida && nav.dir != null ? nav.dir : g.getBearing(),
+      pitch: 40,
+      padding: guida ? this._guidaPad() : { top: 0, bottom: 0, left: 0, right: 0 },
+    });
+    g.easeTo({ ...cam, duration: 500, easing: (t) => t, essential: true });
   }
 
   // l'utente ha spostato la mappa: smette di seguire la posizione finché non preme Ricentra
