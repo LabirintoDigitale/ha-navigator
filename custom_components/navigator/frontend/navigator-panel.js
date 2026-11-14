@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.47";
+const PANEL_VERSION = "1.9.48";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -3224,8 +3224,15 @@ class NavigatorPanel extends HTMLElement {
       this._cloudHooked = true;
       // durante un gesto dell'utente (trascinamento/zoom/rotazione/inclinazione) il ridisegno delle nuvole si ferma: si
       // riprende quando la mappa smette di muoversi, così il gesto resta fluido
-      for (const ev of ["dragstart", "zoomstart", "rotatestart", "pitchstart"]) g.on(ev, (e) => { if (e.originalEvent) { this._g3interacting = true; this._g3Heavy(false); } });
-      g.on("moveend", () => { this._g3interacting = false; this._g3Heavy(true); this._drawClouds(); });
+      // edifici/POI nascosti mentre le DITA sono sullo schermo (non in base al movimento della telecamera: "moveend" scatta
+      // anche se tieni il dito fermo un attimo, e faceva ricomparire gli edifici mentre stavi ancora toccando)
+      const m3 = this.$("map3d");
+      this._g3downs = 0;
+      m3.addEventListener("pointerdown", () => { this._g3downs++; this._g3interacting = true; this._g3Heavy(false); }, { passive: true });
+      const release = () => { this._g3downs = Math.max(0, this._g3downs - 1); if (this._g3downs === 0) { this._g3interacting = false; this._g3Heavy(true); } };
+      for (const ev of ["pointerup", "pointercancel"]) m3.addEventListener(ev, release, { passive: true });
+      // sicurezza: se un rilascio sfugge (dito fuori dallo schermo), a telecamera ferma e senza dita giù si rimettono
+      g.on("moveend", () => { if (!this._g3downs) { this._g3interacting = false; this._g3Heavy(true); } });
       g.on("render", () => { if (!this._g3interacting) this._scheduleCloudDraw(); });
       g.on("resize", () => this._drawClouds());
     }
