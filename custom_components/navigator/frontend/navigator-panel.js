@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.46";
+const PANEL_VERSION = "1.9.47";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -3243,6 +3243,11 @@ class NavigatorPanel extends HTMLElement {
   }
 
   async _updateClouds() {
+    // nuvole volumetriche 3D disattivate: pesanti sulla WebView e rese non sempre bene. Gli avvisi meteo lungo il
+    // percorso restano come icone. (Si possono riattivare in futuro.)
+    this._clouds = [];
+    this._drawClouds();
+    return; // eslint-disable-line no-unreachable
     const g = this._g3;
     if (!this._3d || !g || !this._g3ok) return;
     if (this._settings.clouds3d === false) {
@@ -3677,6 +3682,11 @@ class NavigatorPanel extends HTMLElement {
   // etichetta della targa sul retro del mezzo 3D, ricalcolata a ogni movimento con lo zoom e l'inclinazione del momento;
   // nascosta quando il retro non guarda verso la telecamera
   _placePlate3d() {
+    // targa come etichetta sovrapposta disattivata: a certe angolazioni si staccava. Resta la placchetta bianca sul
+    // retro del modellino 3D. (Per un numero sempre corretto servirebbe un modello 3D con texture: progetto a parte.)
+    this._plate3d?.remove();
+    this._plate3d = null;
+    return; // eslint-disable-line no-unreachable
     const g = this._g3;
     const at = this._plate3dAt;
     const f = this._veh3dPos();
