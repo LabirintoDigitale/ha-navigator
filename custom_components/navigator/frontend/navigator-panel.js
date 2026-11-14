@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.58";
+const PANEL_VERSION = "1.9.59";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -957,6 +957,11 @@ const STYLE = `
   .steps li .tx { flex: 1; } .steps li .d { font-size: 12px; color: var(--secondary-text-color); white-space: nowrap; }
   .steps li.toll .tx::after { content: " 💶"; }
   .steps li.legsep { background: var(--secondary-background-color, #f5f5f5); font-weight: 500; cursor: default; }
+  /* intestazioni di sezione richiudibili (freccia a sinistra; chiuse di default) */
+  h3.cbh { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 6px; }
+  h3.cbh .cbcar { display: inline-block; transition: transform .15s; font-size: 12px; opacity: .65; }
+  h3.cbh.open .cbcar { transform: rotate(90deg); }
+  h3.cbh:not(.open) + .cbbody { display: none; }
   .fav { display: flex; align-items: center; gap: 6px; padding: 5px 0; }
   .fav .nm { flex: 1; min-width: 0; cursor: pointer; } .fav .nm small { display: block; color: var(--secondary-text-color); }
   .fav .nm:hover { color: var(--primary-color); }
@@ -3741,16 +3746,11 @@ class NavigatorPanel extends HTMLElement {
     const th = (f.dir * Math.PI) / 180;
     const lat = f.lat + (at.rear * Math.cos(th) * S) / 111320;
     const lon = f.lon + (at.rear * Math.sin(th) * S) / (111320 * Math.cos((f.lat * Math.PI) / 180));
-    const mLon = 1 / (111320 * Math.cos((f.lat * Math.PI) / 180));
-    const side = (x) => [lon + x * Math.cos(th) * S * mLon, lat - (x * Math.sin(th) * S) / 111320];
-    let px = 0;
-    try { const a = g.project(side(-0.6)), b = g.project(side(0.6)); px = Math.hypot(a.x - b.x, a.y - b.y); } catch (e) { /* fuori dai dati */ }
     const mpp = (40075016.686 * Math.cos((f.lat * Math.PI) / 180)) / (512 * 2 ** g.getZoom());
-    const base = (1.2 * S) / mpp;
-    const ratio = px > 0 ? Math.max(0.8, Math.min(1.3, px / base)) : 1; // più stabile: meno "ballo" verticale
-    // larghezza AUTOMATICA (mostra sempre tutto il numero): si regola solo il corpo del testo in base alla
-    // larghezza del retro proiettata, così la targa è grande quanto il mezzo ma non taglia mai le cifre
-    const targetW = Math.max(30, Math.min(120, px || base));
+    // dimensione e alzata in base alla SCALA del mezzo (dipende SOLO dallo zoom, non dalla rotazione):
+    // così la targa non cambia e non "balla" quando ruoti la mappa a mezzo fermo. Larghezza automatica:
+    // mostra sempre tutto il numero, grande quanto il retro.
+    const targetW = Math.max(30, Math.min(120, (at.w * S) / mpp));
     const ems = 1.9 + (at.text ? at.text.length : 7) * 0.52; // 2 bandiere UE + cifre (font stretto)
     el.style.width = "";
     el.style.fontSize = `${Math.max(6, Math.min(16, targetW / ems)).toFixed(2)}px`;
@@ -3759,7 +3759,7 @@ class NavigatorPanel extends HTMLElement {
     const offscreen = pos.x < -60 || pos.y < -60 || pos.x > g.getCanvas().clientWidth + 60 || pos.y > g.getCanvas().clientHeight + 60;
     el.style.visibility = away || offscreen ? "hidden" : "";
     const pitch = (g.getPitch() * Math.PI) / 180;
-    this._plate3d.setLngLat([lon, lat]).setRotation(0).setOffset([0, -((at.z * S) / mpp) * Math.sin(pitch) * ratio]);
+    this._plate3d.setLngLat([lon, lat]).setRotation(0).setOffset([0, -((at.z * S) / mpp) * Math.sin(pitch)]);
   }
 
   // la telecamera non deve finire sotto il terreno: inclinata sta dietro e più in basso del punto guardato, e le colline
@@ -6415,7 +6415,7 @@ class NavigatorPanel extends HTMLElement {
     if (r) {
       const rt = r.routes[this._sel];
       const dest = this._points[this._points.length - 1];
-      html += `<div class="sec"><h3>Indicazioni <span class="muted" style="text-transform:none">${rt.maneuvers.length} passi</span></h3><ul class="steps">`;
+      html += `<div class="sec">${this._secHead("indicazioni", `Indicazioni <span class="muted" style="text-transform:none">${rt.maneuvers.length} passi</span>`)}<div class="cbbody"><ul class="steps">`;
       let leg = 0;
       rt.maneuvers.forEach((m, k) => {
         if (m.leg !== leg) {
@@ -6426,7 +6426,7 @@ class NavigatorPanel extends HTMLElement {
         html += `<li data-k="${k}" class="${m.toll ? "toll" : ""}"><span class="ic">${maneuverIcon(m)}</span><span class="tx">${esc(m.text)}</span>
           <span class="d">${m.length_km > 0 ? fmtKm(m.length_km) : ""}</span></li>`;
       });
-      html += `</ul></div>`;
+      html += `</ul></div></div>`;
       // apri altrove / condividi
       const pts = this._points;
       const g = new URL("https://www.google.com/maps/dir/");
@@ -6446,6 +6446,7 @@ class NavigatorPanel extends HTMLElement {
         <div class="muted" style="margin-top:6px">Le app esterne ricalcolano il percorso: le tratte tolte qui non vengono trasmesse.</div></div>`;
     }
     box.innerHTML = html;
+    this._wireCollapse(box);
     // cambiando la fonte in "Segui la posizione di", il punto blu passa subito alla nuova fonte
     this._renderPlanSel();
     box.querySelectorAll(".alt").forEach((el) => el.addEventListener("click", () => this._select(+el.dataset.i)));
@@ -6523,24 +6524,47 @@ class NavigatorPanel extends HTMLElement {
     }
   }
 
+  // intestazione di una sezione richiudibile: la freccia e il titolo; segue sempre un <div class="cbbody">…</div>.
+  // chiuse di default (l'utente apre quelle che vuole; lo stato è salvato sul dispositivo)
+  _secHead(key, title, extra = "") {
+    const open = !!this._settings.secShow?.[key];
+    return `<h3 class="cbh${open ? " open" : ""}" data-cb="${esc(key)}"><span class="cbcar">▸</span><span style="flex:1">${title}</span>${extra}</h3>`;
+  }
+
+  // attiva il mostra/nascondi sulle intestazioni richiudibili dentro un contenitore (dopo averlo ridisegnato)
+  _wireCollapse(root) {
+    root?.querySelectorAll("h3.cbh[data-cb]").forEach((h) => h.addEventListener("click", (e) => {
+      if (e.target.closest("button, a, .link")) return; // i pulsanti nell'intestazione non aprono/chiudono
+      const key = h.dataset.cb;
+      this._settings.secShow = this._settings.secShow || {};
+      const open = !this._settings.secShow[key];
+      this._settings.secShow[key] = open;
+      this._saveSettings();
+      h.classList.toggle("open", open);
+    }));
+  }
+
   _renderFavs() {
     const box = this.$("favsec");
     const favs = this._info?.favorites || [];
     const rec = this._info?.recent || [];
-    let html = `<h3>Preferiti</h3>`;
+    let html = this._secHead("preferiti", `Preferiti${favs.length ? ` <span class="muted" style="text-transform:none">${favs.length}</span>` : ""}`) + `<div class="cbbody">`;
     if (!favs.length) html += `<div class="muted">Nessun preferito: cerca un luogo o clicca sulla mappa e premi ★.</div>`;
     favs.forEach((f, k) => {
       html += `<div class="fav"><span>${esc(f.icon || "★")}</span><div class="nm" data-f="${k}">${esc(f.name)}<small>${esc(f.address || "")}</small></div>
         <button class="icon" data-go="${k}" title="Portami qui">➜</button><button class="icon" data-del="${k}" title="Elimina">🗑</button></div>`;
     });
+    html += `</div>`;
     if (rec.length) {
-      html += `<h3 style="margin-top:14px">Destinazioni recenti <button class="link" data-a="clearrec">Cancella</button></h3>`;
+      html += this._secHead("recenti", `Destinazioni recenti <span class="muted" style="text-transform:none">${rec.length}</span>`, `<button class="link" data-a="clearrec">Cancella</button>`) + `<div class="cbbody">`;
       rec.slice(0, 6).forEach((f, k) => {
         html += `<div class="fav"><span>🕘</span><div class="nm" data-r="${k}">${esc(f.name)}<small>${esc(f.address || "")}</small></div>
           <button class="icon" data-rgo="${k}" title="Portami qui">➜</button></div>`;
       });
+      html += `</div>`;
     }
     box.innerHTML = html;
+    this._wireCollapse(box);
     box.querySelectorAll("[data-f]").forEach((el) => el.addEventListener("click", () => this._showPlace(favs[+el.dataset.f], true)));
     box.querySelectorAll("[data-r]").forEach((el) => el.addEventListener("click", () => this._showPlace(rec[+el.dataset.r], true)));
     box.querySelectorAll("[data-go]").forEach((el) => el.addEventListener("click", () => this._placeAction("dest", favs[+el.dataset.go])));
