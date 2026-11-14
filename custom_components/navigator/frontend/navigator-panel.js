@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.41";
+const PANEL_VERSION = "1.9.42";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -3211,8 +3211,9 @@ class NavigatorPanel extends HTMLElement {
           "fill-extrusion-opacity": 1, "fill-extrusion-vertical-gradient": true } });
       g.on("zoom", () => { if (this._settings.veh3d !== false && this._veh3dPos()) this._drawVeh3d(); });
       // la targa è agganciata al mezzo per coordinate: la ri-misura solo quando il mezzo si ridimensiona (zoom) o la mappa si ferma
-      g.on("zoom", () => this._schedulePlate3d());
-      g.on("moveend", () => this._schedulePlate3d());
+      // la targa sta sul retro del mezzo e la prospettiva cambia a ogni fotogramma: la si riposiziona a ogni "move",
+      // ma al massimo una volta per fotogramma (requestAnimationFrame)
+      g.on("move", () => this._schedulePlate3d());
     } else {
       g.moveLayer("veh3d");
     }
@@ -3672,20 +3673,30 @@ class NavigatorPanel extends HTMLElement {
     }
     const el = this._plate3d.getElement();
     if (el.dataset.t !== at.text) { el.dataset.t = at.text; el.innerHTML = `<span class="eu">I</span><b>${esc(at.text)}</b><span class="eu"></span>`; }
-    // appiccicata al retro del mezzo per coordinate geografiche: MapLibre la muove e la inclina da sola a ogni fotogramma,
-    // senza ricalcoli in JS; qui si aggiornano solo posizione e misura, quando il mezzo si muove o si ridimensiona (zoom)
+    // appiccicata al retro del mezzo: posizione geografica sul retro, misura dalla larghezza vera del retro proiettata
+    // (con la prospettiva), alzata sulla targa verticale secondo l'inclinazione. Si ricalcola al massimo una volta per fotogramma.
     const S = this._veh3dScale(at.kind);
     const th = (f.dir * Math.PI) / 180;
     const lat = f.lat + (at.rear * Math.cos(th) * S) / 111320;
     const lon = f.lon + (at.rear * Math.sin(th) * S) / (111320 * Math.cos((f.lat * Math.PI) / 180));
-    // larghezza in pixel circa come il mezzo a questo zoom (si aggiorna solo quando il mezzo si ridimensiona)
-    const pxPerM = (512 * 2 ** g.getZoom()) / (40075016.686 * Math.cos((f.lat * Math.PI) / 180));
-    const wpx = Math.max(42, Math.min(140, 1.8 * S * pxPerM * 1.25));
+    const mLon = 1 / (111320 * Math.cos((f.lat * Math.PI) / 180));
+    const side = (x) => [lon + x * Math.cos(th) * S * mLon, lat - (x * Math.sin(th) * S) / 111320];
+    let px = 0;
+    try {
+      const a = g.project(side(-0.9)), b = g.project(side(0.9));
+      px = Math.hypot(a.x - b.x, a.y - b.y);
+    } catch (e) { /* fuori dai dati del rilievo */ }
+    const mpp = (40075016.686 * Math.cos((f.lat * Math.PI) / 180)) / (512 * 2 ** g.getZoom());
+    const ratio = px > 0 ? px / ((1.8 * S) / mpp) : 1;
+    const wpx = Math.max(40, Math.min(130, (px || (1.8 * S) / mpp) * 1.35));
     el.style.width = `${wpx}px`;
-    el.style.fontSize = `${Math.max(7, Math.min(16, wpx * 0.16))}px`;
-    // nascosta quando il retro non guarda verso la telecamera
-    el.style.visibility = Math.abs(((((f.dir - g.getBearing()) % 360) + 540) % 360) - 180) > 100 ? "hidden" : "";
-    this._plate3d.setLngLat([lon, lat]);
+    el.style.fontSize = `${Math.max(7, Math.min(17, wpx * 0.145))}px`;
+    const away = Math.abs(((((f.dir - g.getBearing()) % 360) + 540) % 360) - 180) > 100;
+    const pos = g.project([lon, lat]);
+    const off = pos.x < -50 || pos.y < -50 || pos.x > g.getCanvas().clientWidth + 50 || pos.y > g.getCanvas().clientHeight + 50;
+    el.style.visibility = away || off ? "hidden" : "";
+    const pitch = (g.getPitch() * Math.PI) / 180;
+    this._plate3d.setLngLat([lon, lat]).setOffset([0, -((at.z * S) / mpp) * Math.sin(pitch) * ratio]);
   }
 
   // la telecamera non deve finire sotto il terreno: inclinata sta dietro e più in basso del punto guardato, e le colline
