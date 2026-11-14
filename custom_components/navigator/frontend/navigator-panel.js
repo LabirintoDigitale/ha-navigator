@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.53";
+const PANEL_VERSION = "1.9.54";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1494,9 +1494,12 @@ class NavigatorPanel extends HTMLElement {
     if (brand && this._isNaviHA()) {
       brand.style.cursor = "pointer";
       brand.addEventListener("click", () => {
-        if (window.confirm("Vuoi uscire da NaviHA?")) {
-          try { window.NaviHAApp?.exit(); } catch (e) { /* ponte non disponibile */ }
-        }
+        try {
+          // app recente: dialogo nativo col titolo "Navigator" (il confirm del WebView mostrava l'URL)
+          if (window.NaviHAApp?.confirmExit) { window.NaviHAApp.confirmExit(); return; }
+          // app più vecchia: confirm del WebView come ripiego
+          if (window.NaviHAApp?.exit && window.confirm("Vuoi uscire da NaviHA?")) window.NaviHAApp.exit();
+        } catch (e) { /* ponte non disponibile */ }
       });
     }
     this._bindNavTopDrag();
@@ -3711,7 +3714,8 @@ class NavigatorPanel extends HTMLElement {
     if (!this._plate3d) {
       const el = document.createElement("div");
       el.className = "plate3d";
-      this._plate3d = new window.maplibregl.Marker({ element: el, anchor: "center" }).setLngLat([f.lon, f.lat]).addTo(g);
+      // viewport: la targa resta sempre dritta verso lo schermo e NON ruota/inclina con la mappa
+      this._plate3d = new window.maplibregl.Marker({ element: el, anchor: "center", rotationAlignment: "viewport", pitchAlignment: "viewport" }).setLngLat([f.lon, f.lat]).addTo(g);
     }
     const el = this._plate3d.getElement();
     if (el.dataset.t !== at.text) { el.dataset.t = at.text; el.innerHTML = `<span class="eu">I</span><b>${esc(at.text)}</b><span class="eu"></span>`; }
@@ -3724,11 +3728,11 @@ class NavigatorPanel extends HTMLElement {
     const mLon = 1 / (111320 * Math.cos((f.lat * Math.PI) / 180));
     const side = (x) => [lon + x * Math.cos(th) * S * mLon, lat - (x * Math.sin(th) * S) / 111320];
     let px = 0;
-    try { const a = g.project(side(-0.9)), b = g.project(side(0.9)); px = Math.hypot(a.x - b.x, a.y - b.y); } catch (e) { /* fuori dai dati */ }
+    try { const a = g.project(side(-0.6)), b = g.project(side(0.6)); px = Math.hypot(a.x - b.x, a.y - b.y); } catch (e) { /* fuori dai dati */ }
     const mpp = (40075016.686 * Math.cos((f.lat * Math.PI) / 180)) / (512 * 2 ** g.getZoom());
-    const base = (1.8 * S) / mpp;
+    const base = (1.2 * S) / mpp;
     const ratio = px > 0 ? Math.max(0.5, Math.min(2, px / base)) : 1; // prospettiva, ma senza valori estremi in primissimo piano
-    const wpx = Math.max(40, Math.min(130, (px || base) * 1.3));
+    const wpx = Math.max(34, Math.min(110, (px || base) * 1.0)); // più stretta: resta entro i lati dell'auto
     el.style.width = `${wpx}px`;
     el.style.fontSize = `${Math.max(7, Math.min(17, wpx * 0.145))}px`;
     const away = Math.abs(((((f.dir - g.getBearing()) % 360) + 540) % 360) - 180) > 100;
@@ -4027,6 +4031,22 @@ class NavigatorPanel extends HTMLElement {
     // inclinazione a 40° come richiesto; la vista ravvicinata si memorizza così la guida la mantiene
     this._settings.pitch3d = 40;
     if (far) this._saveSettings(); else this._setZoom3dOff(2);
+    // La prima volta (appena entrati in 3D) il terreno non è ancora caricato: senza la quota del
+    // centro la telecamera resta altissima e il ricentro "non parte". Si riapplica un paio di volte
+    // dopo un attimo, così appena il terreno è pronto la vista scende sul mezzo.
+    this._apply3dRecenter();
+    clearTimeout(this._rc3dT1); clearTimeout(this._rc3dT2);
+    const re = () => { if (this._3d && this._nav?.follow && !this._g3interacting && !this._g3downs) this._apply3dRecenter(); };
+    this._rc3dT1 = setTimeout(re, 500);
+    this._rc3dT2 = setTimeout(re, 1300);
+  }
+
+  // Sposta davvero la telecamera 3D sul mezzo, vicino e a 40°. Richiamata più volte dal ricentro,
+  // perché il risultato di _clearCamera dipende dal terreno, che può non essere pronto al primo giro.
+  _apply3dRecenter() {
+    const g = this._g3;
+    const nav = this._nav;
+    if (!g || !nav?.fix) return;
     this._g3key = null;
     const guida = this._isGuida();
     const pos = this._navPos() || { lat: nav.fix.lat, lon: nav.fix.lon };
@@ -4037,7 +4057,7 @@ class NavigatorPanel extends HTMLElement {
       pitch: 40,
       padding: guida ? this._guidaPad() : { top: 0, bottom: 0, left: 0, right: 0 },
     });
-    g.easeTo({ ...cam, duration: 500, easing: (t) => t, essential: true });
+    g.easeTo({ ...cam, duration: 400, easing: (t) => t, essential: true });
   }
 
   // l'utente ha spostato la mappa: smette di seguire la posizione finché non preme Ricentra
