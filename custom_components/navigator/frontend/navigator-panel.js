@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.44";
+const PANEL_VERSION = "1.9.45";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -982,7 +982,7 @@ const STYLE = `
   /* navigazione */
   select.inp { width: 100%; font: inherit; font-size: 14px; padding: 8px; border-radius: 8px; border: 1px solid var(--divider-color);
     background: var(--secondary-background-color, #f5f5f5); color: var(--primary-text-color); }
-  .navtop { position: absolute; z-index: 1001; top: 10px; left: 54px; right: 10px; display: flex; align-items: center; gap: 12px;
+  .navtop { position: absolute; z-index: 1001; top: 10px; left: 10px; right: 10px; display: flex; align-items: center; gap: 12px;
     background: #0b6e3a; color: #fff; border-radius: 12px; padding: 10px 14px; box-shadow: 0 2px 10px rgba(0,0,0,.35);
     cursor: grab; touch-action: none; } /* tieni premuto per spostarlo */
   .navtop .ic { font-size: 34px; width: 40px; text-align: center; flex: none; }
@@ -2397,7 +2397,9 @@ class NavigatorPanel extends HTMLElement {
     // posizione mostrata (mezzo e telecamera): all'avvio, finché non ci si muove davvero, sta sull'inizio della linea del
     // percorso; appena ti muovi davvero (oltre ~12 m o >2,5 m/s) passa alla posizione GPS reale
     nav.startPos = nav.startPos || [fix.lat, fix.lon];
-    if (!nav.started && (distM(nav.startPos, [fix.lat, fix.lon]) > 12 || (nav.speed || 0) > 2.5)) nav.started = true;
+    // "ti stai muovendo davvero": soprattutto dalla velocità (il rumore del GPS da fermo sposta la posizione di decine di metri,
+    // quindi la sola distanza non basta); in alternativa uno spostamento ampio dal punto di partenza
+    if (!nav.started && ((nav.speed || 0) > 2.5 || distM(nav.startPos, [fix.lat, fix.lon]) > 40)) nav.started = true;
     if (!nav.started && rt.shape.length > 1) {
       nav.disp = { lat: rt.shape[0][0], lon: rt.shape[0][1] };
       let j = 1;
