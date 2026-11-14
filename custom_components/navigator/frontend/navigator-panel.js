@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.54";
+const PANEL_VERSION = "1.9.55";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -2520,7 +2520,7 @@ class NavigatorPanel extends HTMLElement {
         if (m[0] < box[0] - pad || m[0] > box[2] + pad || m[1] < box[1] - pad || m[1] > box[3] + pad) continue;
         const pos = { lat: m[0], lon: m[1] };
         for (let k = 0; k < pts.length - 1; k++) {
-          if (segDist(pos, pts[k], pts[k + 1]).dist < 15) { mark[i] = 1; break; }
+          if (segDist(pos, pts[k], pts[k + 1]).dist < 8) { mark[i] = 1; break; } // stretto: un ponte sopra un tunnel non conta
         }
       }
     }
@@ -2572,7 +2572,8 @@ class NavigatorPanel extends HTMLElement {
   _tunnelExit() {
     clearInterval(this._tunTick);
     this._tunTick = null;
-    if (this._nav) this._nav.tun = null;
+    if (this._nav) { this._nav.tun = null; this._nav.userFrame = false; } // all'uscita si ricentra sul mezzo
+    this._g3key = null;
     this._tunnelFx();
   }
 
@@ -2615,6 +2616,9 @@ class NavigatorPanel extends HTMLElement {
     this._drawMe();
     this._applyRotation();
     if (nav.follow) this._followView();
+    // anche la telecamera 3D segue la posizione stimata: così, quando l'animazione si toglie
+    // all'uscita, la vista è già sul mezzo e non "perde" il centro
+    if (nav.follow && this._3d && this._g3 && this._g3ok) this._sync3d();
     if (!nav.rerouting) this._voiceGuide(rt, along);
     this._renderNav();
   }
@@ -3072,10 +3076,11 @@ class NavigatorPanel extends HTMLElement {
       g.on(ev, (e) => {
         if (!e.originalEvent) return;
         if (followGuida()) {
-          // muovendo il 3D non si smette subito di seguire: si tiene la TUA inquadratura finché il mezzo resta sullo schermo;
-          // se esce dall'inquadratura, _sync3dCam interrompe il tracciamento (◎ lo riprende)
-          if (this._nav) this._nav.userFrame = true;
-          if (ev !== "dragstart") { clearTimeout(this._g3dragT); this._g3gest.add(ev.replace("start", "")); }
+          // zoom, rotazione e inclinazione con le dita cambiano SOLO la distanza e l'inclinazione:
+          // il mezzo resta comunque centrato. Solo TRASCINARE (dragstart) tiene la TUA inquadratura
+          // (userFrame) finché il mezzo resta sullo schermo; se esce, _sync3dCam smette di seguire (◎ riprende).
+          if (ev === "dragstart") { if (this._nav) this._nav.userFrame = true; }
+          else { clearTimeout(this._g3dragT); this._g3gest.add(ev.replace("start", "")); }
           return;
         }
         if (ev === "zoomstart" && this._nav) this._nav.manualZoomUntil = Date.now() + 20000;
@@ -3834,7 +3839,7 @@ class NavigatorPanel extends HTMLElement {
     const H = this.$("mapwrap")?.clientHeight || 0;
     const bot = this.$("navbot");
     const barZone = bot && !bot.hidden ? bot.offsetHeight + 20 + 14 : 0; // altezza della barra (bottom:20px) + margine
-    const wantY = Math.min(H * 0.725, H - barZone); // posizione del veicolo sullo schermo (72,5% o appena sopra la barra)
+    const wantY = Math.min(H * 0.62, H - barZone); // posizione del veicolo sullo schermo (62%: più centrato, con strada davanti)
     const delta = 2 * wantY - H;                    // centro Y = (top + H − bottom) / 2 = wantY
     return { top: Math.max(0, delta), bottom: Math.max(0, -delta), left: 0, right: 0 };
   }
