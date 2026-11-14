@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.56";
+const PANEL_VERSION = "1.9.57";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -982,12 +982,16 @@ const STYLE = `
   /* navigazione */
   select.inp { width: 100%; font: inherit; font-size: 14px; padding: 8px; border-radius: 8px; border: 1px solid var(--divider-color);
     background: var(--secondary-background-color, #f5f5f5); color: var(--primary-text-color); }
-  .navtop { position: absolute; z-index: 1001; top: 10px; left: 10px; right: 10px; display: flex; align-items: center; gap: 12px;
-    background: #0b6e3a; color: #fff; border-radius: 12px; padding: 10px 14px; box-shadow: 0 2px 10px rgba(0,0,0,.35);
+  .navtop { position: absolute; z-index: 1001; top: 10px; left: 10px; right: 10px; display: flex; align-items: center; gap: 10px;
+    background: #0b6e3a; color: #fff; border-radius: 12px; padding: 7px 12px; box-shadow: 0 2px 10px rgba(0,0,0,.35);
     cursor: grab; touch-action: none; } /* tieni premuto per spostarlo */
-  .navtop .ic { font-size: 34px; width: 40px; text-align: center; flex: none; }
-  .navtop .d { font-size: 24px; font-weight: 700; white-space: nowrap; }
-  .navtop .t { font-size: 15px; line-height: 1.25; }
+  .navtop .ic { font-size: 30px; width: 34px; text-align: center; flex: none; }
+  .navtop .d { font-size: 23px; font-weight: 700; white-space: nowrap; }
+  .navtop .t { font-size: 15px; line-height: 1.2; }
+  /* in guida distanza e indicazione sulla stessa riga: banner più basso */
+  .navtop .nmain { min-width: 0; flex: 1; }
+  .navtop .nmain .d { display: inline; font-size: 20px; margin-right: 8px; }
+  .navtop .nmain .t { display: inline; }
   .navtop.wait { background: #37474f; }
   /* spostata a mano (tieni premuto): solo in alto/basso, sempre a tutta larghezza */
   .navtop.moved { top: var(--nty); }
@@ -3068,19 +3072,18 @@ class NavigatorPanel extends HTMLElement {
     this._g3ready = new Promise((ok) => { g.once("style.load", ok); g.once("load", ok); }).then(() => { this._g3ok = true; });
     g.on("error", (e) => console.debug("Navigator 3D:", e?.error?.message || e)); // riquadri mancanti: la vista va avanti
     // movimenti fatti a mano nella vista 3D: la guida smette di seguire, Leaflet si sposta nello stesso punto
-    // In guida, mentre la vista segue la posizione, zoom, rotazione e inclinazione con le dita non la fermano:
-    // cambiano la distanza (e l'inclinazione), che resta memorizzata. Solo trascinare la mappa smette di seguire.
+    // In guida il mezzo resta SEMPRE centrato: zoom, rotazione, inclinazione e anche il trascinamento con le dita
+    // non fermano il tracciamento. Sono momentanei (mentre le dita sono sullo schermo la vista è libera) e, appena
+    // si molla o al GPS successivo, la vista torna sul mezzo. Zoom e inclinazione restano memorizzati come distanza.
     this._g3gest = new Set();
     const followGuida = () => !!(this._nav?.fix && this._nav.follow && this._isGuida());
     for (const ev of ["dragstart", "zoomstart", "rotatestart", "pitchstart"]) {
       g.on(ev, (e) => {
         if (!e.originalEvent) return;
         if (followGuida()) {
-          // zoom, rotazione e inclinazione con le dita cambiano SOLO la distanza e l'inclinazione:
-          // il mezzo resta comunque centrato. Solo TRASCINARE (dragstart) tiene la TUA inquadratura
-          // (userFrame) finché il mezzo resta sullo schermo; se esce, _sync3dCam smette di seguire (◎ riprende).
-          if (ev === "dragstart") { if (this._nav) this._nav.userFrame = true; }
-          else { clearTimeout(this._g3dragT); this._g3gest.add(ev.replace("start", "")); }
+          // il trascinamento è solo un'occhiata momentanea: non toglie il tracciamento (nessun userFrame).
+          // zoom/rotazione/inclinazione memorizzano la distanza; si ricentra appena si mollano le dita.
+          if (ev !== "dragstart") { clearTimeout(this._g3dragT); this._g3gest.add(ev.replace("start", "")); }
           return;
         }
         if (ev === "zoomstart" && this._nav) this._nav.manualZoomUntil = Date.now() + 20000;
@@ -3249,7 +3252,15 @@ class NavigatorPanel extends HTMLElement {
       const m3 = this.$("map3d");
       this._g3downs = 0;
       m3.addEventListener("pointerdown", () => { this._g3downs++; this._g3interacting = true; this._g3Heavy(false); }, { passive: true });
-      const release = () => { this._g3downs = Math.max(0, this._g3downs - 1); if (this._g3downs === 0) { this._g3interacting = false; this._g3Heavy(true); } };
+      const release = () => {
+        this._g3downs = Math.max(0, this._g3downs - 1);
+        if (this._g3downs === 0) {
+          this._g3interacting = false;
+          this._g3Heavy(true);
+          // appena si mollano le dita, in guida la vista torna subito sul mezzo (sempre centrato)
+          if (this._nav?.fix && this._nav.follow && this._isGuida() && this._3d && this._g3ok) { this._g3key = null; this._sync3d(); }
+        }
+      };
       for (const ev of ["pointerup", "pointercancel"]) m3.addEventListener(ev, release, { passive: true });
       // sicurezza: se un rilascio sfugge (dito fuori dallo schermo), a telecamera ferma e senza dita giù si rimettono
       g.on("moveend", () => { if (!this._g3downs) { this._g3interacting = false; this._g3Heavy(true); } });
@@ -3883,17 +3894,6 @@ class NavigatorPanel extends HTMLElement {
       const guida = this._isGuida();
       const pad = guida ? this._guidaPad() : null;
       const pos = this._navPos(); // all'avvio l'inizio della linea, poi il GPS reale
-      // hai spostato tu la vista (userFrame): finché il mezzo resta nell'inquadratura non la si tocca; se esce, si smette di seguire
-      if (nav.userFrame && guida) {
-        const pt = g.project([pos.lon, pos.lat]);
-        const cv = g.getCanvas();
-        const inView = pt.x >= 0 && pt.y >= 0 && pt.x <= cv.clientWidth && pt.y <= cv.clientHeight;
-        if (inView) return;
-        nav.follow = false;
-        nav.userFrame = false;
-        this._renderNav();
-        return;
-      }
       const key = `${pos.lat},${pos.lon},${z},${nav.dir},${guida},${this._pitch3d()},${pad ? Math.round(pad.top) + "/" + Math.round(pad.bottom) : ""}`;
       if (key === this._g3key) return;
       this._g3key = key;
@@ -5121,7 +5121,7 @@ class NavigatorPanel extends HTMLElement {
       // corsie da tenere (dove sono mappate), entro 2 km dalla manovra
       const lanes = next.lanes && toNext < 2000
         ? `<div class="lanes" title="Corsie: quelle chiare sono quelle da tenere">${next.lanes.map((l) => `<span class="ln ${l.v ? "on" : ""}">${laneSvg(l.d)}</span>`).join("")}</div>` : "";
-      top.innerHTML = `<span class="ic">${maneuverIcon(next)}</span><div><div class="d">${toNext < 15 ? "Ora" : fmtDist(toNext)}</div><div class="t">${esc(next.text)}</div>${lanes}</div>`;
+      top.innerHTML = `<span class="ic">${maneuverIcon(next)}</span><div class="nmain"><span class="d">${toNext < 15 ? "Ora" : fmtDist(toNext)}</span><span class="t">${esc(next.text)}</span>${lanes}</div>`;
     }
     // a destra della barra: il cartello del limite di velocità e il tasto per zittire SOLO la voce delle indicazioni
     let right = "";
