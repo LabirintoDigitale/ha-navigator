@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.50";
+const PANEL_VERSION = "1.9.51";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -3995,10 +3995,12 @@ class NavigatorPanel extends HTMLElement {
     nav.follow = true;
     nav.userFrame = false; // ◎: riprende a seguire e ricentra, anche se avevi tenuto una tua inquadratura
     nav.manualZoomUntil = 0;
-    const z = this._autoZoomOn() && nav.speed != null ? zoomForSpeed(nav.speed * 3.6) : 17;
+    const z = this._autoZoomOn() && nav.speed ? zoomForSpeed(nav.speed * 3.6) : 17;
     this._map.setZoom(z, { animate: false });
     this._g3key = null;
     if (nav.fix) this._followView();
+    // in 3D ricentra DIRETTAMENTE la telecamera sul mezzo (non si affida alla sincronizzazione con la mappa 2D, che restava distante)
+    if (this._3d && this._g3 && this._g3ok) this._sync3d();
     this._renderNav();
   }
 
