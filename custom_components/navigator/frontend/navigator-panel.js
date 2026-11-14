@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.48";
+const PANEL_VERSION = "1.9.49";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -2931,6 +2931,8 @@ class NavigatorPanel extends HTMLElement {
     this._cloudCanvas = null;
     this._cloudHooked = false;
     this._g3interacting = false;
+    this._g3heavyOn = undefined; // vista 3D ricreata: edifici di nuovo visibili
+    this._g3downs = 0;
     cancelAnimationFrame(this._cloudRaf); this._cloudRaf = 0;
     cancelAnimationFrame(this._plateRaf); this._plateRaf = 0;
     this._plate3d = null;
@@ -3677,6 +3679,8 @@ class NavigatorPanel extends HTMLElement {
   // durante un gesto con le dita in 3D: nasconde edifici e punti di interesse (pesanti da ridisegnare a ogni fotogramma);
   // li rimette appena si molla, così la rotazione/lo spostamento resta fluido
   _g3Heavy(on) {
+    if (this._g3heavyOn === on) return; // già in questo stato: non ritoccare lo stile (ripeterlo durante un gesto lo blocca)
+    this._g3heavyOn = on;
     const g = this._g3;
     if (g && this._g3ok) {
       for (const id of ["bld", "bld-roof", "poi-bld"]) {
