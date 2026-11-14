@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.57";
+const PANEL_VERSION = "1.9.58";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -3747,10 +3747,13 @@ class NavigatorPanel extends HTMLElement {
     try { const a = g.project(side(-0.6)), b = g.project(side(0.6)); px = Math.hypot(a.x - b.x, a.y - b.y); } catch (e) { /* fuori dai dati */ }
     const mpp = (40075016.686 * Math.cos((f.lat * Math.PI) / 180)) / (512 * 2 ** g.getZoom());
     const base = (1.2 * S) / mpp;
-    const ratio = px > 0 ? Math.max(0.5, Math.min(2, px / base)) : 1; // prospettiva, ma senza valori estremi in primissimo piano
-    const wpx = Math.max(34, Math.min(110, (px || base) * 1.0)); // più stretta: resta entro i lati dell'auto
-    el.style.width = `${wpx}px`;
-    el.style.fontSize = `${Math.max(7, Math.min(17, wpx * 0.145))}px`;
+    const ratio = px > 0 ? Math.max(0.8, Math.min(1.3, px / base)) : 1; // più stabile: meno "ballo" verticale
+    // larghezza AUTOMATICA (mostra sempre tutto il numero): si regola solo il corpo del testo in base alla
+    // larghezza del retro proiettata, così la targa è grande quanto il mezzo ma non taglia mai le cifre
+    const targetW = Math.max(30, Math.min(120, px || base));
+    const ems = 1.9 + (at.text ? at.text.length : 7) * 0.52; // 2 bandiere UE + cifre (font stretto)
+    el.style.width = "";
+    el.style.fontSize = `${Math.max(6, Math.min(16, targetW / ems)).toFixed(2)}px`;
     const away = Math.abs(((((f.dir - g.getBearing()) % 360) + 540) % 360) - 180) > 100;
     const pos = g.project([lon, lat]);
     const offscreen = pos.x < -60 || pos.y < -60 || pos.x > g.getCanvas().clientWidth + 60 || pos.y > g.getCanvas().clientHeight + 60;
