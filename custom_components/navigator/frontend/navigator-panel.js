@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.59";
+const PANEL_VERSION = "1.9.60";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -2961,7 +2961,7 @@ class NavigatorPanel extends HTMLElement {
     this._g3downs = 0;
     cancelAnimationFrame(this._cloudRaf); this._cloudRaf = 0;
     cancelAnimationFrame(this._plateRaf); this._plateRaf = 0;
-    this._plate3d = null;
+    this._plateImgText = null; this._plateKey = this._plateSize = this._plateTy = null;
     const el = this.$("map3d");
     if (el) el.innerHTML = "";
   }
@@ -3239,13 +3239,26 @@ class NavigatorPanel extends HTMLElement {
         paint: { "fill-extrusion-color": ["get", "c"], "fill-extrusion-base": ["get", "b"], "fill-extrusion-height": ["get", "h"],
           "fill-extrusion-opacity": 1, "fill-extrusion-vertical-gradient": true } });
       g.on("zoom", () => { if (this._settings.veh3d !== false && this._veh3dPos()) this._drawVeh3d(); });
-      // la targa è agganciata al mezzo per coordinate: la ri-misura solo quando il mezzo si ridimensiona (zoom) o la mappa si ferma
-      // la targa sta sul retro del mezzo e la prospettiva cambia a ogni fotogramma: la si riposiziona a ogni "move",
-      // ma al massimo una volta per fotogramma (requestAnimationFrame)
+      // la targa (numero) è disegnata DENTRO la mappa come icona di un layer symbol: così sta nello stesso
+      // motore di rendering del mezzo e resta incollata come i rettangoli. La riposizione la fa MapLibre a ogni
+      // fotogramma; qui si aggiornano solo misura/alzata quando cambiano zoom o inclinazione.
       g.on("move", () => this._schedulePlate3d());
     } else {
       g.moveLayer("veh3d");
     }
+    // targa: numero come icona nello stile (sopra il mezzo)
+    if (!g.getSource("plate3d")) g.addSource("plate3d", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+    if (!g.getLayer("plate3d")) {
+      g.addLayer({ id: "plate3d", type: "symbol", source: "plate3d",
+        layout: { "icon-image": "plate3d-img", "icon-size": 0.5, "icon-anchor": "center",
+          "icon-rotation-alignment": "viewport", "icon-pitch-alignment": "viewport",
+          "icon-allow-overlap": true, "icon-ignore-placement": true },
+        paint: { "icon-translate": [0, 0], "icon-translate-anchor": "viewport" } });
+    } else {
+      g.moveLayer("plate3d");
+    }
+    this._plateImgText = null; // stile (ri)creato: l'immagine della targa va rigenerata
+    this._plateKey = this._plateSize = this._plateTy = null;
     this._veh3dKey = null;
     // nuvole in cielo: disegnate su un foglio sopra la mappa, in prospettiva con la telecamera
     if (!this._cloudHooked) {
@@ -3724,42 +3737,72 @@ class NavigatorPanel extends HTMLElement {
     this.$("map3d")?.classList.toggle("g3busy", !on);
   }
 
-  // etichetta della targa sul retro del mezzo 3D, ricalcolata a ogni movimento con lo zoom e l'inclinazione del momento;
-  // nascosta quando il retro non guarda verso la telecamera
+  // immagine della targa (placca bianca + banda UE blu + numero) disegnata su tela, usata come icona del layer
+  _plate3dImage(text) {
+    const pr = 3; // risoluzione (pixelRatio)
+    const H = 22 * pr;
+    const m = document.createElement("canvas").getContext("2d");
+    const numFont = (h) => `bold ${Math.round(h * 0.6)}px "Arial Narrow", Arial, sans-serif`;
+    m.font = numFont(H);
+    const euW = Math.round(H * 0.42);
+    const pad = Math.round(H * 0.16);
+    const numW = Math.ceil(m.measureText(text).width);
+    const W = euW + numW + pad * 2;
+    const c = document.createElement("canvas"); c.width = W; c.height = H;
+    const x = c.getContext("2d");
+    const rad = Math.round(H * 0.16);
+    const rr = (xx, yy, ww, hh, r) => { x.beginPath(); x.moveTo(xx + r, yy); x.arcTo(xx + ww, yy, xx + ww, yy + hh, r); x.arcTo(xx + ww, yy + hh, xx, yy + hh, r); x.arcTo(xx, yy + hh, xx, yy, r); x.arcTo(xx, yy, xx + ww, yy, r); x.closePath(); };
+    const bd = Math.max(1, Math.round(pr * 0.8));
+    x.fillStyle = "#2b2b2b"; rr(0, 0, W, H, rad); x.fill();
+    x.fillStyle = "#fbfbf8"; rr(bd, bd, W - 2 * bd, H - 2 * bd, Math.max(1, rad - bd)); x.fill();
+    x.save(); rr(bd, bd, euW, H - 2 * bd, Math.max(1, rad - bd)); x.clip(); x.fillStyle = "#1f3fa8"; x.fillRect(bd, bd, euW, H); x.restore();
+    x.fillStyle = "#fff"; x.font = `bold ${Math.round(H * 0.28)}px Arial`; x.textAlign = "center"; x.textBaseline = "alphabetic";
+    x.fillText("I", bd + euW / 2, H - Math.round(H * 0.2));
+    x.fillStyle = "#111"; x.font = numFont(H); x.textAlign = "center"; x.textBaseline = "middle";
+    x.fillText(text, euW + pad + numW / 2, H / 2 + Math.round(pr));
+    return { data: x.getImageData(0, 0, W, H), natW: W / pr, pixelRatio: pr };
+  }
+
+  // targa (numero) come icona del layer "plate3d": la riposizione la fa MapLibre nello stesso fotogramma del mezzo
+  // (resta incollata come i rettangoli). Qui si aggiorna il punto geografico del retro e, solo se cambiano, misura e alzata.
   _placePlate3d() {
     const g = this._g3;
     const at = this._plate3dAt;
     const f = this._veh3dPos();
-    const show = !!(g && at && f && this._3d && this._settings.veh3d !== false);
-    if (!show) { this._plate3d?.remove(); this._plate3d = null; return; }
-    if (!this._plate3d) {
-      const el = document.createElement("div");
-      el.className = "plate3d";
-      // viewport: la targa resta sempre dritta verso lo schermo e NON ruota/inclina con la mappa
-      this._plate3d = new window.maplibregl.Marker({ element: el, anchor: "center", rotationAlignment: "viewport", pitchAlignment: "viewport" }).setLngLat([f.lon, f.lat]).addTo(g);
+    const src = g?.getSource?.("plate3d");
+    if (!src) return;
+    const show = !!(at && f && this._3d && this._g3ok && this._settings.veh3d !== false);
+    if (!show) { if (this._plateKey !== "") { this._plateKey = ""; src.setData({ type: "FeatureCollection", features: [] }); } return; }
+    // immagine: una volta per numero (e dopo ogni ricreazione dello stile)
+    if (this._plateImgText !== at.text || !g.hasImage("plate3d-img")) {
+      try {
+        const img = this._plate3dImage(at.text);
+        if (g.hasImage("plate3d-img")) g.removeImage("plate3d-img");
+        g.addImage("plate3d-img", img.data, { pixelRatio: img.pixelRatio });
+        this._plateImgText = at.text; this._plateImgNatW = img.natW;
+        this._plateSize = null; // forza il ricalcolo della misura
+      } catch (e) { /* stile in ricostruzione */ }
     }
-    const el = this._plate3d.getElement();
-    if (el.dataset.t !== at.text) { el.dataset.t = at.text; el.innerHTML = `<span class="eu">I</span><b>${esc(at.text)}</b><span class="eu"></span>`; }
-    // sul retro verticale del mezzo: posizione geografica del retro, misura dalla larghezza del retro proiettata (prospettiva),
-    // alzata sulla targa secondo l'inclinazione; tenuta vicino al mezzo anche in primissimo piano
     const S = this._veh3dScale(at.kind);
     const th = (f.dir * Math.PI) / 180;
     const lat = f.lat + (at.rear * Math.cos(th) * S) / 111320;
     const lon = f.lon + (at.rear * Math.sin(th) * S) / (111320 * Math.cos((f.lat * Math.PI) / 180));
     const mpp = (40075016.686 * Math.cos((f.lat * Math.PI) / 180)) / (512 * 2 ** g.getZoom());
-    // dimensione e alzata in base alla SCALA del mezzo (dipende SOLO dallo zoom, non dalla rotazione):
-    // così la targa non cambia e non "balla" quando ruoti la mappa a mezzo fermo. Larghezza automatica:
-    // mostra sempre tutto il numero, grande quanto il retro.
-    const targetW = Math.max(30, Math.min(120, (at.w * S) / mpp));
-    const ems = 1.9 + (at.text ? at.text.length : 7) * 0.52; // 2 bandiere UE + cifre (font stretto)
-    el.style.width = "";
-    el.style.fontSize = `${Math.max(6, Math.min(16, targetW / ems)).toFixed(2)}px`;
+    // dimensione in base alla SCALA del mezzo (solo zoom, non la rotazione): non "balla" ruotando a mezzo fermo
+    const targetW = Math.max(30, Math.min(130, (at.w * S) / mpp));
+    const size = targetW / (this._plateImgNatW || targetW);
+    if (this._plateSize !== size) { this._plateSize = size; try { g.setLayoutProperty("plate3d", "icon-size", size); } catch (e) { /* */ } }
+    // alzata sul retro verticale secondo l'inclinazione (in pixel schermo)
+    const ty = -Math.round(((at.z * S) / mpp) * Math.sin((g.getPitch() * Math.PI) / 180));
+    if (this._plateTy !== ty) { this._plateTy = ty; try { g.setPaintProperty("plate3d", "icon-translate", [0, ty]); } catch (e) { /* */ } }
+    // nascosta quando il retro è girato via dalla telecamera; altrimenti punto geografico del retro del mezzo
     const away = Math.abs(((((f.dir - g.getBearing()) % 360) + 540) % 360) - 180) > 100;
-    const pos = g.project([lon, lat]);
-    const offscreen = pos.x < -60 || pos.y < -60 || pos.x > g.getCanvas().clientWidth + 60 || pos.y > g.getCanvas().clientHeight + 60;
-    el.style.visibility = away || offscreen ? "hidden" : "";
-    const pitch = (g.getPitch() * Math.PI) / 180;
-    this._plate3d.setLngLat([lon, lat]).setRotation(0).setOffset([0, -((at.z * S) / mpp) * Math.sin(pitch)]);
+    const key = away ? "" : `${lon.toFixed(7)},${lat.toFixed(7)}`;
+    if (key !== this._plateKey) {
+      this._plateKey = key;
+      src.setData(away ? { type: "FeatureCollection", features: [] }
+        : { type: "FeatureCollection", features: [{ type: "Feature", geometry: { type: "Point", coordinates: [lon, lat] }, properties: {} }] });
+    }
   }
 
   // la telecamera non deve finire sotto il terreno: inclinata sta dietro e più in basso del punto guardato, e le colline
