@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.62";
+const PANEL_VERSION = "1.9.63";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -3760,7 +3760,6 @@ class NavigatorPanel extends HTMLElement {
         self._carCam.projectionMatrix = base.multiply(l);
         const r = self._carRenderer;
         r.resetState();
-        r.clearDepth(); // il mezzo si occlude da solo correttamente e resta sopra la mappa
         r.render(self._carScene, self._carCam);
         // mantiene il disegno vivo mentre si guida (e ancora un attimo dopo l'ultimo movimento); da fermi si spegne
         if (self._g3.isMoving?.() || Date.now() - (c.lastMove || 0) < 2500) self._g3.triggerRepaint();
@@ -3804,7 +3803,8 @@ class NavigatorPanel extends HTMLElement {
     const dim = { suv: [4.7, 2.0, 1.78], jeep: [4.4, 1.95, 1.9], camper: [6.0, 2.25, 2.75], furgone: [5.2, 2.05, 2.4],
       auto: [4.4, 1.82, 1.5], car: [4.4, 1.82, 1.5] }[kind] || [4.5, 1.85, 1.6];
     const [L, W, H] = dim;
-    const lam = (c, o = {}) => new THREE.MeshLambertMaterial({ color: new THREE.Color(c), side: THREE.DoubleSide, ...o });
+    // depthTest/Write off: il mezzo-segnaposto si disegna sempre sopra la mappa (evita il "clipping" che a certi zoom lo faceva sparire)
+    const lam = (c, o = {}) => new THREE.MeshLambertMaterial({ color: new THREE.Color(c), side: THREE.DoubleSide, depthTest: false, depthWrite: false, ...o });
     const body = lam(color || "#173a7a");
     const addBox = (w, h, l, m, y, z = 0) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, l), m); b.position.set(0, y, z); grp.add(b); return b; };
     const wheelR = Math.min(0.38, H * 0.25), floor = wheelR * 0.95;
@@ -3832,7 +3832,7 @@ class NavigatorPanel extends HTMLElement {
     if (plate && !["moto", "scooter", "bici", "piedi"].includes(kind)) {
       const tex = this._plateTexture(plate);
       const pw = Math.min(W * 0.46, 0.52), ph = pw * 0.2;
-      const pm = new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide });
+      const pm = new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide, depthTest: false, depthWrite: false });
       const pl = new THREE.Mesh(new THREE.PlaneGeometry(pw, ph), pm);
       pl.position.set(0, floor + H * 0.22, -L * 0.5 - 0.015);
       pl.rotation.y = Math.PI; grp.add(pl);
@@ -3859,6 +3859,9 @@ class NavigatorPanel extends HTMLElement {
     }
     c.lon = f.lon; c.lat = f.lat;
     c.dirRad = -((f.dir || 0) * Math.PI) / 180; // verso di marcia
+    // dimensione ~costante sullo schermo: a zoom più basso (guida) il modello si ingrandisce, altrimenti sparirebbe
+    const z = this._g3.getZoom();
+    c.meters = Math.max(0.6, Math.min(16, 2 * Math.pow(2, 18.5 - z)));
     let elev = 0; try { elev = this._g3.queryTerrainElevation([f.lon, f.lat]) || 0; } catch (e) { /* quota non pronta */ }
     c.elev = elev;
     c.visible = true;
