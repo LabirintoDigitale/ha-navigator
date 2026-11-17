@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.64";
+const PANEL_VERSION = "1.9.65";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1196,14 +1196,23 @@ const STYLE = `
   .main.guida #map3d .maplibregl-ctrl-bottom-right { bottom: 96px; }
   button.b3d { font-weight: 700; font-size: 13px; }
   /* inclinazione della vista 3D: dall'alto fino a quasi la telecamera dell'auto */
-  .pitchctl { position: absolute; z-index: 1002; right: 10px; top: 56px; display: flex; flex-direction: column; align-items: center;
-    background: rgba(32,33,36,.85); border-radius: 10px; padding: 3px; box-shadow: 0 1px 5px rgba(0,0,0,.35); color: #fff; }
+  /* comando a croce: ▲▼ inclinazione (su/giù) e −/+ zoom (sinistra/destra) attorno ai gradi; in 2D solo −/+ */
+  .pitchctl { position: absolute; z-index: 1002; right: 10px; top: 56px; display: grid;
+    grid-template-columns: 40px 40px 40px; grid-template-rows: 36px 36px 36px; place-items: center;
+    background: rgba(32,33,36,.85); border-radius: 12px; padding: 2px; box-shadow: 0 1px 5px rgba(0,0,0,.35); color: #fff; }
   .pitchctl[hidden] { display: none; }
-  .pitchctl button { width: 40px; height: 36px; padding: 0; border: none; background: transparent; color: #fff; }
+  .pitchctl .up { grid-area: 1 / 2; } .pitchctl .left { grid-area: 2 / 1; }
+  .pitchctl .mid { grid-area: 2 / 2; } .pitchctl .right { grid-area: 2 / 3; }
+  .pitchctl .down { grid-area: 3 / 2; }
+  .pitchctl button { width: 40px; height: 36px; padding: 0; border: none; background: transparent; color: #fff; font: 700 22px sans-serif; }
   .pitchctl button:disabled { opacity: .35; }
   .pitchctl svg { width: 22px; height: 22px; display: block; margin: auto; fill: none; stroke: currentColor; stroke-width: 2.6;
     stroke-linecap: round; stroke-linejoin: round; }
   .pitchctl span { font: 600 12px sans-serif; padding: 1px 0; }
+  /* mappa piatta (2D): niente inclinazione, solo i due zoom affiancati */
+  .pitchctl.twod { grid-template-columns: 40px 40px; grid-template-rows: 36px; }
+  .pitchctl.twod .up, .pitchctl.twod .down, .pitchctl.twod .mid { display: none; }
+  .pitchctl.twod .left { grid-area: 1 / 1; } .pitchctl.twod .right { grid-area: 1 / 2; }
   /* galleria: animazione stilizzata di un tunnel che si percorre (archi che vengono incontro, luci, strada) */
   .tunfx { position: absolute; inset: 0; z-index: 960; pointer-events: none; overflow: hidden; opacity: 0; transition: opacity .6s;
     background: radial-gradient(ellipse at 50% 45%, #4a3f2e 0%, #1d1913 40%, #060606 100%); --tfd: 2.4s; }
@@ -1434,9 +1443,11 @@ class NavigatorPanel extends HTMLElement {
           <div class="tunfx" id="tunfx" hidden><div class="tf-road"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -0 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -1 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -2 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -3 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -4 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -5 / 6)"></div>
             <div class="tf-label"><span>🚇 In galleria</span><small id="tunrem"></small></div></div>
           <div class="pitchctl" id="pitchctl" hidden>
-            <button data-p="-15" title="Più dall'alto"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></button>
-            <span id="pitchval"></span>
-            <button data-p="15" title="Più bassa, come dall'auto"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+            <button class="up" data-p="-15" title="Più dall'alto"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></button>
+            <button class="left" data-z="-1" title="Riduci">−</button>
+            <span class="mid" id="pitchval"></span>
+            <button class="right" data-z="1" title="Ingrandisci">+</button>
+            <button class="down" data-p="15" title="Più bassa, come dall'auto"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
           </div>
           <div class="ctl tr" id="ctltr"><select id="layer"></select></div>
           <div class="navtop" id="navtop" hidden></div>
@@ -1532,6 +1543,7 @@ class NavigatorPanel extends HTMLElement {
     $("fullbtn").addEventListener("click", () => this._toggleFull());
     $("b3dbtn").addEventListener("click", () => this._toggle3d());
     $("pitchctl").querySelectorAll("[data-p]").forEach((b) => b.addEventListener("click", () => this._setPitch3d(+b.dataset.p)));
+    $("pitchctl").querySelectorAll("[data-z]").forEach((b) => b.addEventListener("click", () => this._zoomStep(+b.dataset.z)));
     this._map.on("moveend zoomend", () => this._sync3d());
     if (this._settings.view3d) setTimeout(() => this._toggle3d(true), 0);
     document.addEventListener("fullscreenchange", () => {
@@ -2308,6 +2320,7 @@ class NavigatorPanel extends HTMLElement {
     this._applyView();
     this._renderNav();
     this._updateAwake(); // schermo acceso durante la guida
+    if (!this._full) this._toggleFull(true); // schermo intero automatico alla partenza (il tasto Parti è un gesto dell'utente)
     if (source !== "gps") this._phoneGuida(true);
     if (source === "gps") {
       this._nav.watch = window.navigator.geolocation.watchPosition(
@@ -2347,6 +2360,7 @@ class NavigatorPanel extends HTMLElement {
     this._carAnim = null;
     this._carDisp = null;
     this._closeNearby();
+    if (this._full) this._toggleFull(false); // esce dallo schermo intero al Ferma
     for (const id of ["navtop", "navbot", "navpop"]) this.$(id).hidden = true;
     this._placePitchCtl();
     this.$("ctltr").hidden = false;
@@ -3020,10 +3034,13 @@ class NavigatorPanel extends HTMLElement {
   _placePitchCtl(pitch) {
     const el = this.$("pitchctl");
     if (!el) return;
-    el.hidden = !this._3d || !this._g3;
+    // in guida il comando c'è sempre (zoom −/+); in 3D mostra anche l'inclinazione (croce), in 2D solo i due zoom
+    el.hidden = !(this._isGuida() && this._nav);
     if (el.hidden) return;
+    el.classList.toggle("twod", !this._3d);
     const top = this.$("navtop");
     el.style.top = top && !top.hidden ? `${top.offsetTop + top.offsetHeight + 8}px` : "56px";
+    if (!this._3d || !this._g3) return;
     const p = Math.round(pitch ?? this._g3.getPitch());
     this.$("pitchval").textContent = `${p}°`;
     el.querySelector('[data-p="-15"]').disabled = p <= 0;
@@ -3831,10 +3848,10 @@ class NavigatorPanel extends HTMLElement {
     const plate = v?.type && v?.plate ? v.plate : "";
     if (plate && !["moto", "scooter", "bici", "piedi"].includes(kind)) {
       const tex = this._plateTexture(plate);
-      const pw = Math.min(W * 0.46, 0.52), ph = pw * 0.2;
+      const pw = W * 0.9, ph = pw * 0.22; // targa larga quasi quanto l'auto
       const pm = new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide, depthTest: false, depthWrite: false });
       const pl = new THREE.Mesh(new THREE.PlaneGeometry(pw, ph), pm);
-      pl.position.set(0, floor + H * 0.22, -L * 0.5 - 0.015);
+      pl.position.set(0, floor + H * 0.26, -L * 0.5 - 0.02);
       pl.rotation.y = Math.PI; grp.add(pl);
       grp.userData.plateTex = tex;
     }
@@ -3858,7 +3875,7 @@ class NavigatorPanel extends HTMLElement {
       this._carScene.add(c.mesh);
     }
     c.lon = f.lon; c.lat = f.lat;
-    c.dirRad = -((f.dir || 0) * Math.PI) / 180; // verso di marcia
+    c.dirRad = Math.PI - ((f.dir || 0) * Math.PI) / 180; // verso di marcia (modello girato di 180°: si vede il retro con la targa)
     // dimensione ~costante sullo schermo: a zoom più basso (guida) il modello si ingrandisce, altrimenti sparirebbe
     const z = this._g3.getZoom();
     c.meters = Math.max(0.6, Math.min(16, 2 * Math.pow(2, 18.5 - z)));
@@ -5294,7 +5311,7 @@ class NavigatorPanel extends HTMLElement {
     const bot = this.$("navbot");
     top.hidden = bot.hidden = false;
     this._tunnelFx();
-    if (this._3d) requestAnimationFrame(() => this._placePitchCtl(this._nav?.follow && this._isGuida() ? this._pitch3d() : undefined));
+    requestAnimationFrame(() => this._placePitchCtl(this._nav?.follow && this._isGuida() ? this._pitch3d() : undefined));
     const rt = this._geom(this._result.routes[this._sel]);
     const total = rt._cum[rt._cum.length - 1];
     const ms = rt.maneuvers;
@@ -5362,44 +5379,45 @@ class NavigatorPanel extends HTMLElement {
   // barra in basso della guida: tempi e, sotto, zoom, centra, tipo di mappa ed Esci
   _buildNavBar() {
     const bot = this.$("navbot");
-    const opts = Object.entries(LAYERS).map(([k, v]) => `<option value="${k}" ${k === this._layer ? "selected" : ""}>${esc(v[0])}</option>`).join("");
     bot.innerHTML = `<div class="arr" hidden></div><div class="info"></div>
       <div class="tools">
-        <button data-n="out" title="Riduci">−</button>
-        <button data-n="in" title="Ingrandisci">+</button>
         <button data-n="center" title="Centra sulla tua posizione">◎</button>
         <button data-n="near" title="Distributori, parcheggi e autovelox">🔎</button>
         <button data-n="3d" class="b3d" title="Vista 3D con rilievo ed edifici">3D</button>
-        <button data-n="full" title="Schermo intero">${FS_ON}</button>
-        <select data-n="layer" title="Tipo di mappa">${opts}</select>
+        <button data-n="layer" class="layerbtn" title="Cambia tipo di mappa">${esc(LAYERS[this._layer][0].split(" ")[0])}</button>
         <button class="stop" data-n="stop" title="Ferma la navigazione">■ Ferma</button>
       </div>`;
-    // + e −: in 3D, mentre la vista segue, cambiano la distanza memorizzata; altrimenti lo zoom come sempre
-    const zoomBtn = (d) => {
-      if (this._3d && this._nav?.follow && this._isGuida()) {
-        this._setZoom3dOff(this._zoom3dOff() + d * 0.5);
-        this._g3key = null;
-        this._sync3d();
-        return;
-      }
-      if (d > 0) this._map.zoomIn(); else this._map.zoomOut();
-      this._afterZoom();
-    };
-    bot.querySelector('[data-n="out"]').addEventListener("click", () => zoomBtn(-1));
-    bot.querySelector('[data-n="in"]').addEventListener("click", () => zoomBtn(1));
     bot.querySelector('[data-n="center"]').addEventListener("click", () => this._recenter());
-    bot.querySelector('[data-n="layer"]').addEventListener("change", (e) => {
-      this._setLayer(e.target.value);
-      this.$("layer").value = e.target.value;
-      this.$("gattr").innerHTML = LAYERS[this._layer][3];
-      this._saveState();
-    });
+    bot.querySelector('[data-n="layer"]').addEventListener("click", () => this._cycleLayer());
     bot.querySelector('[data-n="near"]').addEventListener("click", () => this._openNearby(this._nearCat || "fuel"));
     bot.querySelector('[data-n="stop"]').addEventListener("click", () => this._stopNav());
-    bot.querySelector('[data-n="full"]').addEventListener("click", () => this._toggleFull());
     bot.querySelector('[data-n="3d"]').addEventListener("click", () => this._toggle3d());
-    this._syncFullBtns();
     this._sync3dBtns();
+  }
+
+  // zoom con i tasti −/+ del comando a croce: in 3D (vista che segue) cambia la distanza memorizzata, altrimenti lo zoom
+  _zoomStep(d) {
+    if (this._3d && this._nav?.follow && this._isGuida()) {
+      this._setZoom3dOff(this._zoom3dOff() + d * 0.5);
+      this._g3key = null;
+      this._sync3d();
+      return;
+    }
+    if (d > 0) this._map.zoomIn(); else this._map.zoomOut();
+    this._afterZoom();
+  }
+
+  // un solo pulsante che cicla i tipi di mappa (niente più elenco a tendina)
+  _cycleLayer() {
+    const keys = Object.keys(LAYERS);
+    const next = keys[(keys.indexOf(this._layer) + 1) % keys.length];
+    this._setLayer(next);
+    const sel = this.$("layer"); if (sel) sel.value = next;
+    const btn = this.$("navbot")?.querySelector('[data-n="layer"]');
+    if (btn) btn.textContent = LAYERS[next][0].split(" ")[0];
+    if (this.$("gattr")) this.$("gattr").innerHTML = LAYERS[next][3];
+    this._msg(LAYERS[next][0]);
+    this._saveState();
   }
 
   // ----------------------------------------------------------------- calcolo del percorso
