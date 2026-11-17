@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.68";
+const PANEL_VERSION = "1.9.69";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -3515,14 +3515,55 @@ class NavigatorPanel extends HTMLElement {
       }
     }
     items.sort((m, n) => n[0] - m[0]); // prima le lontane
-    // vista dall'alto o poco inclinata: niente nuvole, coprirebbero la mappa (compaiono da 40° a 55°)
-    const top = 0.92 * Math.min(1, Math.max(0, (g.getPitch() - 40) / 15));
-    if (top <= 0) return;
-    for (const [, sx, sy, rad, a, rain] of items) {
-      x.globalAlpha = a * top * 0.6;
+    // vista dall'alto o poco inclinata: niente nuvole, coprirebbero la mappa (compaiono da ~33° a ~50°)
+    const top = Math.min(1, Math.max(0, (g.getPitch() - 33) / 16));
+    if (top > 0) for (const [, sx, sy, rad, a, rain] of items) {
+      x.globalAlpha = a * top * 0.7;
       x.drawImage(rain ? rainS : shadow, sx - rad, sy - rad * 0.8, rad * 2, rad * 2); // ombra sotto
-      x.globalAlpha = a * top;
+      x.globalAlpha = Math.min(1, a * top * 1.25);
       x.drawImage(rain ? rainL : light, sx - rad, sy - rad * 1.1, rad * 2, rad * 2);
+    }
+    x.globalAlpha = 1;
+    // pioggia: se nella zona ci sono nuvole con pioggia, gocce che cadono sopra la vista (solo in 3D)
+    const rainN = this._clouds.filter((c) => c.rain).length;
+    const intensity = Math.min(1, rainN / Math.max(1, this._clouds.length));
+    if (intensity > 0.12 && g.getPitch() > 25) {
+      this._drawRain(x, W, H, intensity);
+      g.triggerRepaint(); // mantiene viva l'animazione anche da fermi
+    } else {
+      this._rainDrops = null;
+    }
+  }
+
+  // pioggia animata su un foglio sopra la mappa (2D): tante gocce-striscia che cadono con un po' di vento
+  _drawRain(x, W, H, intensity) {
+    const now = performance.now();
+    let dt = now - (this._rainT || now); this._rainT = now;
+    dt = Math.min(60, dt);
+    const night = this._nightOn;
+    const n = Math.round(90 + 320 * intensity); // più fitta con pioggia forte
+    const wind = 0.12; // inclinazione/vento (px per px di caduta)
+    if (!this._rainDrops || this._rainDrops.length !== n) {
+      this._rainDrops = Array.from({ length: n }, () => ({
+        x: Math.random() * (W + 120) - 60, y: Math.random() * H,
+        len: 14 + Math.random() * 20, spd: 1.1 + Math.random() * 1.0, a: 0.45 + Math.random() * 0.45,
+      }));
+    }
+    x.lineWidth = 2;
+    x.lineCap = "round";
+    x.strokeStyle = night ? "rgba(170,190,225," : "rgba(225,238,255,";
+    for (const d of this._rainDrops) {
+      d.y += d.spd * dt;
+      d.x += d.spd * dt * wind;
+      if (d.y > H + 20) { d.y = -20; d.x = Math.random() * (W + 120) - 60; }
+      if (d.x > W + 30) d.x -= W + 120;
+      // un filo più trasparente in cima (lascia leggibile il pannello)
+      const fade = Math.min(1, Math.max(0.35, (d.y / H) * 1.3));
+      x.globalAlpha = Math.min(1, d.a * fade * (0.7 + 0.3 * intensity));
+      x.beginPath();
+      x.moveTo(d.x, d.y);
+      x.lineTo(d.x - d.len * wind, d.y - d.len);
+      x.stroke();
     }
     x.globalAlpha = 1;
   }
