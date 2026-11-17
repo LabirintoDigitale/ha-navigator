@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.66";
+const PANEL_VERSION = "1.9.67";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -3777,6 +3777,9 @@ class NavigatorPanel extends HTMLElement {
         self._carCam.projectionMatrix = base.multiply(l);
         const r = self._carRenderer;
         r.resetState();
+        // buffer di profondità pulito solo per il mezzo: le sue parti si occludono fra loro (niente trasparenze)
+        // ma resta sopra la mappa senza il "clipping" che a certi zoom lo faceva sparire
+        gl.depthMask(true); gl.clearDepth(1.0); gl.clear(gl.DEPTH_BUFFER_BIT);
         r.render(self._carScene, self._carCam);
         // mantiene il disegno vivo mentre si guida (e ancora un attimo dopo l'ultimo movimento); da fermi si spegne
         if (self._g3.isMoving?.() || Date.now() - (c.lastMove || 0) < 2500) self._g3.triggerRepaint();
@@ -3818,8 +3821,8 @@ class NavigatorPanel extends HTMLElement {
     const dim = { suv: [4.7, 2.0, 1.78], jeep: [4.4, 1.95, 1.9], camper: [6.0, 2.25, 2.75], furgone: [5.2, 2.05, 2.4],
       auto: [4.4, 1.82, 1.5], car: [4.4, 1.82, 1.5] }[kind] || [4.5, 1.85, 1.6];
     const [L, W, H] = dim;
-    // depthTest/Write off: il mezzo-segnaposto si disegna sempre sopra la mappa (evita il "clipping" che a certi zoom lo faceva sparire)
-    const lam = (c, o = {}) => new THREE.MeshLambertMaterial({ color: new THREE.Color(c), side: THREE.DoubleSide, depthTest: false, depthWrite: false, ...o });
+    // depth attivo per l'occlusione tra le parti del mezzo (niente trasparenze); il buffer si azzera prima di disegnarlo
+    const lam = (c, o = {}) => new THREE.MeshLambertMaterial({ color: new THREE.Color(c), side: THREE.DoubleSide, ...o });
     const body = lam(color || "#173a7a");
     const addBox = (w, h, l, m, y, z = 0) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, l), m); b.position.set(0, y, z); grp.add(b); return b; };
     const wheelR = Math.min(0.38, H * 0.25), floor = wheelR * 0.95;
@@ -3847,7 +3850,7 @@ class NavigatorPanel extends HTMLElement {
     if (plate && !["moto", "scooter", "bici", "piedi"].includes(kind)) {
       const tex = this._plateTexture(plate);
       const pw = W * 0.9, ph = pw * 0.22; // targa larga quasi quanto l'auto
-      const pm = new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide, depthTest: false, depthWrite: false });
+      const pm = new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide, depthWrite: false });
       const pl = new THREE.Mesh(new THREE.PlaneGeometry(pw, ph), pm);
       pl.position.set(0, floor + H * 0.26, -L * 0.5 - 0.02);
       pl.rotation.y = Math.PI; grp.add(pl);
