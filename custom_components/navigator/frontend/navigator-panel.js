@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.63";
+const PANEL_VERSION = "1.9.64";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -3862,8 +3862,9 @@ class NavigatorPanel extends HTMLElement {
     // dimensione ~costante sullo schermo: a zoom più basso (guida) il modello si ingrandisce, altrimenti sparirebbe
     const z = this._g3.getZoom();
     c.meters = Math.max(0.6, Math.min(16, 2 * Math.pow(2, 18.5 - z)));
-    let elev = 0; try { elev = this._g3.queryTerrainElevation([f.lon, f.lat]) || 0; } catch (e) { /* quota non pronta */ }
-    c.elev = elev;
+    // quota 0: la matrice mercatore tiene GIÀ conto del rilievo del terreno. Aggiungere la quota del terreno
+    // faceva galleggiare il mezzo in aria (altezza errata). A terra = quota 0.
+    c.elev = 0;
     c.visible = true;
     c.lastMove = Date.now();
     this._g3?.triggerRepaint?.();
