@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.65";
+const PANEL_VERSION = "1.9.66";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -3806,8 +3806,6 @@ class NavigatorPanel extends HTMLElement {
     x.fillStyle = "#111"; x.font = `bold ${Math.round(H * 0.62)}px "Arial Narrow", Arial, sans-serif`; x.textAlign = "center"; x.textBaseline = "middle";
     x.fillText(text, euW + (W - euW) / 2, H / 2 + Math.round(H * 0.03));
     const tex = new THREE.CanvasTexture(c);
-    // il piano della targa è ruotato di 180° (guarda all'indietro): si de-specchia la texture così il numero si legge dritto
-    tex.wrapS = THREE.RepeatWrapping; tex.repeat.x = -1; tex.offset.x = 1;
     tex.anisotropy = 8; tex.needsUpdate = true;
     return tex;
   }
@@ -3878,7 +3876,7 @@ class NavigatorPanel extends HTMLElement {
     c.dirRad = Math.PI - ((f.dir || 0) * Math.PI) / 180; // verso di marcia (modello girato di 180°: si vede il retro con la targa)
     // dimensione ~costante sullo schermo: a zoom più basso (guida) il modello si ingrandisce, altrimenti sparirebbe
     const z = this._g3.getZoom();
-    c.meters = Math.max(0.6, Math.min(16, 2 * Math.pow(2, 18.5 - z)));
+    c.meters = Math.max(1, Math.min(28, 4 * Math.pow(2, 18.5 - z)));
     // quota 0: la matrice mercatore tiene GIÀ conto del rilievo del terreno. Aggiungere la quota del terreno
     // faceva galleggiare il mezzo in aria (altezza errata). A terra = quota 0.
     c.elev = 0;
