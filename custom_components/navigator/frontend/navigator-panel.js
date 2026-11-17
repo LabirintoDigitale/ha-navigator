@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.67";
+const PANEL_VERSION = "1.9.68";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -661,19 +661,36 @@ function fmtAge(ms) {
 
 const STALE_MS = 10 * 60000; // posizione di una persona più vecchia di così: si avvisa prima di partire
 
+// icone meteo DISEGNATE (SVG): sempre uguali su ogni dispositivo, al posto delle emoji (che a volte diventano un quadrato)
+function wxIcon(kind) {
+  const cloud = '<path d="M7.3 17.3a3.5 3.5 0 0 1-.3-7 5 5 0 0 1 9.6-1.2 3.3 3.3 0 0 1-.3 6.6z" fill="#e6ebf0" stroke="#95a2af" stroke-width="1"/>';
+  const wrap = (inner) => `<svg class="wxs" viewBox="0 0 24 24">${inner}</svg>`;
+  const cl = (inner) => wrap(cloud + inner);
+  switch (kind) {
+    case "storm": return cl('<path d="M12.2 13.5l-3 4.5h2.3l-1.1 4 3.9-5.6h-2.5l1.6-2.9z" fill="#ffcf2e" stroke="#d9a400" stroke-width=".5"/>');
+    case "snow": return cl('<g fill="#74c0ff"><circle cx="8.5" cy="20" r="1.2"/><circle cx="12" cy="22.2" r="1.2"/><circle cx="15.5" cy="20" r="1.2"/></g>');
+    case "rain": return cl('<g stroke="#2e9cff" stroke-width="2" stroke-linecap="round"><line x1="8" y1="18.5" x2="7" y2="22.5"/><line x1="12" y1="18.5" x2="11" y2="23"/><line x1="16" y1="18.5" x2="15" y2="22.5"/></g>');
+    case "fog": return wrap('<g stroke="#aeb7c0" stroke-width="2.4" stroke-linecap="round"><line x1="4" y1="8" x2="20" y2="8"/><line x1="3" y1="12.5" x2="21" y2="12.5"/><line x1="6" y1="17" x2="18" y2="17"/></g>');
+    case "wind": return wrap('<g fill="none" stroke="#8fa0b0" stroke-width="2" stroke-linecap="round"><path d="M3 9h11a2.6 2.6 0 1 0-2.6-2.6"/><path d="M3 14h15a2.6 2.6 0 1 1-2.6 2.6"/></g>');
+    case "ice": return wrap('<g stroke="#49c7ff" stroke-width="2" stroke-linecap="round"><line x1="12" y1="3" x2="12" y2="21"/><line x1="4" y1="7.5" x2="20" y2="16.5"/><line x1="20" y1="7.5" x2="4" y2="16.5"/></g>');
+    case "cold": return wrap('<path d="M12 4a1 1 0 0 1 1 1v9.3a3.2 3.2 0 1 1-2 0V5a1 1 0 0 1 1-1z" fill="#8fd0ff" stroke="#4a7fb0" stroke-width="1"/>');
+    default: return cl('');
+  }
+}
+
 // avvisi del meteo in un punto (Open-Meteo: mm/h, cm/h, °C, km/h, codici WMO)
 function wxWarnings(w) {
   const out = [];
   const c = w.code ?? -1;
-  if (c >= 95) out.push({ ico: "⛈️", txt: "Temporale" });
-  if ((w.snow || 0) >= 0.1 || [71, 73, 75, 77, 85, 86].includes(c)) out.push({ ico: "🌨️", txt: (w.snow || 0) >= 1 ? "Neve forte" : "Neve" });
+  if (c >= 95) out.push({ ico: "⛈️", kind: "storm", txt: "Temporale" });
+  if ((w.snow || 0) >= 0.1 || [71, 73, 75, 77, 85, 86].includes(c)) out.push({ ico: "🌨️", kind: "snow", txt: (w.snow || 0) >= 1 ? "Neve forte" : "Neve" });
   else if ((w.prec || 0) >= 0.3 || (c >= 51 && c <= 67) || (c >= 80 && c <= 82)) {
-    out.push({ ico: "🌧️", txt: (w.prec || 0) >= 4 ? "Pioggia forte" : "Pioggia" });
+    out.push({ ico: "🌧️", kind: "rain", txt: (w.prec || 0) >= 4 ? "Pioggia forte" : "Pioggia" });
   }
-  if (w.temp != null && w.temp <= 1 && ((w.prec || 0) > 0 || [56, 57, 66, 67].includes(c))) out.push({ ico: "🧊", txt: "Rischio ghiaccio" });
-  else if (w.temp != null && w.temp <= 0) out.push({ ico: "🥶", txt: "Gelo" });
-  if ((w.gust || 0) >= 60) out.push({ ico: "💨", txt: "Vento forte" });
-  if (c === 45 || c === 48) out.push({ ico: "🌫️", txt: "Nebbia" });
+  if (w.temp != null && w.temp <= 1 && ((w.prec || 0) > 0 || [56, 57, 66, 67].includes(c))) out.push({ ico: "🧊", kind: "ice", txt: "Rischio ghiaccio" });
+  else if (w.temp != null && w.temp <= 0) out.push({ ico: "🥶", kind: "cold", txt: "Gelo" });
+  if ((w.gust || 0) >= 60) out.push({ ico: "💨", kind: "wind", txt: "Vento forte" });
+  if (c === 45 || c === 48) out.push({ ico: "🌫️", kind: "fog", txt: "Nebbia" });
   return out;
 }
 
@@ -1262,8 +1279,11 @@ const STYLE = `
   .navbot .arr[hidden] { display: none; }
   .navbot .arr button { flex: 1 1 140px; height: 48px; font-size: 16px; font-weight: 600; background: #0b6e3a; color: #fff; border-color: #0b6e3a; }
   /* meteo lungo il percorso */
-  .wxm { font-size: 20px; line-height: 1; filter: drop-shadow(0 1px 2px rgba(0,0,0,.6)); }
-  .wx3d .wxm { font-size: 30px; }
+  .wxm { width: 26px; height: 26px; filter: drop-shadow(0 1px 2px rgba(0,0,0,.6)); }
+  .wx3d .wxm { width: 34px; height: 34px; }
+  .wxm .wxs { width: 100%; height: 100%; display: block; }
+  .wxi { display: inline-block; width: 18px; height: 18px; vertical-align: -3px; }
+  .wxi .wxs { width: 100%; height: 100%; display: block; }
   .clouds3d { position: absolute; left: 0; top: 0; pointer-events: none; }
   #map3d.g3busy .poi3d { display: none; } /* punti di interesse nascosti durante un gesto con le dita */
   .wxlist { margin: 4px 0 0; padding: 0; list-style: none; font-size: 13px; }
@@ -5680,7 +5700,7 @@ class NavigatorPanel extends HTMLElement {
       if (!p.warn?.length) continue;
       const w = p.warn[0];
       L.marker(p.ll, { title: `${w.txt} · ${fmtClock(p.t)}${p.temp != null ? ` · ${Math.round(p.temp)} °C` : ""}`,
-        icon: L.divIcon({ className: "", html: `<div class="wxm">${w.ico}</div>`, iconSize: [24, 24], iconAnchor: [12, 12] }) }).addTo(lay);
+        icon: L.divIcon({ className: "", html: `<div class="wxm">${wxIcon(w.kind)}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] }) }).addTo(lay);
     }
     this._schedule3d();
   }
@@ -5693,7 +5713,7 @@ class NavigatorPanel extends HTMLElement {
     const temps = wx.items.map((p) => p.temp).filter((t) => t != null);
     const warns = wx.items.flatMap((p) => (p.warn || []).map((w) => ({ ...w, p })));
     const range = temps.length ? `${Math.round(Math.min(...temps))}–${Math.round(Math.max(...temps))} °C` : "";
-    const list = warns.slice(0, 8).map(({ ico, txt, p }) => `<li>${ico} <b>${esc(txt)}</b> · km ${Math.round(p.along / 1000)} · ${fmtClock(p.t)}${
+    const list = warns.slice(0, 8).map(({ kind, txt, p }) => `<li><span class="wxi">${wxIcon(kind)}</span> <b>${esc(txt)}</b> · km ${Math.round(p.along / 1000)} · ${fmtClock(p.t)}${
       p.temp != null ? ` · ${Math.round(p.temp)} °C` : ""}</li>`).join("");
     return `<div class="sec"><h3>Meteo lungo il percorso <span class="muted" style="text-transform:none">Open-Meteo</span></h3>
       <div>${warns.length ? `⚠ ${warns.length} ${warns.length === 1 ? "avviso" : "avvisi"}` : "☀️ Nessun problema previsto"}${range ? ` · ${range}` : ""}</div>
@@ -5711,7 +5731,7 @@ class NavigatorPanel extends HTMLElement {
       if (!p.warn?.length || to < 0 || to > 10000 || nav.wxSaid.has(p.along)) continue;
       nav.wxSaid.add(p.along);
       const w = p.warn[0];
-      this._navPopup("warn", w.ico, `${esc(w.txt)} tra ${fmtDist(to)}${p.temp != null ? `<br><b>${Math.round(p.temp)} °C</b>` : ""}`, 6000);
+      this._navPopup("warn", `<span class="wxi" style="width:40px;height:40px">${wxIcon(w.kind)}</span>`, `${esc(w.txt)} tra ${fmtDist(to)}${p.temp != null ? `<br><b>${Math.round(p.temp)} °C</b>` : ""}`, 6000);
       this._speak(`Attenzione: ${w.txt.toLowerCase()} tra ${fmtDist(to).replace("km", "chilometri").replace(" m", " metri")}`);
       break;
     }
