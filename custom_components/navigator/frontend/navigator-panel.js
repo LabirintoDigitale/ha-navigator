@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.69";
+const PANEL_VERSION = "1.9.70";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -670,7 +670,7 @@ function wxIcon(kind) {
     case "storm": return cl('<path d="M12.2 13.5l-3 4.5h2.3l-1.1 4 3.9-5.6h-2.5l1.6-2.9z" fill="#ffcf2e" stroke="#d9a400" stroke-width=".5"/>');
     case "snow": return cl('<g fill="#74c0ff"><circle cx="8.5" cy="20" r="1.2"/><circle cx="12" cy="22.2" r="1.2"/><circle cx="15.5" cy="20" r="1.2"/></g>');
     case "rain": return cl('<g stroke="#2e9cff" stroke-width="2" stroke-linecap="round"><line x1="8" y1="18.5" x2="7" y2="22.5"/><line x1="12" y1="18.5" x2="11" y2="23"/><line x1="16" y1="18.5" x2="15" y2="22.5"/></g>');
-    case "fog": return wrap('<g stroke="#aeb7c0" stroke-width="2.4" stroke-linecap="round"><line x1="4" y1="8" x2="20" y2="8"/><line x1="3" y1="12.5" x2="21" y2="12.5"/><line x1="6" y1="17" x2="18" y2="17"/></g>');
+    case "fog": return cl('<g stroke="#b6c0ca" stroke-width="2" stroke-linecap="round"><line x1="5.5" y1="20" x2="16" y2="20"/><line x1="8" y1="23" x2="18.5" y2="23"/></g>');
     case "wind": return wrap('<g fill="none" stroke="#8fa0b0" stroke-width="2" stroke-linecap="round"><path d="M3 9h11a2.6 2.6 0 1 0-2.6-2.6"/><path d="M3 14h15a2.6 2.6 0 1 1-2.6 2.6"/></g>');
     case "ice": return wrap('<g stroke="#49c7ff" stroke-width="2" stroke-linecap="round"><line x1="12" y1="3" x2="12" y2="21"/><line x1="4" y1="7.5" x2="20" y2="16.5"/><line x1="20" y1="7.5" x2="4" y2="16.5"/></g>');
     case "cold": return wrap('<path d="M12 4a1 1 0 0 1 1 1v9.3a3.2 3.2 0 1 1-2 0V5a1 1 0 0 1 1-1z" fill="#8fd0ff" stroke="#4a7fb0" stroke-width="1"/>');
