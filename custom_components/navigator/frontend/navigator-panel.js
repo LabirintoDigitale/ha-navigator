@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.77";
+const PANEL_VERSION = "1.9.78";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -2393,6 +2393,7 @@ class NavigatorPanel extends HTMLElement {
     if (!nav) return;
     this._tunnelExit();
     clearInterval(this._tunWatchT); this._tunWatchT = null;
+    clearTimeout(this._rotUserT); this._rotUser = 0;
     this._tripEnd(nav);
     this._hass.callWS({ type: "navigator/live", active: false }).catch(() => { /* sensori non aggiornati */ });
     if (nav.watch != null) window.navigator.geolocation.clearWatch(nav.watch);
@@ -4532,7 +4533,9 @@ class NavigatorPanel extends HTMLElement {
   _applyRotation() {
     if (!this._isGuida() || this._nav.dir == null) return;
     const cur = this._rot || 0;
-    const delta = ((((this._nav.dir - cur) % 360) + 540) % 360) - 180; // giro più corto
+    // in guida la mappa segue la direzione di marcia; con due dita la si può girare per un momento (_rotUser)
+    const target = this._nav.dir + (this._rotUser || 0);
+    const delta = ((((target - cur) % 360) + 540) % 360) - 180; // giro più corto
     this._rot = cur + delta;
     this.$("map").style.transform = `rotate(${-this._rot}deg)`;
     this.$("map").style.setProperty("--maprot", `${this._rot}deg`);
@@ -4650,6 +4653,10 @@ class NavigatorPanel extends HTMLElement {
     let twist0 = null; // angolo fra le due dita all'inizio: la rotazione parte solo oltre una soglia
     const mine = () => this._rotated(); // gesti gestiti qui (non da Leaflet)
     const canTwist = () => !this._isGuida() && !this._3d;
+    // in guida (2D): due dita che ruotano girano la mappa per guardarsi intorno; mollate, dopo un attimo torna nel verso di marcia
+    const guidaTwist = () => this._isGuida() && !this._3d && !!this._nav;
+    let twisting = false;
+    let rotBase = 0;
     const state = () => {
       const a = [...pts.values()];
       const c = a.length >= 2 ? { x: (a[0].x + a[1].x) / 2, y: (a[0].y + a[1].y) / 2 } : { x: a[0].x, y: a[0].y };
@@ -4666,6 +4673,7 @@ class NavigatorPanel extends HTMLElement {
       if (pts.size === 1) moved = false;
       pinch0 = pts.size >= 2 ? { d: prev.d, zoom: prev.zoom } : null;
       twist0 = pts.size >= 2 ? prev.ang : null;
+      twisting = false;
     });
     el.addEventListener("pointermove", (e) => {
       if (!pts.has(e.pointerId)) return;
@@ -4690,6 +4698,11 @@ class NavigatorPanel extends HTMLElement {
       const dx = now.c.x - prev.c.x;
       const dy = now.c.y - prev.c.y;
       const pinch = now.n >= 2 && pinch0 && pinch0.d > 0;
+      if (now.n >= 2 && guidaTwist() && twist0 != null) { // guida: rotazione momentanea, solo oltre 10° (lo zoom non gira)
+        const tot = angDiff(now.ang, twist0);
+        if (!twisting && Math.abs(tot) >= 10) { twisting = true; rotBase = this._rotUser || 0; clearTimeout(this._rotUserT); }
+        if (twisting) { this._rotUser = rotBase - tot; this._applyRotation(); }
+      }
       if (now.n >= 2 && canTwist()) { // rotazione con due dita
         const da = angDiff(now.ang, prev.ang);
         if (da) {
@@ -4725,6 +4738,11 @@ class NavigatorPanel extends HTMLElement {
       else {
         el.classList.remove("moving");
         pinch0 = twist0 = null;
+        if (twisting) {
+          twisting = false;
+          clearTimeout(this._rotUserT);
+          this._rotUserT = setTimeout(() => { this._rotUser = 0; if (this._nav) this._applyRotation(); }, 1500);
+        }
         if (moved) this._gestEnd = Date.now();
         // girata fino quasi al nord: si raddrizza da sola
         if (this._freeRot && !this._isGuida()) {
