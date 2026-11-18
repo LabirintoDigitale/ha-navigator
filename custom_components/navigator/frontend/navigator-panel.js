@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.85";
+const PANEL_VERSION = "1.9.86";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1362,8 +1362,12 @@ const STYLE = `
   .sidetabs button.on { color: var(--primary-color); border-bottom-color: var(--primary-color); }
   .trip input[type=checkbox] { width: 18px; height: 18px; flex: none; accent-color: var(--tc, var(--primary-color)); }
   .trip .sw { width: 10px; height: 10px; border-radius: 50%; flex: none; }
-  .month { margin: 12px 0 2px; font-weight: 600; font-size: 13px; display: flex; justify-content: space-between; }
-  .month span { font-weight: 400; color: var(--secondary-text-color); }
+  .tyear, .month { display: flex; justify-content: space-between; align-items: baseline; cursor: pointer; user-select: none; }
+  .tyear { margin: 14px 0 4px; padding: 6px 2px; font-size: 16px; border-bottom: 1px solid var(--divider-color, #ddd); }
+  .month { margin: 8px 0 2px 10px; font-size: 13px; }
+  .tyear span, .month span { font-weight: 400; font-size: 12px; color: var(--secondary-text-color); }
+  .tyear .car, .month .car { display: inline-block; transition: transform .15s; color: var(--secondary-text-color); }
+  .tyear.open .car, .month.open .car { transform: rotate(90deg); }
   /* stato dei punti di interesse, in basso a sinistra sulla mappa */
   .poistat { position: absolute; z-index: 1000; left: 10px; bottom: 26px; max-width: calc(100% - 80px); display: flex; gap: 8px; align-items: center;
     white-space: nowrap;
@@ -6381,17 +6385,28 @@ class NavigatorPanel extends HTMLElement {
       html += `<div class="muted">Ogni guida finita con Esci viene salvata qui: data, veicolo, km, tempo, velocità e traccia.</div>`;
     } else {
       html += `<div class="muted">${trips.length} ${trips.length === 1 ? "viaggio" : "viaggi"} · ${fmtKm(kmAll)} in tutto. Spunta un viaggio per vederlo sulla mappa.</div>`;
-      const monthOf = (t) => new Date(t.start * 1000).toLocaleDateString("it-IT", { month: "long", year: "numeric" });
-      let month = "";
+      // raggruppati per anno e mese, che si aprono e chiudono; all'inizio aperti solo l'anno e il mese più recenti
+      const yOf = (t) => String(new Date(t.start * 1000).getFullYear());
+      const mOf = (t) => { const d = new Date(t.start * 1000); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
+      if (!this._tripOpen) this._tripOpen = new Set(trips.length ? [yOf(trips[0]), mOf(trips[0])] : []);
+      const tot = (list) => `${list.length} · ${fmtKm(list.reduce((a, x) => a + (x.km || 0), 0))} · ${fmtTime(list.reduce((a, x) => a + (x.duration || 0), 0))}`;
+      let year = "", month = "";
       trips.forEach((t, k) => {
         const d = new Date(t.start * 1000);
-        const m = monthOf(t);
+        const y = yOf(t), m = mOf(t);
+        if (y !== year) {
+          year = y; month = "";
+          const open = this._tripOpen.has(y);
+          html += `<div class="tyear${open ? " open" : ""}" data-tg="${y}"><b><span class="car">▸</span> ${y}</b><span>${tot(trips.filter((x) => yOf(x) === y))}</span></div>`;
+        }
+        if (!this._tripOpen.has(y)) return;
         if (m !== month) {
           month = m;
-          const inM = trips.filter((x) => monthOf(x) === m);
-          html += `<div class="month">${m.charAt(0).toUpperCase() + m.slice(1)}<span>${inM.length} · ${fmtKm(inM.reduce((a, x) => a + (x.km || 0), 0))} · ${
-            fmtTime(inM.reduce((a, x) => a + (x.duration || 0), 0))}</span></div>`;
+          const open = this._tripOpen.has(m);
+          const nm = d.toLocaleDateString("it-IT", { month: "long" });
+          html += `<div class="month${open ? " open" : ""}" data-tg="${m}"><b><span class="car">▸</span> ${nm.charAt(0).toUpperCase() + nm.slice(1)}</b><span>${tot(trips.filter((x) => mOf(x) === m))}</span></div>`;
         }
+        if (!this._tripOpen.has(m)) return;
         const when = `${d.toLocaleDateString("it-IT", { weekday: "short", day: "numeric" })} ${d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}`;
         const v = t.vehicle || {};
         const veh = v.type ? ` · ${vehIcon(v.type)} ${esc(v.name || "")}${v.plate ? ` ${esc(v.plate)}` : ""}` : "";
@@ -6405,6 +6420,11 @@ class NavigatorPanel extends HTMLElement {
     }
     box.innerHTML = html;
     box.querySelector('[data-t="none"]')?.addEventListener("click", () => { this._tripSel.clear(); this._drawTrips(); this._renderTrips(); });
+    box.querySelectorAll("[data-tg]").forEach((el) => el.addEventListener("click", () => {
+      const g = el.dataset.tg;
+      if (this._tripOpen.has(g)) this._tripOpen.delete(g); else this._tripOpen.add(g);
+      this._renderTrips();
+    }));
     box.querySelectorAll("[data-tc]").forEach((el) => el.addEventListener("change", () => this._toggleTrip(trips[+el.dataset.tc], el.checked)));
     box.querySelectorAll("[data-tv]").forEach((el) => el.addEventListener("click", () => this._toggleTrip(trips[+el.dataset.tv], true, true)));
     box.querySelectorAll("[data-td]").forEach((el) => el.addEventListener("click", async () => {
