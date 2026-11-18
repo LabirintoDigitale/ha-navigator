@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.72";
+const PANEL_VERSION = "1.9.73";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1271,10 +1271,8 @@ const STYLE = `
   /* "visitatori" della galleria: arrivano dal fondo del tunnel verso di noi (pipistrelli, e a Natale/Halloween sorprese) */
   .tf-vis { position: absolute; inset: 0; }
   .tf-v { position: absolute; left: 50%; top: 45%; width: 12vmin; height: 12vmin; margin: -6vmin 0 0 -6vmin; opacity: 0;
-    animation: tf-v linear forwards; animation-timing-function: cubic-bezier(.62,.02,.96,.5); will-change: transform, opacity; }
+    transform: scale(0); will-change: transform, opacity; }
   .tf-v svg { width: 100%; height: 100%; display: block; overflow: visible; }
-  @keyframes tf-v { 0% { transform: translate(var(--x0), var(--y0)) scale(var(--s0)); opacity: 0; } 10% { opacity: 1; }
-    88% { opacity: 1; } 100% { transform: translate(var(--dx), var(--dy)) scale(var(--s1)); opacity: 0; } }
   .tf-bat { width: 10vmin; height: 5vmin; margin: -2.5vmin 0 0 -5vmin; }
   .tf-bat svg { transform-origin: 50% 45%; animation: tf-flap .19s ease-in-out infinite alternate; }
   .tf-santa { width: 17vmin; height: 13vmin; margin: -6.5vmin 0 0 -8.5vmin; }
@@ -2765,6 +2763,7 @@ class NavigatorPanel extends HTMLElement {
   _tunnelVisitors(on) {
     if (!on) {
       clearTimeout(this._tunVisT);
+      cancelAnimationFrame(this._tfRaf); this._tfRaf = 0; this._tfList = [];
       this._tunVisOn = false;
       const box = this.$("tfvis");
       if (box) box.innerHTML = "";
@@ -2785,19 +2784,34 @@ class NavigatorPanel extends HTMLElement {
     this._tunVisT = setTimeout(spawn, 5000 + Math.random() * 4000); // "dopo un po'"
   }
 
+  // un visitatore si avvicina a velocità costante; sullo schermo, come in prospettiva vera, dimensione e distanza dal
+  // punto di fuga valgono 1/distanza: da lontano cresce pochissimo, negli ultimi metri si ingrandisce di colpo e ci passa
+  // accanto. (dx, dy, s1) = posizione e scala quando ci è addosso
   _tfSpawn(svg, cls, o, delay = 0) {
     const box = this.$("tfvis");
     if (!box) return;
     const el = document.createElement("div");
     el.className = `tf-v ${cls}`;
     el.innerHTML = svg;
-    for (const k of ["x0", "y0", "dx", "dy"]) el.style.setProperty(`--${k}`, `${o[k]}vmin`);
-    el.style.setProperty("--s0", o.s0 ?? 0.05);
-    el.style.setProperty("--s1", o.s1);
-    el.style.animationDuration = `${o.dur}s`;
-    el.style.animationDelay = `${delay}ms`;
     box.appendChild(el);
-    setTimeout(() => el.remove(), o.dur * 1000 + delay + 300);
+    (this._tfList ||= []).push({ el, dx: o.dx, dy: o.dy, s1: o.s1, dur: o.dur * 1000, t0: performance.now() + delay, z0: o.z0 || 30 });
+    if (this._tfRaf) return;
+    const step = (now) => {
+      this._tfRaf = 0;
+      const list = this._tfList || [];
+      for (let i = list.length - 1; i >= 0; i--) {
+        const v = list[i];
+        const t = (now - v.t0) / v.dur;
+        if (t < 0) continue;
+        if (t >= 1 || !v.el.isConnected) { v.el.remove(); list.splice(i, 1); continue; }
+        const z = v.z0 + (1 - v.z0) * t; // distanza: da z0 fino a 1 ("addosso")
+        const k = 1 / z;
+        v.el.style.transform = `translate(${(v.dx * k).toFixed(2)}vmin, ${(v.dy * k).toFixed(2)}vmin) scale(${(v.s1 * k).toFixed(3)})`;
+        v.el.style.opacity = Math.max(0, Math.min(1, t / 0.08, (1 - k) / 0.2)).toFixed(2); // compare piano, sparisce solo quando ci è addosso
+      }
+      if (list.length) this._tfRaf = requestAnimationFrame(step);
+    };
+    this._tfRaf = requestAnimationFrame(step);
   }
 
   _tfBats() {
@@ -2805,22 +2819,22 @@ class NavigatorPanel extends HTMLElement {
     const n = 3 + Math.floor(Math.random() * 3);
     for (let i = 0; i < n; i++) {
       const side = Math.random() < 0.5 ? -1 : 1;
-      this._tfSpawn(TF_BAT, "tf-bat", { x0: rnd(-4, 4), y0: rnd(-6, -1), dx: side * rnd(25, 80), dy: rnd(-62, -18),
-        s0: 0.04, s1: rnd(1.8, 2.7), dur: rnd(1.6, 2.4) }, i * rnd(80, 260));
+      this._tfSpawn(TF_BAT, "tf-bat", { dx: side * rnd(30, 85), dy: rnd(-65, -22), s1: rnd(2, 2.8), dur: rnd(2.2, 3.1), z0: 26 },
+        i * rnd(120, 380));
     }
   }
 
   _tfSanta() { // nella carreggiata opposta (a sinistra), viene verso di noi e ci passa di fianco
-    this._tfSpawn(TF_SANTA, "tf-santa", { x0: -3, y0: 2, dx: -82, dy: 36, s0: 0.05, s1: 3.2, dur: 3.6 });
+    this._tfSpawn(TF_SANTA, "tf-santa", { dx: -85, dy: 38, s1: 3.3, dur: 4.6, z0: 32 });
   }
 
   _tfPumpkin() {
-    this._tfSpawn(TF_PUMPKIN, "tf-pump", { x0: -3, y0: 3, dx: -70, dy: 42, s0: 0.05, s1: 2.6, dur: 3 });
+    this._tfSpawn(TF_PUMPKIN, "tf-pump", { dx: -72, dy: 44, s1: 2.7, dur: 4, z0: 30 });
   }
 
   _tfGhost() {
     const rnd = (a, b) => a + Math.random() * (b - a);
-    this._tfSpawn(TF_GHOST, "tf-ghost", { x0: rnd(-6, 6), y0: -4, dx: rnd(-32, 32), dy: -55, s0: 0.05, s1: 2.8, dur: 3.3 });
+    this._tfSpawn(TF_GHOST, "tf-ghost", { dx: rnd(-34, 34), dy: -58, s1: 2.9, dur: 4.2, z0: 30 });
   }
 
   // indicazioni vocali: un avviso in anticipo ("Tra 300 metri, …") e uno al momento della manovra
