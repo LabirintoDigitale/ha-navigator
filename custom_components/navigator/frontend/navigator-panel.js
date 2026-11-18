@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.71";
+const PANEL_VERSION = "1.9.72";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -661,6 +661,22 @@ function fmtAge(ms) {
 
 const STALE_MS = 10 * 60000; // posizione di una persona più vecchia di così: si avvisa prima di partire
 
+// periodo dell'anno per le sorprese in galleria: Natale (20 giorni prima, 10 dopo) e Halloween (idem)
+function tunnelSeason(d = new Date()) {
+  if (window.__naviSeason) return window.__naviSeason; // solo per le prove
+  const y = d.getFullYear(), t = d.getTime();
+  const at = (yy, m, dd) => new Date(yy, m, dd).getTime();
+  if ((t >= at(y, 11, 5)) || (t < at(y, 0, 5))) return "natale"; // 5 dicembre → 4 gennaio
+  if (t >= at(y, 9, 11) && t < at(y, 10, 11)) return "halloween"; // 11 ottobre → 10 novembre
+  return null;
+}
+
+// disegni dei "visitatori" della galleria (SVG: si vedono uguali su ogni telefono)
+const TF_BAT = `<svg viewBox="0 0 100 50"><path d="M50 17c-3 0-5 2-6 5-6-8-16-12-28-10 6 3 9 7 9 12-5-2-11-1-16 3 8 1 14 5 17 11 3-4 8-6 13-6 2 4 6 7 11 7s9-3 11-7c5 0 10 2 13 6 3-6 9-10 17-11-5-4-11-5-16-3 0-5 3-9 9-12-12-2-22 2-28 10-1-3-3-5-6-5z" fill="#221c17" stroke="#7a6650" stroke-width="1.3"/><path d="M46 19l-2-7 4 4M54 19l2-7-4 4" fill="#221c17" stroke="#7a6650" stroke-width="1"/><circle cx="46.8" cy="23.5" r="1.7" fill="#ffcc33"/><circle cx="53.2" cy="23.5" r="1.7" fill="#ffcc33"/></svg>`;
+const TF_SANTA = `<svg viewBox="0 0 120 90"><path d="M38 30h44l-4 14H42z" fill="#c62828" stroke="#7f1010" stroke-width="1.2"/><path d="M36 44c2 4 6 5 10 5h28c4 0 8-1 10-5" fill="none" stroke="#ffcf3f" stroke-width="2.6" stroke-linecap="round"/><path d="M39 30h42" stroke="#ffcf3f" stroke-width="2"/><ellipse cx="60" cy="27" rx="11" ry="9" fill="#d32f2f"/><circle cx="60" cy="15" r="6" fill="#f6c9a8"/><path d="M54 16c0 7 3 10 6 10s6-3 6-10c-2 2-4 3-6 3s-4-1-6-3z" fill="#fff"/><circle cx="58" cy="14" r=".9" fill="#222"/><circle cx="62" cy="14" r=".9" fill="#222"/><path d="M53 12c1-6 6-9 12-7l3 8z" fill="#d32f2f"/><circle cx="68.5" cy="13" r="2.3" fill="#fff"/><rect x="53" y="10.5" width="14" height="2.6" rx="1.3" fill="#fff"/><path d="M52 30L33 46M68 30L87 46" stroke="#5d3a1a" stroke-width="1.1"/><g fill="#8d5a30" stroke="#4e2f14" stroke-width="1"><ellipse cx="33" cy="67" rx="10" ry="12"/><ellipse cx="87" cy="67" rx="10" ry="12"/><ellipse cx="33" cy="49" rx="6" ry="7"/><ellipse cx="87" cy="49" rx="6" ry="7"/></g><g stroke="#6d4520" stroke-width="1.7" fill="none" stroke-linecap="round"><path d="M29 44l-4-8m2 4l-5-1M37 44l4-8m-2 4l5-1M83 44l-4-8m2 4l-5-1M91 44l4-8m-2 4l5-1"/></g><circle cx="33" cy="54" r="5" fill="#ff2a2a" opacity=".35"/><circle cx="33" cy="54" r="2.5" fill="#ff2a2a"/><circle cx="87" cy="54" r="2" fill="#3b2412"/><g fill="#111"><circle cx="31" cy="48" r="1"/><circle cx="35" cy="48" r="1"/><circle cx="85" cy="48" r="1"/><circle cx="89" cy="48" r="1"/></g></svg>`;
+const TF_PUMPKIN = `<svg viewBox="0 0 60 56"><path d="M30 10c-2-5-1-8 3-9" stroke="#4e7a1e" stroke-width="3" fill="none" stroke-linecap="round"/><ellipse cx="30" cy="32" rx="27" ry="22" fill="#f57c00" stroke="#a84300" stroke-width="1.5"/><path d="M30 10c-9 0-12 10-12 22s3 22 12 22M30 10c9 0 12 10 12 22s-3 22-12 22" fill="none" stroke="#c75c00" stroke-width="1.4"/><path d="M16 27l6-7 6 7zM32 27l6-7 6 7z" fill="#ffe066"/><path d="M14 36c4 9 28 9 32 0l-4 2-3-3-3 3-3-3-3 3-3-3-3 3-3-3-3 3z" fill="#ffe066"/></svg>`;
+const TF_GHOST = `<svg viewBox="0 0 50 60"><path d="M25 3C12 3 5 13 5 26v30l6-5 6 5 8-5 8 5 6-5 6 5V26C45 13 38 3 25 3z" fill="#f4f6f8" fill-opacity=".92" stroke="#c9d1d8" stroke-width="1"/><ellipse cx="18" cy="25" rx="3.6" ry="5" fill="#222"/><ellipse cx="32" cy="25" rx="3.6" ry="5" fill="#222"/><ellipse cx="25" cy="38" rx="4" ry="5.5" fill="#222"/></svg>`;
+
 // icone meteo DISEGNATE (SVG): sempre uguali su ogni dispositivo, al posto delle emoji (che a volte diventano un quadrato)
 function wxIcon(kind) {
   const cloud = '<path d="M7.3 17.3a3.5 3.5 0 0 1-.3-7 5 5 0 0 1 9.6-1.2 3.3 3.3 0 0 1-.3 6.6z" fill="#e6ebf0" stroke="#95a2af" stroke-width="1"/>';
@@ -1252,6 +1268,22 @@ const STYLE = `
     gap: 2px; background: rgba(0, 0, 0, .6); color: #fff; padding: 8px 18px; border-radius: 18px; font: 600 16px sans-serif; white-space: nowrap; }
   .tf-label small { font-weight: 400; font-size: 13px; opacity: .85; }
   @media (prefers-reduced-motion: reduce) { .tf-ring, .tf-road::after { animation-duration: calc(var(--tfd) * 3); } }
+  /* "visitatori" della galleria: arrivano dal fondo del tunnel verso di noi (pipistrelli, e a Natale/Halloween sorprese) */
+  .tf-vis { position: absolute; inset: 0; }
+  .tf-v { position: absolute; left: 50%; top: 45%; width: 12vmin; height: 12vmin; margin: -6vmin 0 0 -6vmin; opacity: 0;
+    animation: tf-v linear forwards; animation-timing-function: cubic-bezier(.62,.02,.96,.5); will-change: transform, opacity; }
+  .tf-v svg { width: 100%; height: 100%; display: block; overflow: visible; }
+  @keyframes tf-v { 0% { transform: translate(var(--x0), var(--y0)) scale(var(--s0)); opacity: 0; } 10% { opacity: 1; }
+    88% { opacity: 1; } 100% { transform: translate(var(--dx), var(--dy)) scale(var(--s1)); opacity: 0; } }
+  .tf-bat { width: 10vmin; height: 5vmin; margin: -2.5vmin 0 0 -5vmin; }
+  .tf-bat svg { transform-origin: 50% 45%; animation: tf-flap .19s ease-in-out infinite alternate; }
+  .tf-santa { width: 17vmin; height: 13vmin; margin: -6.5vmin 0 0 -8.5vmin; }
+  .tf-santa svg { animation: tf-bob .45s ease-in-out infinite alternate; filter: drop-shadow(0 0 3px rgba(255,220,150,.5)); }
+  .tf-pump svg { animation: tf-bob .32s ease-in-out infinite alternate; filter: drop-shadow(0 0 5px #ffb300); }
+  .tf-ghost svg { animation: tf-sway .9s ease-in-out infinite alternate; filter: drop-shadow(0 0 6px rgba(220,235,255,.6)); }
+  @keyframes tf-flap { from { transform: scaleY(1); } to { transform: scaleY(.35); } }
+  @keyframes tf-bob { from { transform: translateY(0); } to { transform: translateY(-9%); } }
+  @keyframes tf-sway { from { transform: translateX(-9%) rotate(-7deg); } to { transform: translateX(9%) rotate(7deg); } }
   /* frecce del verso di marcia sul percorso (2D) */
   .rarrow { width: 16px; height: 16px; background: no-repeat center / 16px 16px
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 11 8 5l5 6' fill='none' stroke='%23263238' stroke-width='4.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M3 11 8 5l5 6' fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
@@ -1461,6 +1493,7 @@ class NavigatorPanel extends HTMLElement {
           <div id="map3d" hidden></div>
           <div class="poistat" id="poistat" hidden></div>
           <div class="tunfx" id="tunfx" hidden><div class="tf-road"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -0 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -1 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -2 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -3 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -4 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -5 / 6)"></div>
+            <div class="tf-vis" id="tfvis"></div>
             <div class="tf-label"><span>🚇 In galleria</span><small id="tunrem"></small></div></div>
           <div class="pitchctl" id="pitchctl" hidden>
             <button class="up" data-p="-15" title="Più dall'alto"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></button>
@@ -2716,13 +2749,78 @@ class NavigatorPanel extends HTMLElement {
     if (!show) {
       el.classList.remove("on");
       if (!el.hidden) setTimeout(() => { if (!el.classList.contains("on")) el.hidden = true; }, 600);
+      this._tunnelVisitors(false);
       return;
     }
     if (el.hidden) { el.hidden = false; requestAnimationFrame(() => el.classList.add("on")); }
+    this._tunnelVisitors(true);
     const v = t.speed || 0;
     el.style.setProperty("--tfd", `${Math.max(0.8, Math.min(3.5, 3.5 - v * 0.09)).toFixed(2)}s`);
     const left = Math.max(0, t.end - (this._nav.snap?.along ?? t.start));
     this.$("tunrem").textContent = v > 0.5 ? `uscita tra circa ${fmtDist(left)}` : `galleria di ${fmtDist(t.end - t.start)}`;
+  }
+
+  // "visitatori" della galleria: dopo un po' ogni tanto uno stormo di pipistrelli che ci vola incontro;
+  // a Natale Babbo Natale sulla slitta nella carreggiata opposta, a Halloween zucche e fantasmi
+  _tunnelVisitors(on) {
+    if (!on) {
+      clearTimeout(this._tunVisT);
+      this._tunVisOn = false;
+      const box = this.$("tfvis");
+      if (box) box.innerHTML = "";
+      return;
+    }
+    if (this._tunVisOn) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    this._tunVisOn = true;
+    const spawn = () => {
+      if (!this._tunVisOn) return;
+      const season = tunnelSeason();
+      const r = Math.random();
+      if (season === "natale" && r < 0.45) this._tfSanta();
+      else if (season === "halloween" && r < 0.5) { if (Math.random() < 0.55) this._tfPumpkin(); else this._tfGhost(); }
+      else this._tfBats();
+      this._tunVisT = setTimeout(spawn, 8000 + Math.random() * 12000);
+    };
+    this._tunVisT = setTimeout(spawn, 5000 + Math.random() * 4000); // "dopo un po'"
+  }
+
+  _tfSpawn(svg, cls, o, delay = 0) {
+    const box = this.$("tfvis");
+    if (!box) return;
+    const el = document.createElement("div");
+    el.className = `tf-v ${cls}`;
+    el.innerHTML = svg;
+    for (const k of ["x0", "y0", "dx", "dy"]) el.style.setProperty(`--${k}`, `${o[k]}vmin`);
+    el.style.setProperty("--s0", o.s0 ?? 0.05);
+    el.style.setProperty("--s1", o.s1);
+    el.style.animationDuration = `${o.dur}s`;
+    el.style.animationDelay = `${delay}ms`;
+    box.appendChild(el);
+    setTimeout(() => el.remove(), o.dur * 1000 + delay + 300);
+  }
+
+  _tfBats() {
+    const rnd = (a, b) => a + Math.random() * (b - a);
+    const n = 3 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < n; i++) {
+      const side = Math.random() < 0.5 ? -1 : 1;
+      this._tfSpawn(TF_BAT, "tf-bat", { x0: rnd(-4, 4), y0: rnd(-6, -1), dx: side * rnd(25, 80), dy: rnd(-62, -18),
+        s0: 0.04, s1: rnd(1.8, 2.7), dur: rnd(1.6, 2.4) }, i * rnd(80, 260));
+    }
+  }
+
+  _tfSanta() { // nella carreggiata opposta (a sinistra), viene verso di noi e ci passa di fianco
+    this._tfSpawn(TF_SANTA, "tf-santa", { x0: -3, y0: 2, dx: -82, dy: 36, s0: 0.05, s1: 3.2, dur: 3.6 });
+  }
+
+  _tfPumpkin() {
+    this._tfSpawn(TF_PUMPKIN, "tf-pump", { x0: -3, y0: 3, dx: -70, dy: 42, s0: 0.05, s1: 2.6, dur: 3 });
+  }
+
+  _tfGhost() {
+    const rnd = (a, b) => a + Math.random() * (b - a);
+    this._tfSpawn(TF_GHOST, "tf-ghost", { x0: rnd(-6, 6), y0: -4, dx: rnd(-32, 32), dy: -55, s0: 0.05, s1: 2.8, dur: 3.3 });
   }
 
   // indicazioni vocali: un avviso in anticipo ("Tra 300 metri, …") e uno al momento della manovra
