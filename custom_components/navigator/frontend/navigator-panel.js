@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.73";
+const PANEL_VERSION = "1.9.74";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1253,11 +1253,12 @@ const STYLE = `
   .tunfx[hidden] { display: none; }
   .tf-ring { position: absolute; left: 50%; top: 45%; width: 80vmin; height: 66vmin; margin-left: -40vmin; margin-top: -40vmin;
     border: 4px solid rgba(255, 196, 120, .6); border-bottom: none; border-radius: 50% 50% 0 0 / 75% 75% 0 0;
-    transform-origin: 50% 61%; transform: scale(.04); opacity: 0; animation: tf-ring var(--tfd) linear infinite;
+    transform-origin: 50% 61%; transform: scale(.07); opacity: 0; animation: tf-ring calc(var(--tfd) * 10 / 6) linear infinite;
     box-shadow: inset 0 6px 22px rgba(255, 170, 80, .25); }
   .tf-ring::after { content: ""; position: absolute; left: 50%; top: -5px; width: 34px; height: 6px; margin-left: -17px; border-radius: 3px;
     background: #ffe2b0; box-shadow: 0 0 14px 5px rgba(255, 205, 130, .65); }
-  @keyframes tf-ring { 0% { transform: scale(.04); opacity: 0; } 18% { opacity: .95; } 100% { transform: scale(2.8); opacity: 0; } }
+  /* prospettiva vera: l'arco avanza a velocità costante, grandezza = 1/distanza (in fondo fitti e piccoli, vicino si allargano di colpo) */
+  @keyframes tf-ring { 0% { transform: scale(0.070); opacity: 0; } 10% { transform: scale(0.078); opacity: 0.79; } 20% { transform: scale(0.087); opacity: 0.95; } 30% { transform: scale(0.099); opacity: 0.95; } 40% { transform: scale(0.115); opacity: 0.95; } 50% { transform: scale(0.137); opacity: 0.95; } 60% { transform: scale(0.169); opacity: 0.95; } 70% { transform: scale(0.220); opacity: 0.95; } 78% { transform: scale(0.292); opacity: 0.95; } 84% { transform: scale(0.387); opacity: 0.95; } 88% { transform: scale(0.493); opacity: 0.95; } 91% { transform: scale(0.621); opacity: 0.95; } 93% { transform: scale(0.751); opacity: 0.95; } 95% { transform: scale(0.949); opacity: 0.95; } 96.5% { transform: scale(1.184); opacity: 0.95; } 97.5% { transform: scale(1.418); opacity: 0.95; } 98.5% { transform: scale(1.767); opacity: 0.57; } 99.3% { transform: scale(2.200); opacity: 0.27; } 100% { transform: scale(2.800); opacity: 0.0; } }
   .tf-road { position: absolute; left: 50%; top: 45%; bottom: 0; width: 170vmin; margin-left: -85vmin;
     background: linear-gradient(#262626, #3a3a3a); clip-path: polygon(49.3% 0, 50.7% 0, 100% 100%, 0 100%); }
   .tf-road::after { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 3vmin; margin-left: -1.5vmin;
@@ -1490,7 +1491,7 @@ class NavigatorPanel extends HTMLElement {
           <div id="map"></div>
           <div id="map3d" hidden></div>
           <div class="poistat" id="poistat" hidden></div>
-          <div class="tunfx" id="tunfx" hidden><div class="tf-road"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -0 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -1 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -2 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -3 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -4 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -5 / 6)"></div>
+          <div class="tunfx" id="tunfx" hidden><div class="tf-road"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -0 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -1 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -2 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -3 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -4 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -5 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -6 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -7 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -8 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -9 / 6)"></div>
             <div class="tf-vis" id="tfvis"></div>
             <div class="tf-label"><span>🚇 In galleria</span><small id="tunrem"></small></div></div>
           <div class="pitchctl" id="pitchctl" hidden>
