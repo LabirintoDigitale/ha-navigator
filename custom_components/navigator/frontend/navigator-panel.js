@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.74";
+const PANEL_VERSION = "1.9.75";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -4086,7 +4086,9 @@ class NavigatorPanel extends HTMLElement {
     c.dirRad = Math.PI - ((f.dir || 0) * Math.PI) / 180; // verso di marcia (modello girato di 180°: si vede il retro con la targa)
     // dimensione ~costante sullo schermo: a zoom più basso (guida) il modello si ingrandisce, altrimenti sparirebbe
     const z = this._g3.getZoom();
-    c.meters = Math.max(1, Math.min(28, 4 * Math.pow(2, 18.5 - z)));
+    // da vicino (zoom ≥ 18,5) dimensione costante sullo schermo; allontanandosi rimpicciolisce anche sullo schermo,
+    // ma più piano della mappa (si vede sempre) e con un tetto: prima restava grande uguale e diventava un gigante
+    c.meters = z >= 18.5 ? Math.max(1, 4 * Math.pow(2, 18.5 - z)) : Math.min(9, 4 * Math.pow(2, (18.5 - z) * 0.45));
     // quota 0: la matrice mercatore tiene GIÀ conto del rilievo del terreno. Aggiungere la quota del terreno
     // faceva galleggiare il mezzo in aria (altezza errata). A terra = quota 0.
     c.elev = 0;
