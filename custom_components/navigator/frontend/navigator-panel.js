@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.82";
+const PANEL_VERSION = "1.9.83";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -3279,13 +3279,19 @@ class NavigatorPanel extends HTMLElement {
     if (b.dataset.n === String(n)) return;
     b.dataset.n = String(n);
     b.className = `mid ${n ? "night" : "day"}`;
-    b.title = n ? "Modalità notte: tocca per il giorno" : "Modalità giorno: tocca per la notte";
+    b.title = n ? "Notte: tocca per il giorno (fino al prossimo tramonto/alba)" : "Giorno: tocca per la notte (fino al prossimo tramonto/alba)";
     b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M9 17.5h6M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.3 1.1 2.2v.5h5V16c0-.9.4-1.6 1.1-2.2A6 6 0 0 0 12 3z"/><path class="base" d="M10 20.5h4"/></svg>';
   }
 
+  // la lampadina cambia giorno/notte solo fino al prossimo tramonto o alba (da sun.sun), poi torna l'automatico
   _toggleNight() {
-    this._settings.nightMode = this._isNight() ? "off" : "on";
+    const a = this._hass?.states?.["sun.sun"]?.attributes || {};
+    const next = [a.next_rising, a.next_setting].map((t) => Date.parse(t)).filter((t) => t > Date.now());
+    const until = next.length ? Math.min(...next) : Date.now() + 12 * 3600e3;
+    this._settings.nightOverride = { on: !this._isNight(), until };
     this._saveSettings();
+    clearTimeout(this._nightOvT); // allo scadere si ricontrolla (anche se il sole non cambia stato nello stesso istante)
+    this._nightOvT = setTimeout(() => { this._applyNight(); this._syncNightBtn(); }, Math.min(until - Date.now() + 2000, 2 ** 31 - 1));
     this._applyNight();
     this._syncNightBtn();
   }
@@ -5674,7 +5680,7 @@ class NavigatorPanel extends HTMLElement {
       this._saveSettings();
       if (k === "voiceStyle") { this._unlockAudio(); this._speak(PHRASES[s.lang].test, true, true); }
       if (k === "terrainEx" || k === "bldStyle") this._apply3dSettings();
-      if (k === "nightMode") this._applyNight();
+      if (k === "nightMode") { delete s.nightOverride; this._saveSettings(); this._applyNight(); this._syncNightBtn(); }
       if (k === "lang" && this._result && !this._nav) this._compute(false); // indicazioni nella nuova lingua
       this._openSettings();
     }));
@@ -6576,6 +6582,9 @@ class NavigatorPanel extends HTMLElement {
   // automatica col sole di Home Assistant (sotto l'orizzonte), sempre o mai: mappa scura, satellite attenuato, 3D notturno
 
   _isNight() {
+    // lampadina: scelta momentanea, vale fino al prossimo tramonto/alba, poi torna l'impostazione
+    const o = this._settings.nightOverride;
+    if (o && Date.now() < o.until) return !!o.on;
     const m = this._settings.nightMode || "auto";
     if (m === "on") return true;
     if (m === "off") return false;
