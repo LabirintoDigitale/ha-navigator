@@ -427,6 +427,11 @@ class MapServices:
         if costing in ("auto", "motorcycle"):
             options["use_tolls"] = 0.0 if avoid_tolls else 0.5
             options["use_highways"] = 0.0 if avoid_highways else 1.0
+            # ogni svolta "costa" 45 s (Valhalla ne usa 5): niente uscite e rientri dalla statale per guadagnare pochi
+            # secondi su una stradina; una deviazione deve far risparmiare davvero tempo per essere scelta
+            options["maneuver_penalty"] = 45
+            options["use_living_streets"] = 0.0
+            options["service_penalty"] = 60
         if costing == "pedestrian":
             # a piedi: preferire marciapiedi, percorsi pedonali e attraversamenti (strisce) quando in OpenStreetMap sono
             # disegnati a parte; dove ci sono solo le strade il percorso resta quello di prima

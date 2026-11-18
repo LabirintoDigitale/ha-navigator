@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.70";
+const PANEL_VERSION = "1.9.71";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -2360,6 +2360,7 @@ class NavigatorPanel extends HTMLElement {
     const nav = this._nav;
     if (!nav) return;
     this._tunnelExit();
+    clearInterval(this._tunWatchT); this._tunWatchT = null;
     this._tripEnd(nav);
     this._hass.callWS({ type: "navigator/live", active: false }).catch(() => { /* sensori non aggiornati */ });
     if (nav.watch != null) window.navigator.geolocation.clearWatch(nav.watch);
@@ -2440,6 +2441,7 @@ class NavigatorPanel extends HTMLElement {
     const now = Date.now();
     if (nav.tun && this._tunnelGate(fix, now)) return; // in galleria: posizione stimata, il GPS non sposta la guida
     const prev = nav.fix;
+    if (prev && !prev.est) { const gap = now - prev.time; if (gap > 0 && gap < 60000) nav.gapAvg = nav.gapAvg ? nav.gapAvg * 0.7 + gap * 0.3 : gap; }
     if (prev && distM([prev.lat, prev.lon], [fix.lat, fix.lon]) > 3) {
       nav.heading = bearing([prev.lat, prev.lon], [fix.lat, fix.lon]);
     }
@@ -2503,9 +2505,14 @@ class NavigatorPanel extends HTMLElement {
       nav.idx = snap.idx;
       for (let leg = 1; leg < rt._legStart.length; leg++) if (snap.idx >= rt._legStart[leg]) nav.passed = Math.max(nav.passed, leg);
       if (!nav.rerouting) this._voiceGuide(rt, snap.along);
-      // il GPS si perde spesso poco prima dell'imbocco: la stima parte già 60 m prima (le posizioni buone valgono ancora)
+      // galleria: entrando nel tratto la si "arma" (60 m prima dell'imbocco), ma l'animazione e la posizione stimata
+      // partono SOLO se il GPS si perde davvero (niente posizioni per un po' o precisione pessima). Sui ponti o dove il
+      // segnale resta buono si continua col GPS vero: niente animazione per sbaglio.
       const r = this._tunnelRanges(rt).find(([a, b]) => snap.along >= a - 60 && snap.along < b - 40);
-      if (r && !nav.tun) this._tunnelEnter(rt, r, snap.along);
+      if (r && !nav.tun) {
+        nav.tunArm = { rt, r, along: snap.along, t: now };
+        if ((fix.acc || 0) > 60) { nav.tunArm = null; this._tunnelEnter(rt, r, snap.along, now); } else this._tunnelWatch();
+      } else if (!r) nav.tunArm = null;
     }
     this._speedCheck(rt, snap.dist <= limit ? snap.idx : null);
     if (snap.dist <= limit) this._cameraCheck(rt, snap.along);
@@ -2610,11 +2617,26 @@ class NavigatorPanel extends HTMLElement {
     return { ll, idx: i, t, dir: bearing(sh[i], sh[i + 1]) };
   }
 
-  _tunnelEnter(rt, [a, b], along) {
+  // galleria "armata": se le posizioni smettono di arrivare (più a lungo del solito) il GPS si è perso → si entra
+  _tunnelWatch() {
+    if (this._tunWatchT) return;
+    this._tunWatchT = setInterval(() => {
+      const nav = this._nav;
+      const arm = nav?.tunArm;
+      if (!nav || !arm || nav.tun) { clearInterval(this._tunWatchT); this._tunWatchT = null; return; }
+      const gap = Date.now() - arm.t;
+      const wait = Math.max(3500, Math.min(15000, (nav.gapAvg || 1000) * 2.5));
+      if (gap > wait) { nav.tunArm = null; this._tunnelEnter(arm.rt, arm.r, arm.along, arm.t); }
+    }, 1000);
+  }
+
+  _tunnelEnter(rt, [a, b], along, t0 = Date.now()) {
     const nav = this._nav;
     const v = Math.max(0, nav.speed || 0);
-    nav.tun = { rt, start: a, end: b, along0: along, t0: Date.now(), since: Date.now(), speed: v,
-      maxMs: Math.max(90000, ((b - along) / Math.max(v, 3)) * 3000) };
+    // la stima parte dall'ultima posizione buona (e dal suo momento): il mezzo è già andato avanti nel frattempo.
+    // Durata massima: il tempo per attraversarla con un buon margine (prima era almeno 90 s e la vista restava ferma)
+    nav.tun = { rt, start: a, end: b, along0: along, t0, since: Date.now(), speed: v,
+      maxMs: Math.max(25000, ((b - along) / Math.max(v, 3)) * 1500 + 20000) };
     clearInterval(this._tunTick);
     this._tunTick = setInterval(() => this._tunnelStep(), 1000);
     this._tunnelStep();
@@ -2636,7 +2658,9 @@ class NavigatorPanel extends HTMLElement {
     if (t.rt !== rt) { this._tunnelExit(); return false; } // percorso cambiato
     const snap = this._snap(rt, fix, nav.idx);
     const limit = 45 + Math.min(fix.acc || 0, 80);
-    if ((snap.dist <= limit && snap.along >= t.end - 25) || now - t.since > t.maxMs) {
+    const good = (fix.acc || 99) <= 40;
+    if ((snap.dist <= limit && snap.along >= t.end - 25) || (good && snap.dist <= limit && snap.along >= t.end - 120)
+      || now - t.since > t.maxMs) {
       this._tunnelExit();
       return false; // uscita (o stima scaduta): la posizione si usa normalmente
     }
@@ -2656,8 +2680,17 @@ class NavigatorPanel extends HTMLElement {
     const now = Date.now();
     const rt = t.rt;
     const along = Math.min(t.end - 1, t.along0 + (t.speed * (now - t.t0)) / 1000);
+    // arrivata all'uscita senza GPS: dopo qualche secondo si esce dalla modalità galleria (non si resta "incagliati")
+    if (along >= t.end - 1) {
+      t.atEnd = t.atEnd || now;
+      if (now - t.atEnd > 5000 || now - t.since > t.maxMs) { this._tunnelExit(); return; }
+    }
     const p = this._pointAt(rt, along);
+    const prevFix = nav.fix;
     nav.fix = { lat: p.ll[0], lon: p.ll[1], acc: 0, speed: t.speed, heading: p.dir, time: now, est: true };
+    // la posizione mostrata (camera) e il mezzo 3D avanzano con la stima, non restano all'imbocco
+    nav.disp = { lat: p.ll[0], lon: p.ll[1] };
+    this._carGlide(prevFix, nav.disp, p.dir, now);
     nav.snap = { dist: 0, idx: p.idx, t: p.t, along };
     this._routeProgress();
     nav.idx = p.idx;
@@ -4037,7 +4070,7 @@ class NavigatorPanel extends HTMLElement {
   // vicine (accentuate dal rilievo) la coprono, con la mappa "stirata" e il nero sotto. Si prova la posizione e, se serve,
   // ci si allontana (zoom indietro a piccoli passi) finché la telecamera resta almeno 15 m sopra il terreno che ha davanti.
   // Margine piccolo apposta: con uno più largo la vista restava troppo alta e lo zoom con le dita veniva annullato.
-  _clearCamera(opts, min = 15) {
+  _clearCamera(opts, min = 35) {
     const g = this._g3;
     const ml = window.maplibregl;
     // la prova si fa su una copia della telecamera: spostare la vista vera interromperebbe l'animazione in corso
@@ -4075,18 +4108,28 @@ class NavigatorPanel extends HTMLElement {
         }
         return null;
       };
-      // 1) si abbassa un po' l'inclinazione (fino a 30°): la telecamera sale e si avvicina. Basta per le colline.
-      let cl = clr(pitch, z, bearing);
-      while (cl != null && cl < 0 && pitch > 30) { pitch = Math.max(30, pitch - 5); cl = clr(pitch, z, bearing); }
-      // 2) ancora dentro la montagna (tornanti): si RUOTA l'inquadratura verso il lato libero (la valle), lasciando
-      //    la montagna di lato, senza appiattire oltre la vista. Appena il tornante gira, al GPS successivo si
-      //    rivaluta e ruota dall'altra parte.
-      if (cl != null && cl < 0) { const r = tryRotate(pitch); if (r) { bearing = r.br; cl = r.cl; } }
-      // 3) se ruotare non basta: si continua ad abbassare l'inclinazione (fino a 20°) e si riprova a ruotare
-      while (cl != null && cl < 0 && pitch > 20) {
-        pitch = Math.max(20, pitch - 5);
-        cl = clr(pitch, z, bearing);
-        if (cl != null && cl < 0) { const r = tryRotate(pitch); if (r) { bearing = r.br; cl = r.cl; } }
+      // 1) dritto (verso di marcia) se è libero con margine. Se prima avevamo girato, per tornare dritti serve un
+      //    margine più ampio: così non si va avanti e indietro a ogni posizione GPS.
+      const keep = !!opts.keepSide; // solo la camera che segue in guida ricorda il lato scelto
+      const prevOff = keep ? (this._camRotOff || 0) : 0;
+      let cl = clr(pitch, z, baseBearing);
+      const needBack = prevOff ? 45 : 0;
+      if (cl != null && cl >= needBack) {
+        if (keep) this._camRotOff = 0;
+      } else if (prevOff && (() => { const c = clr(pitch, z, baseBearing + prevOff); if (c != null && c >= 0) { cl = c; return true; } return false; })()) {
+        // 2) già girati e da quel lato è ancora libero: si resta lì
+        bearing = baseBearing + prevOff;
+      } else if (cl != null && cl < 0) {
+        // 3) la camera entrerebbe nella montagna: si GIRA SUBITO dal lato libero (la valle), senza prima appiattire
+        //    la vista; fra i due lati quello con più margine. Al tornante successivo si rivaluta e si gira dall'altra parte.
+        const r = tryRotate(pitch);
+        if (r) { bearing = r.br; cl = r.cl; if (keep) this._camRotOff = r.br - baseBearing; }
+        // 4) se nessun lato basta (gola stretta): si abbassa l'inclinazione (fino a 20°) riprovando a girare
+        while (cl != null && cl < 0 && pitch > 20) {
+          pitch = Math.max(20, pitch - 5);
+          cl = clr(pitch, z, bearing);
+          if (cl != null && cl < 0) { const r2 = tryRotate(pitch); if (r2) { bearing = r2.br; cl = r2.cl; if (keep) this._camRotOff = r2.br - baseBearing; } }
+        }
       }
       // 4) gole strettissime: ultima risorsa, ci si allontana
       for (let k = 0; k < 16 && cl != null && cl < 0; k++) { z -= 0.25; cl = clr(pitch, z, bearing); }
@@ -4095,7 +4138,9 @@ class NavigatorPanel extends HTMLElement {
       pitch = opts.pitch ?? g.getPitch();
       bearing = baseBearing;
     }
-    return { ...opts, zoom: z, pitch, bearing };
+    const out = { ...opts, zoom: z, pitch, bearing };
+    delete out.keepSide;
+    return out;
   }
 
   // margine (metri) fra la telecamera e il terreno, già tolto il minimo richiesto: negativo = troppo bassa.
@@ -4171,7 +4216,7 @@ class NavigatorPanel extends HTMLElement {
       const key = `${pos.lat},${pos.lon},${z},${nav.dir},${guida},${this._pitch3d()},${pad ? Math.round(pad.top) + "/" + Math.round(pad.bottom) : ""}`;
       if (key === this._g3key) return;
       this._g3key = key;
-      const cam = this._clearCamera({ center: [pos.lon, pos.lat], zoom: z,
+      const cam = this._clearCamera({ keepSide: guida, center: [pos.lon, pos.lat], zoom: z,
         bearing: guida && nav.dir != null ? nav.dir : g.getBearing(), pitch: guida ? this._pitch3d() : g.getPitch(),
         padding: pad || none });
       g.easeTo({ ...cam, duration: 700, easing: (t) => t });
