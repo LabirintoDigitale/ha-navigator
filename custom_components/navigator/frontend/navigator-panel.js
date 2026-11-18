@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.87";
+const PANEL_VERSION = "1.9.88";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -101,6 +101,18 @@ function arrival(sec) {
 }
 
 // icona per tipo di manovra Valhalla
+// frecce delle manovre disegnate (tratto spesso): si leggono anche grandi, a differenza dei caratteri ↱ ↰
+const mvSvg = (d, flip = false) => `<svg class="rbx" viewBox="0 0 40 40"><g ${flip ? 'transform="matrix(-1 0 0 1 40 0)"' : ""} fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">${d}</g></svg>`;
+const MV_D = {
+  turn: '<path d="M13 36V20a7 7 0 0 1 7-7h13"/><path d="M26 5.5 33.5 13 26 20.5"/>',
+  slight: '<path d="M15 36V24l14-14"/><path d="M18 9h11.5v11.5"/>',
+  straight: '<path d="M20 36V6"/><path d="M11.5 14 20 5.5l8.5 8.5"/>',
+  uturn: '<path d="M27 36V17a7.5 7.5 0 0 0-15 0v8"/><path d="M5 18.5l7 7 7-7"/>',
+  round: '<circle cx="20" cy="25" r="9.5"/><path d="M20 15.5V4M14.5 9.5 20 4l5.5 5.5"/>',
+};
+const MV_ARROW = { right: mvSvg(MV_D.turn), left: mvSvg(MV_D.turn, true), sright: mvSvg(MV_D.slight), sleft: mvSvg(MV_D.slight, true),
+  straight: mvSvg(MV_D.straight), uturn: mvSvg(MV_D.uturn), round: mvSvg(MV_D.round) };
+
 function maneuverIcon(m) {
   if (m.ferry) return "⛴️";
   const t = m.type;
@@ -113,18 +125,18 @@ function maneuverIcon(m) {
   }
   if ([1, 2, 3].includes(t)) return "🟢";
   if ([4, 5, 6].includes(t)) return "🏁";
-  if ([9, 10, 11].includes(t)) return "↱";
-  if ([14, 15, 16].includes(t)) return "↰";
-  if ([12, 13].includes(t)) return "⤺";
-  if ([26, 27].includes(t)) return "⟳";
-  if ([18, 20, 23].includes(t)) return "↗";
-  if ([19, 21, 24].includes(t)) return "↖";
-  if ([17, 22, 25, 8, 7].includes(t)) return "↑";
+  if ([9, 10, 11].includes(t)) return MV_ARROW.right;
+  if ([14, 15, 16].includes(t)) return MV_ARROW.left;
+  if ([12, 13].includes(t)) return MV_ARROW.uturn;
+  if ([26, 27].includes(t)) return MV_ARROW.round;
+  if ([18, 20, 23].includes(t)) return MV_ARROW.sright;
+  if ([19, 21, 24].includes(t)) return MV_ARROW.sleft;
+  if ([17, 22, 25, 8, 7].includes(t)) return MV_ARROW.straight;
   const txt = (m.text || "").toLowerCase();
-  if (txt.includes("rotonda")) return "⟳";
-  if (txt.includes("destra")) return "↱";
-  if (txt.includes("sinistra")) return "↰";
-  return "↑";
+  if (txt.includes("rotonda")) return MV_ARROW.round;
+  if (txt.includes("destra")) return MV_ARROW.right;
+  if (txt.includes("sinistra")) return MV_ARROW.left;
+  return MV_ARROW.straight;
 }
 
 // frecce di una corsia (come sui cartelli): una o più indicazioni sovrapposte, la punta in alto è "dritto"
@@ -1052,7 +1064,10 @@ const STYLE = `
   .navtop { position: absolute; z-index: 1001; top: 10px; left: 10px; right: 10px; display: flex; align-items: center; gap: 10px;
     background: #0b6e3a; color: #fff; border-radius: 12px; padding: 7px 12px; box-shadow: 0 2px 10px rgba(0,0,0,.35);
     cursor: grab; touch-action: none; } /* tieni premuto per spostarlo */
-  .navtop .ic { font-size: 30px; width: 34px; text-align: center; flex: none; }
+  /* icona della manovra grande quanto tutta la barra verde */
+  .navtop .ic { font-size: 40px; width: 56px; height: 56px; margin: -5px 0 -5px -4px; flex: none; display: flex;
+    align-items: center; justify-content: center; line-height: 1; }
+  .navtop .ic .rbx { width: 56px; height: 56px; }
   .navtop .d { font-size: 23px; font-weight: 700; white-space: nowrap; }
   .navtop .t { font-size: 15px; line-height: 1.2; }
   /* in guida distanza e indicazione sulla stessa riga: banner più basso */
