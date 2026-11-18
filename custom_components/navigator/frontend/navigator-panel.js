@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.76";
+const PANEL_VERSION = "1.9.77";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -3147,6 +3147,7 @@ class NavigatorPanel extends HTMLElement {
     this._g3interacting = false;
     this._g3heavyOn = undefined; // vista 3D ricreata: edifici di nuovo visibili
     this._g3downs = 0;
+    this._g3ptrs?.clear();
     cancelAnimationFrame(this._cloudRaf); this._cloudRaf = 0;
     cancelAnimationFrame(this._plateRaf); this._plateRaf = 0;
     this._plate3d = null;
@@ -3283,7 +3284,7 @@ class NavigatorPanel extends HTMLElement {
         if (followGuida()) {
           // il trascinamento è solo un'occhiata momentanea: non toglie il tracciamento (nessun userFrame).
           // zoom/rotazione/inclinazione memorizzano la distanza; si ricentra appena si mollano le dita.
-          if (ev !== "dragstart") { clearTimeout(this._g3dragT); this._g3gest.add(ev.replace("start", "")); }
+          if (ev !== "dragstart") { clearTimeout(this._g3dragT); this._g3gest.add(ev.replace("start", "")); this._g3gestT = Date.now(); }
           return;
         }
         if (ev === "zoomstart" && this._nav) this._nav.manualZoomUntil = Date.now() + 20000;
@@ -3451,17 +3452,30 @@ class NavigatorPanel extends HTMLElement {
       // anche se tieni il dito fermo un attimo, e faceva ricomparire gli edifici mentre stavi ancora toccando)
       const m3 = this.$("map3d");
       this._g3downs = 0;
-      m3.addEventListener("pointerdown", () => { this._g3downs++; this._g3interacting = true; this._g3Heavy(false); }, { passive: true });
-      const release = () => {
-        this._g3downs = Math.max(0, this._g3downs - 1);
-        if (this._g3downs === 0) {
-          this._g3interacting = false;
-          this._g3Heavy(true);
-          // appena si mollano le dita, in guida la vista torna subito sul mezzo (sempre centrato)
-          if (this._nav?.fix && this._nav.follow && this._isGuida() && this._3d && this._g3ok) { this._g3key = null; this._sync3d(); }
-        }
-      };
-      for (const ev of ["pointerup", "pointercancel"]) m3.addEventListener(ev, release, { passive: true });
+      this._g3ptrs ||= new Set(); // dita appoggiate sulla mappa 3D (per identificativo)
+      if (!this._g3ptrHooked) {
+        this._g3ptrHooked = true;
+        m3.addEventListener("pointerdown", (e) => {
+          this._g3ptrs.add(e.pointerId); this._g3downs = this._g3ptrs.size;
+          this._g3lastPtr = Date.now(); this._g3interacting = true; this._g3Heavy(false);
+        }, { passive: true });
+        m3.addEventListener("pointermove", () => { if (this._g3downs) this._g3lastPtr = Date.now(); }, { passive: true });
+        const release = (e) => {
+          if (e) { if (!this._g3ptrs.delete(e.pointerId)) return; } else this._g3ptrs.clear();
+          this._g3downs = this._g3ptrs.size;
+          if (this._g3downs === 0 && this._g3interacting) {
+            this._g3interacting = false;
+            this._g3Heavy(true);
+            // appena si mollano le dita, in guida la vista torna subito sul mezzo (sempre centrato)
+            if (this._nav?.fix && this._nav.follow && this._isGuida() && this._3d && this._g3ok) { this._g3key = null; this._sync3d(); }
+          }
+        };
+        // il dito può staccarsi sopra un altro elemento (croce dei comandi, barre): il rilascio si ascolta su TUTTA la
+        // finestra. Prima solo sulla mappa 3D: il rilascio si perdeva, risultava "dito appoggiato" e la camera non seguiva più
+        for (const ev of ["pointerup", "pointercancel"]) window.addEventListener(ev, release, { capture: true, passive: true });
+        window.addEventListener("blur", () => release(null));
+        document.addEventListener("visibilitychange", () => { if (document.hidden) release(null); });
+      }
       // sicurezza: se un rilascio sfugge (dito fuori dallo schermo), a telecamera ferma e senza dita giù si rimettono
       g.on("moveend", () => { if (!this._g3downs) { this._g3interacting = false; this._g3Heavy(true); } });
       g.on("render", () => { if (!this._g3interacting) this._scheduleCloudDraw(); });
@@ -4403,6 +4417,12 @@ class NavigatorPanel extends HTMLElement {
   _sync3dCam() {
     const g = this._g3;
     // con le dita sullo schermo (_g3interacting) non si riposiziona la telecamera: il ricentro a ogni GPS bloccava il gesto da vicino
+    // sicurezza: un "dito appoggiato" fermo da troppo o un gesto mai chiuso non devono bloccare per sempre la camera
+    const now = Date.now();
+    if (this._g3interacting && now - (this._g3lastPtr || 0) > 8000) {
+      this._g3ptrs?.clear(); this._g3downs = 0; this._g3interacting = false; this._g3Heavy(true);
+    }
+    if (this._g3gest?.size && !this._g3interacting && now - (this._g3gestT || 0) > 2500) this._g3gest.clear();
     if (!this._3d || !g || this._from3d || this._g3interacting || this._g3gest?.size || this._stepAnim || this._stepK != null) return;
     const nav = this._nav;
     // MapLibre misura lo zoom con riquadri da 512 pixel, Leaflet da 256; in guida si aggiunge la distanza scelta dall'utente
@@ -4576,6 +4596,7 @@ class NavigatorPanel extends HTMLElement {
     // sblocca gesti eventualmente rimasti attivi (il tocco a volte non si "chiude" sul telefono)
     this._g3interacting = false;
     this._g3downs = 0;
+    this._g3ptrs?.clear();
     this._g3gest?.clear?.();
     this._g3Heavy(true);
     // inclinazione a 40° come richiesto; la vista ravvicinata si memorizza così la guida la mantiene
