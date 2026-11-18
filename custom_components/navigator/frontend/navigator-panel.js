@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.86";
+const PANEL_VERSION = "1.9.87";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -572,6 +572,18 @@ const ARR_ICONS = { cover: "🚪", lock: "🔒", switch: "⏻", light: "💡", b
 const VEHICLE_TYPES = [["auto", "🚗", "Auto"], ["moto", "🏍️", "Moto"], ["scooter", "🛵", "Scooter"], ["furgone", "🚐", "Furgone"],
   ["camper", "🚌", "Camper"], ["bici", "🚲", "Bici"], ["altro", "🚙", "Altro"]];
 const vehIcon = (t) => (VEHICLE_TYPES.find((v) => v[0] === t) || VEHICLE_TYPES[0])[1];
+// altezza degli edifici 3D: quella vera se in OpenStreetMap c'è (altezza o piani). Senza dati OpenFreeMap mette 5 m
+// a tutti e il paese sembrava "piatto": lì si sceglie un'altezza da 1 a 3 piani, fissa per ogni edificio (dal suo
+// identificativo), così le case non sono tutte uguali. Non è un'altezza vera, è solo più verosimile.
+const BLD_VAR = [5.5, 6.5, 7, 7.5, 8.5, 9.5, 6, 10.5, 7, 8];
+const BLD_H = ["case", [">", ["coalesce", ["get", "render_height"], 0], 5], ["get", "render_height"],
+  ["match", ["%", ["to-number", ["id"], 3], 10], ...BLD_VAR.flatMap((v, i) => [i, v]), 7]];
+function bldHeight(f) {
+  const h = Number(f?.properties?.render_height) || 0;
+  if (h > 5) return h;
+  const id = Number(f?.id);
+  return Number.isFinite(id) ? BLD_VAR[((id % 10) + 10) % 10] : 7;
+}
 const NIGHT_MODES = [["auto", "Automatica (al tramonto)"], ["on", "Sempre"], ["off", "Mai"]];
 const POI_MIN_ZOOM = 13;
 const NEAR_CATS = { fuel: ["⛽", "Distributori"], parking: ["🅿️", "Parcheggi"], cameras: ["📷", "Autovelox"] };
@@ -3826,7 +3838,7 @@ class NavigatorPanel extends HTMLElement {
   // aspetto degli edifici: semplici (grigio chiaro), colorati secondo l'altezza (bassi chiari, alti azzurri) o con finestre
   _bldPaint(style) {
     const g = this._g3;
-    const h = ["coalesce", ["get", "render_height"], 8];
+    const h = BLD_H;
     const base = { "fill-extrusion-height": h, "fill-extrusion-base": ["coalesce", ["get", "render_min_height"], 0],
       "fill-extrusion-vertical-gradient": true };
     const night = this._nightOn;
@@ -3843,7 +3855,7 @@ class NavigatorPanel extends HTMLElement {
 
   // tetto pieno per lo stile con finestre: lastra di 30 cm sopra l'edificio
   _roofPaint() {
-    const h = ["coalesce", ["get", "render_height"], 8];
+    const h = BLD_H;
     return { "fill-extrusion-color": this._nightOn ? "#30363f" : "#d3d9e0", "fill-extrusion-opacity": 0.95, "fill-extrusion-vertical-gradient": false,
       "fill-extrusion-base": h, "fill-extrusion-height": ["+", h, 0.3] };
   }
@@ -6944,7 +6956,7 @@ class NavigatorPanel extends HTMLElement {
           const cx = ring.reduce((a, p) => a + p[0], 0) / ring.length;
           const cy = ring.reduce((a, p) => a + p[1], 0) / ring.length;
           const grow = (r) => r.map(([x, y]) => [cx + (x - cx) * 1.03, cy + (y - cy) * 1.03]);
-          feats.push({ type: "Feature", properties: { c: POI_KINDS[it.k][2], h: Number(f.properties?.render_height) || 8 },
+          feats.push({ type: "Feature", properties: { c: POI_KINDS[it.k][2], h: bldHeight(f) },
             geometry: { type: "Polygon", coordinates: [grow(ring)] } });
           break;
         }
