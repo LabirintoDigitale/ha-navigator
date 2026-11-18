@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.75";
+const PANEL_VERSION = "1.9.76";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -4020,8 +4020,92 @@ class NavigatorPanel extends HTMLElement {
     return tex;
   }
 
+  // fuoristrada/SUV a tre porte sul modello della Daihatsu Feroza: due colori (sopra il colore del mezzo, sotto grigio
+  // argento), cofano corto e abitacolo alto squadrato, parafanghi neri sporgenti, paraurti e bull bar neri, fari quadrati,
+  // ruota di scorta sul portellone, fanali verticali agli angoli, gomme grosse. Misure in metri; avanti = +Z
+  _buildFeroza(color, plate) {
+    const THREE = this._THREE;
+    const night = this._nightOn;
+    const grp = new THREE.Group();
+    const L = 3.75, W = 1.62, H = 1.74, zf = L / 2, zr = -L / 2;
+    const lam = (c) => new THREE.MeshLambertMaterial({ color: new THREE.Color(c), side: THREE.DoubleSide });
+    const upper = lam(color || "#1b1f27"), silver = lam("#b4b9c0"), black = lam("#17191c");
+    const glassM = lam(night ? "#162235" : "#2d405a"), lightM = lam(night ? "#fff1b0" : "#eef0e2");
+    const amber = lam("#f29b1d"), red = lam("#c4161c"), rim = lam("#5b3a28"), grey = lam("#8a9099");
+    const box = (w, h, l, m, x, y, z) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, l), m); b.position.set(x, y, z); grp.add(b); return b; };
+    const cyl = (r, len, m, x, y, z, axis) => {
+      const c = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 20), m);
+      if (axis === "x") c.rotation.z = Math.PI / 2; else if (axis === "z") c.rotation.x = Math.PI / 2;
+      c.position.set(x, y, z); grp.add(c); return c;
+    };
+    // fascia bassa argento
+    box(W, 0.48, L - 0.04, silver, 0, 0.68, 0);
+    // scocca superiore: profilo laterale (cofano corto, parabrezza inclinato, tetto piatto) estruso sulla larghezza
+    const Wu = W * 0.97;
+    const sh = new THREE.Shape();
+    sh.moveTo(zf - 0.04, 0.9); sh.lineTo(zf - 0.04, 1.03); sh.lineTo(zf - 1.1, 1.07); sh.lineTo(zf - 1.42, H - 0.03);
+    sh.lineTo(zr + 0.06, H); sh.lineTo(zr + 0.02, H - 0.06); sh.lineTo(zr + 0.02, 0.9); sh.lineTo(zf - 0.04, 0.9);
+    const eg = new THREE.ExtrudeGeometry(sh, { depth: Wu, bevelEnabled: false });
+    eg.rotateY(-Math.PI / 2); eg.translate(Wu / 2, 0, 0);
+    grp.add(new THREE.Mesh(eg, upper));
+    // vetri: fascia laterale, montante centrale, parabrezza inclinato e lunotto
+    const zA = zf - 1.47, zB = zr + 0.15;
+    box(Wu + 0.014, 0.46, zA - zB, glassM, 0, 1.39, (zA + zB) / 2);
+    box(Wu + 0.03, 0.5, 0.1, upper, 0, 1.39, zf - 2.15);
+    const z1 = zf - 1.1, y1 = 1.07, z2 = zf - 1.42, y2 = H - 0.03, len = Math.hypot(z2 - z1, y2 - y1), a = Math.atan2(z2 - z1, y2 - y1);
+    const ws = new THREE.Mesh(new THREE.PlaneGeometry(Wu * 0.86, len * 0.84), glassM);
+    ws.rotation.x = a;
+    ws.position.set(0, (y1 + y2) / 2 - Math.sin(a) * 0.012, (z1 + z2) / 2 + Math.cos(a) * 0.012);
+    grp.add(ws);
+    const rw = new THREE.Mesh(new THREE.PlaneGeometry(Wu * 0.8, 0.44), glassM);
+    rw.rotation.y = Math.PI; rw.position.set(0, 1.4, zr + 0.008); grp.add(rw);
+    // parafanghi neri sporgenti sulle ruote
+    const zW = [zf - 0.71, zr + 0.76];
+    for (const zw of zW) box(W + 0.1, 0.32, 0.98, black, 0, 0.73, zw);
+    // ruote: gomme tassellate nere, cerchi color ruggine
+    for (const zw of zW) for (const sx of [-1, 1]) {
+      cyl(0.37, 0.27, black, sx * (W / 2 - 0.09), 0.37, zw, "x");
+      cyl(0.21, 0.285, rim, sx * (W / 2 - 0.09), 0.37, zw, "x");
+      cyl(0.06, 0.3, grey, sx * (W / 2 - 0.09), 0.37, zw, "x");
+    }
+    // davanti: paraurti, griglia, fari quadrati, frecce, bull bar
+    box(W + 0.06, 0.2, 0.18, black, 0, 0.5, zf + 0.02);
+    box(0.62, 0.2, 0.03, black, 0, 0.8, zf + 0.0);
+    for (const sx of [-1, 1]) {
+      box(0.25, 0.2, 0.03, lightM, sx * 0.5, 0.8, zf + 0.0);
+      box(0.16, 0.07, 0.03, amber, sx * 0.53, 0.64, zf + 0.0);
+      cyl(0.035, 0.6, black, sx * 0.42, 0.74, zf + 0.2);
+    }
+    cyl(0.035, 0.9, black, 0, 1.04, zf + 0.2, "x");
+    cyl(0.03, 0.84, black, 0, 0.74, zf + 0.2, "x");
+    // dietro: paraurti, fanali verticali agli angoli, ruota di scorta sul portellone
+    box(W + 0.06, 0.2, 0.18, black, 0, 0.5, zr - 0.02);
+    for (const sx of [-1, 1]) {
+      box(0.13, 0.13, 0.03, amber, sx * (W / 2 - 0.09), 1.0, zr - 0.005);
+      box(0.13, 0.2, 0.03, red, sx * (W / 2 - 0.09), 0.82, zr - 0.005);
+    }
+    cyl(0.35, 0.22, black, 0, 1.08, zr - 0.13, "z");
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.31, 0.022, 8, 32), grey);
+    ring.position.set(0, 1.08, zr - 0.245); grp.add(ring);
+    // targa sul paraurti posteriore, spostata di lato come sull'originale (più grande del vero per leggerla)
+    if (plate) {
+      const tex = this._plateTexture(plate);
+      const pw = 0.95, ph = pw * 0.22;
+      const pm = new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide, depthWrite: false });
+      const pl = new THREE.Mesh(new THREE.PlaneGeometry(pw, ph), pm);
+      pl.position.set(0.24, 0.6, zr - 0.116);
+      pl.rotation.y = Math.PI; grp.add(pl);
+      grp.userData.plateTex = tex;
+    }
+    return grp;
+  }
+
   // costruisce il mezzo come un unico gruppo di forme solide, con la targa sul retro
   _buildCar3dMesh(kind, color) {
+    if (kind === "suv" || kind === "jeep") {
+      const v0 = this._curVehicle();
+      return this._buildFeroza(color, v0?.type && v0?.plate ? v0.plate : "");
+    }
     const THREE = this._THREE;
     const night = this._nightOn;
     const grp = new THREE.Group();
