@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.83";
+const PANEL_VERSION = "1.9.84";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1083,6 +1083,8 @@ const STYLE = `
   .navbot .rem { font-size: 18px; font-weight: 600; }
   .navbot .tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: auto; }
   .navbot button { padding: 0 10px; height: 36px; min-width: 36px; font-size: 15px; }
+  /* tipo di mappa: solo l'icona dei livelli (il nome compare per un attimo quando si cambia) */
+  .navbot .layerbtn svg { width: 22px; height: 22px; display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; }
   .navbot button.attn { background: var(--primary-color); color: var(--text-primary-color, #fff); border-color: var(--primary-color); }
   .navbot button.stop { background: #c62828; color: #fff; border-color: #c62828; font-size: 14px; }
   .navbot select { height: 36px; font: inherit; font-size: 13px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--divider-color);
@@ -5829,7 +5831,7 @@ class NavigatorPanel extends HTMLElement {
         <button data-n="center" title="Centra sulla tua posizione">◎</button>
         <button data-n="near" title="Distributori, parcheggi e autovelox">🔎</button>
         <button data-n="3d" class="b3d" title="Vista 3D con rilievo ed edifici">3D</button>
-        <button data-n="layer" class="layerbtn" title="Cambia tipo di mappa">${esc(LAYERS[this._layer][0].split(" ")[0])}</button>
+        <button data-n="layer" class="layerbtn" title="Cambia tipo di mappa"><svg viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 12.5l9 5 9-5"/><path d="M3 16.5l9 5 9-5"/></svg></button>
         <button class="stop" data-n="stop" title="Ferma la navigazione">■ Ferma</button>
       </div>`;
     bot.querySelector('[data-n="center"]').addEventListener("click", () => this._recenter());
@@ -5860,7 +5862,7 @@ class NavigatorPanel extends HTMLElement {
     this._setLayer(next);
     const sel = this.$("layer"); if (sel) sel.value = next;
     const btn = this.$("navbot")?.querySelector('[data-n="layer"]');
-    if (btn) btn.textContent = LAYERS[next][0].split(" ")[0];
+    if (btn) btn.title = `Mappa: ${LAYERS[next][0]} (tocca per cambiare)`;
     if (this.$("gattr")) this.$("gattr").innerHTML = LAYERS[next][3];
     this._msg(LAYERS[next][0]);
     this._saveState();
