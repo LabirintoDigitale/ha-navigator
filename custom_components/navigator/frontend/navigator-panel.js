@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.78";
+const PANEL_VERSION = "1.9.79";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1003,6 +1003,14 @@ const STYLE = `
   h3.cbh .cbcar { display: inline-block; transition: transform .15s; font-size: 12px; opacity: .65; }
   h3.cbh.open .cbcar { transform: rotate(90deg); }
   h3.cbh:not(.open) + .cbbody { display: none; }
+  /* ricerca, veicolo e itinerario: dopo "Calcola percorso" si richiudono in una riga col riassunto del viaggio */
+  h3.cbh.planh { margin: 0; padding: 12px 14px; border-bottom: 1px solid var(--divider-color); font-size: 14px; font-weight: 500;
+    text-transform: none; letter-spacing: 0; color: var(--primary-text-color); background: var(--secondary-background-color, rgba(127,127,127,.08)); }
+  h3.cbh.planh[hidden] { display: none; }
+  h3.cbh.planh .cbcar { font-size: 14px; opacity: .8; }
+  h3.cbh.planh .plansum { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  h3.cbh.planh .planedit { font-size: 12px; color: var(--primary-color); flex: none; }
+  h3.cbh.planh.open .planedit { display: none; }
   .fav { display: flex; align-items: center; gap: 6px; padding: 5px 0; }
   .fav .nm { flex: 1; min-width: 0; cursor: pointer; } .fav .nm small { display: block; color: var(--secondary-text-color); }
   .fav .nm:hover { color: var(--primary-color); }
@@ -1457,6 +1465,8 @@ class NavigatorPanel extends HTMLElement {
           <div class="sidetabs" id="sidetabs">
             <button data-tab="viaggio" class="on">🧭 Viaggio</button><button data-tab="live">📡 Live</button><button data-tab="archivio">🗂️ Archivio</button></div>
           <div id="tabViaggio">
+          <h3 class="cbh open planh" id="planh" hidden title="Tocca per riaprire ricerca, veicolo e itinerario"><span class="cbcar">▸</span><span class="plansum" id="plansum">Ricerca e itinerario</span><span class="planedit">Modifica</span></h3>
+          <div class="cbbody" id="planbody">
           <div class="sec">
             <h3>Cerca un luogo</h3>
             <div class="field search"><input type="text" id="q" placeholder="Indirizzo, città, attività…" autocomplete="off"></div>
@@ -1476,6 +1486,7 @@ class NavigatorPanel extends HTMLElement {
             </div>
             <div id="srcbox" style="margin-top:10px"></div>
             <div class="row" style="margin-top:10px"><button class="primary" id="go" style="flex:1">Calcola percorso</button></div>
+          </div>
           </div>
           <div id="results"></div>
           <div class="sec" id="favsec"></div>
@@ -1617,7 +1628,12 @@ class NavigatorPanel extends HTMLElement {
     $("settingsbtn").addEventListener("click", () => this._openSettings());
     try { window.speechSynthesis?.addEventListener?.("voiceschanged", () => { if (!this.$("setwrap").hidden) this._openSettings(); }); } catch (e) { /* nessuna voce */ }
     $("fit").addEventListener("click", () => this._fit());
-    $("go").addEventListener("click", () => this._compute());
+    $("go").addEventListener("click", async () => {
+      await this._compute();
+      if (this._result) this.$("planh").classList.remove("open"); // calcolato: ricerca e itinerario si richiudono
+      this._planSync();
+    });
+    $("planh").addEventListener("click", () => $("planh").classList.toggle("open"));
     $("addstop").addEventListener("click", () => { this._points.splice(this._points.length - 1, 0, null); this._renderPoints(true); });
     $("swap").addEventListener("click", () => { this._points.reverse(); this._afterPointsChange(); });
     $("clear").addEventListener("click", () => {
@@ -1627,6 +1643,8 @@ class NavigatorPanel extends HTMLElement {
       this._result = null;
       this._afterPointsChange(false);
       this._renderResults();
+      this.$("planh").classList.add("open");
+      this._planSync();
     });
     for (const k of ["tolls", "highways", "ferries"]) {
       const cb = $(`av_${k}`);
@@ -6883,7 +6901,19 @@ class NavigatorPanel extends HTMLElement {
     this._compute(false);
   }
 
+  // intestazione richiudibile di ricerca/veicolo/itinerario: c'è solo con un percorso calcolato; riassume il viaggio
+  _planSync() {
+    const h = this.$("planh");
+    if (!h) return;
+    h.hidden = !this._result;
+    if (!this._result) h.classList.add("open"); // senza percorso la parte resta sempre aperta
+    const pts = this._points || [];
+    const a = pts[0], z = pts[pts.length - 1];
+    this.$("plansum").textContent = a && z ? `${a.name || "Partenza"} → ${z.name || "Arrivo"}` : "Ricerca e itinerario";
+  }
+
   _renderResults() {
+    this._planSync();
     // percorso cambiato (nuovo calcolo o altra alternativa): l'anteprima dell'indicazione non vale più
     if (this._stepK != null && this._stepRt !== this._result?.routes[this._sel]) this._stepClose();
     const box = this.$("results");
