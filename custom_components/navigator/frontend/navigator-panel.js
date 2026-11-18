@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.80";
+const PANEL_VERSION = "1.9.81";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1250,11 +1250,16 @@ const STYLE = `
   .pitchctl button:disabled { opacity: .35; }
   .pitchctl svg { width: 22px; height: 22px; display: block; margin: auto; fill: none; stroke: currentColor; stroke-width: 2.6;
     stroke-linecap: round; stroke-linejoin: round; }
-  .pitchctl span { font: 600 12px sans-serif; padding: 1px 0; }
-  /* mappa piatta (2D): niente inclinazione, solo i due zoom affiancati */
-  .pitchctl.twod { grid-template-columns: 40px 40px; grid-template-rows: 36px; }
-  .pitchctl.twod .up, .pitchctl.twod .down, .pitchctl.twod .mid { display: none; }
-  .pitchctl.twod .left { grid-area: 1 / 1; } .pitchctl.twod .right { grid-area: 1 / 2; }
+  .pitchctl .mid svg { width: 24px; height: 24px; stroke-width: 1.8; }
+  .pitchctl .mid.day svg { fill: #ffd54f; stroke: #ffd54f; }
+  .pitchctl .mid.day svg .base { fill: none; stroke: #fff; }
+  .pitchctl .mid.night svg { stroke: #9aa0a6; }
+  /* mappa piatta (2D): niente inclinazione, − lampadina + in fila */
+  .pitchctl.twod { grid-template-rows: 36px; }
+  .pitchctl.twod .up, .pitchctl.twod .down { display: none; }
+  .pitchctl.twod .left { grid-area: 1 / 1; } .pitchctl.twod .mid { grid-area: 1 / 2; } .pitchctl.twod .right { grid-area: 1 / 3; }
+  /* fuori dalla guida: in alto a sinistra, al posto dello zoom di Leaflet */
+  .pitchctl.plan { right: auto; left: 10px; top: 10px; }
   /* galleria: animazione stilizzata di un tunnel che si percorre (archi che vengono incontro, luci, strada) */
   .tunfx { position: absolute; inset: 0; z-index: 960; pointer-events: none; overflow: hidden; opacity: 0; transition: opacity .6s;
     background: radial-gradient(ellipse at 50% 45%, #4a3f2e 0%, #1d1913 40%, #060606 100%); --tfd: 2.4s; }
@@ -1509,7 +1514,7 @@ class NavigatorPanel extends HTMLElement {
           <div class="pitchctl" id="pitchctl" hidden>
             <button class="up" data-p="-15" title="Più dall'alto"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></button>
             <button class="left" data-z="-1" title="Riduci">−</button>
-            <span class="mid" id="pitchval"></span>
+            <button class="mid" id="nightbtn" title="Giorno / notte"></button>
             <button class="right" data-z="1" title="Ingrandisci">+</button>
             <button class="down" data-p="15" title="Più bassa, come dall'auto"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
           </div>
@@ -1536,13 +1541,14 @@ class NavigatorPanel extends HTMLElement {
 
     // mappa
     const home = [this._hass.config.latitude, this._hass.config.longitude];
-    this._map = L.map($("map"), { zoomControl: true, attributionControl: true }).setView(home, 12);
+    this._map = L.map($("map"), { zoomControl: false, attributionControl: true }).setView(home, 12);
     const dark = this._hass.themes?.darkMode;
     if (!this._layer || !LAYERS[this._layer]) this._layer = dark ? "scura" : "strade";
     for (const [k, v] of Object.entries(LAYERS)) $("layer").insertAdjacentHTML("beforeend", `<option value="${k}">${v[0]}</option>`);
     $("layer").value = this._layer;
     $("layer").addEventListener("change", (e) => { this._setLayer(e.target.value); this._saveState(); });
     this._setLayer(this._layer);
+    this._placePitchCtl();
     this._routeLayer = L.layerGroup().addTo(this._map);
     this._markerLayer = L.layerGroup().addTo(this._map);
     this._poiLayer = L.layerGroup().addTo(this._map);
@@ -1607,6 +1613,7 @@ class NavigatorPanel extends HTMLElement {
     $("fullbtn").addEventListener("click", () => this._toggleFull());
     $("b3dbtn").addEventListener("click", () => this._toggle3d());
     $("pitchctl").querySelectorAll("[data-p]").forEach((b) => b.addEventListener("click", () => this._setPitch3d(+b.dataset.p)));
+    $("nightbtn").addEventListener("click", () => this._toggleNight());
     $("pitchctl").querySelectorAll("[data-z]").forEach((b) => b.addEventListener("click", () => this._zoomStep(+b.dataset.z)));
     this._map.on("moveend zoomend", () => this._sync3d());
     if (this._settings.view3d) setTimeout(() => this._toggle3d(true), 0);
@@ -3250,17 +3257,37 @@ class NavigatorPanel extends HTMLElement {
   _placePitchCtl(pitch) {
     const el = this.$("pitchctl");
     if (!el) return;
-    // in guida il comando c'è sempre (zoom −/+); in 3D mostra anche l'inclinazione (croce), in 2D solo i due zoom
-    el.hidden = !(this._isGuida() && this._nav);
-    if (el.hidden) return;
+    // sempre visibile: zoom −/+ con la lampadina giorno/notte in mezzo; in 3D anche l'inclinazione (croce)
+    const guida = !!(this._isGuida() && this._nav);
+    el.hidden = false;
     el.classList.toggle("twod", !this._3d);
+    el.classList.toggle("plan", !guida);
+    this._syncNightBtn();
     const top = this.$("navtop");
-    el.style.top = top && !top.hidden ? `${top.offsetTop + top.offsetHeight + 8}px` : "56px";
+    el.style.top = !guida ? "" : top && !top.hidden ? `${top.offsetTop + top.offsetHeight + 8}px` : "56px";
     if (!this._3d || !this._g3) return;
     const p = Math.round(pitch ?? this._g3.getPitch());
-    this.$("pitchval").textContent = `${p}°`;
     el.querySelector('[data-p="-15"]').disabled = p <= 0;
     el.querySelector('[data-p="15"]').disabled = p >= 80;
+  }
+
+  // lampadina: accesa (gialla) di giorno, spenta di notte; il tocco passa all'altra modalità e la fissa
+  _syncNightBtn() {
+    const b = this.$("nightbtn");
+    if (!b) return;
+    const n = this._isNight();
+    if (b.dataset.n === String(n)) return;
+    b.dataset.n = String(n);
+    b.className = `mid ${n ? "night" : "day"}`;
+    b.title = n ? "Modalità notte: tocca per il giorno" : "Modalità giorno: tocca per la notte";
+    b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M9 17.5h6M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.3 1.1 2.2v.5h5V16c0-.9.4-1.6 1.1-2.2A6 6 0 0 0 12 3z"/><path class="base" d="M10 20.5h4"/></svg>';
+  }
+
+  _toggleNight() {
+    this._settings.nightMode = this._isNight() ? "off" : "on";
+    this._saveSettings();
+    this._applyNight();
+    this._syncNightBtn();
   }
 
   _sync3dBtns() {
@@ -5796,6 +5823,7 @@ class NavigatorPanel extends HTMLElement {
       this._sync3d();
       return;
     }
+    if (this._3d && this._g3) { if (d > 0) this._g3.zoomIn(); else this._g3.zoomOut(); this._afterZoom(); return; }
     if (d > 0) this._map.zoomIn(); else this._map.zoomOut();
     this._afterZoom();
   }
@@ -6557,6 +6585,7 @@ class NavigatorPanel extends HTMLElement {
     const n = this._isNight();
     if (n === this._nightOn) return;
     this._nightOn = n;
+    this._syncNightBtn();
     this.$("map").classList.toggle("night", n);
     if (this._layer) this._setLayer(this._layer);
     if (this._g3 && this._g3ok) {
