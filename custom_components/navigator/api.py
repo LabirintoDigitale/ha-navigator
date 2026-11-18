@@ -18,6 +18,67 @@ import aiohttp
 from .const import LANGUAGES, MAX_EXCLUDE, MODES, USER_AGENT
 
 TIMEOUT = aiohttp.ClientTimeout(total=30)
+IMAGERY_IDENTIFY = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/identify"
+
+
+def _imagery_date(value: Any) -> tuple[int, int, int] | None:
+    """Data dei metadati Esri: "20200615", millisecondi dal 1970, "2020-06-15" o "6/15/2020"."""
+    if value is None or value == "":
+        return None
+    txt = str(value).strip()
+    if re.fullmatch(r"\d{8}", txt):
+        y, m, d = int(txt[:4]), int(txt[4:6]), int(txt[6:8])
+    elif re.fullmatch(r"-?\d{10,14}(\.\d+)?", txt):
+        t = time.gmtime(float(txt) / 1000)
+        y, m, d = t.tm_year, t.tm_mon, t.tm_mday
+    elif mt := re.match(r"(\d{4})-(\d{1,2})-(\d{1,2})", txt):
+        y, m, d = (int(g) for g in mt.groups())
+    elif mt := re.match(r"(\d{1,2})/(\d{1,2})/(\d{4})", txt):
+        m, d, y = (int(g) for g in mt.groups())
+    else:
+        return None
+    if not (1970 <= y <= 2100 and 1 <= m <= 12 and 1 <= d <= 31):
+        return None
+    return y, m, d
+
+
+def _pick(attrs: dict, *names: str) -> Any:
+    low = {str(k).lower(): v for k, v in attrs.items()}
+    for n in names:
+        if (v := low.get(n.lower())) not in (None, "", "Null"):
+            return v
+    return None
+
+
+def imagery_meta(data: dict, zoom: int) -> dict:
+    """Dalla risposta "identify" di World Imagery: la foto mostrata a quello zoom (o la più dettagliata)."""
+    cands = []
+    for res in (data or {}).get("results") or []:
+        a = res.get("attributes") or {}
+        date = _imagery_date(_pick(a, "SRC_DATE", "Date (YYYYMMDD)", "SRC_DATE2", "Date"))
+        if not date:
+            continue
+        try:
+            resm = float(_pick(a, "SRC_RES", "Resolution (Meters)", "Resolution") or 0) or None
+        except (TypeError, ValueError):
+            resm = None
+        try:
+            lo = int(float(_pick(a, "MinMapLevel", "Min Map Level") or 0))
+            hi = int(float(_pick(a, "MaxMapLevel", "Max Map Level") or 23))
+        except (TypeError, ValueError):
+            lo, hi = 0, 23
+        cands.append({
+            "date": f"{date[0]:04d}-{date[1]:02d}-{date[2]:02d}", "year": date[0], "month": date[1],
+            "res": resm, "source": str(_pick(a, "NICE_NAME", "Source") or ""),
+            "sensor": str(_pick(a, "SRC_DESC", "Description") or ""), "fits": lo <= zoom <= hi,
+        })
+    if not cands:
+        return {"found": False}
+    cands.sort(key=lambda c: (not c["fits"], c["res"] if c["res"] else 999, c["date"]))
+    best = cands[0]
+    best.pop("fits", None)
+    return {"found": True, **best}
+
 LANES_TIMEOUT = aiohttp.ClientTimeout(total=6)  # le corsie sono un di più: il percorso non le aspetta a lungo
 
 _LOGGER = logging.getLogger(__name__)
@@ -211,6 +272,32 @@ class MapServices:
                 }
             except (aiohttp.ClientError, asyncio.TimeoutError, NavigatorError, ValueError):
                 result = {"name": f"{lat:.5f}, {lon:.5f}", "address": "", "lat": lat, "lon": lon}
+        self._cache_put(key, result)
+        return result
+
+    # ------------------------------------------------------------------ data delle foto satellitari
+
+    async def imagery(self, lat: float, lon: float, zoom: float = 17) -> dict:
+        """Data dello scatto della foto satellitare Esri World Imagery in un punto (servizio pubblico, senza chiave).
+
+        Si interroga il servizio di metadati della stessa mappa usata per le foto: per ogni livello di dettaglio dice
+        data, risoluzione, fornitore e satellite. Si sceglie la foto mostrata a quello zoom (o la più dettagliata).
+        """
+        z = int(max(0, min(23, round(zoom))))
+        key = f"img|{lat:.4f}|{lon:.4f}|{z}"
+        if (cached := self._cache_get(key)) is not None:
+            return cached
+        d = 0.01
+        params = {
+            "geometry": f"{lon},{lat}", "geometryType": "esriGeometryPoint", "sr": 4326, "layers": "all",
+            "tolerance": 2, "mapExtent": f"{lon - d},{lat - d},{lon + d},{lat + d}", "imageDisplay": "400,400,96",
+            "returnGeometry": "false", "f": "json",
+        }
+        try:
+            data = await self._get_json(IMAGERY_IDENTIFY, params)
+        except (aiohttp.ClientError, asyncio.TimeoutError, NavigatorError, ValueError):
+            return {"found": False}
+        result = imagery_meta(data, z)
         self._cache_put(key, result)
         return result
 

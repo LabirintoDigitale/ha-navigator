@@ -32,7 +32,7 @@ def async_setup(hass: HomeAssistant) -> None:
         return
     for handler in (ws_info, ws_search, ws_reverse, ws_route, ws_place_save, ws_place_delete, ws_recent_clear, ws_nearby,
                     ws_poi_tile, ws_live, ws_weather, ws_trip_save, ws_trips, ws_trip, ws_trip_delete, ws_garage,
-                    ws_garage_save, ws_trip_start, ws_trip_append, ws_trip_finish, ws_poi_tiles, ws_poi_info, ws_live_all, ws_garage_select, ws_cameras_area):
+                    ws_garage_save, ws_trip_start, ws_trip_append, ws_trip_finish, ws_poi_tiles, ws_poi_info, ws_live_all, ws_garage_select, ws_cameras_area, ws_imagery):
         websocket_api.async_register_command(hass, handler)
     hass.data[DATA_WS_REGISTERED] = True
 
@@ -107,6 +107,21 @@ async def ws_search(hass: HomeAssistant, connection: websocket_api.ActiveConnect
 async def ws_reverse(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
     async def go():
         return await _data(hass).maps.reverse(msg["lat"], msg["lon"])
+
+    await _run(connection, msg["id"], go())
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "navigator/imagery",
+    vol.Required("lat"): vol.Coerce(float),
+    vol.Required("lon"): vol.Coerce(float),
+    vol.Optional("zoom", default=17): vol.Coerce(float),
+})
+@websocket_api.async_response
+async def ws_imagery(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Data dello scatto della foto satellitare nel punto (metadati Esri World Imagery)."""
+    async def go():
+        return await _data(hass).maps.imagery(msg["lat"], msg["lon"], msg["zoom"])
 
     await _run(connection, msg["id"], go())
 

@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.79";
+const PANEL_VERSION = "1.9.80";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1012,6 +1012,7 @@ const STYLE = `
   h3.cbh.planh .planedit { font-size: 12px; color: var(--primary-color); flex: none; }
   h3.cbh.planh.open .planedit { display: none; }
   .fav { display: flex; align-items: center; gap: 6px; padding: 5px 0; }
+  .popup .imgdate { font-size: 12px; color: var(--secondary-text-color, #666); margin: 2px 0 6px; }
   .fav .nm { flex: 1; min-width: 0; cursor: pointer; } .fav .nm small { display: block; color: var(--secondary-text-color); }
   .fav .nm:hover { color: var(--primary-color); }
   .muted { color: var(--secondary-text-color); font-size: 13px; }
@@ -2047,6 +2048,7 @@ class NavigatorPanel extends HTMLElement {
     const el = document.createElement("div");
     el.className = "popup";
     el.innerHTML = `<div class="n"><span class="loading"></span> Cerco l'indirizzo…</div><div class="a">${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}</div>
+      <div class="imgdate" hidden></div>
       <div class="row"><button data-a="start">Parti da qui</button><button data-a="stop">＋ Tappa</button>
       <button data-a="dest">Arriva qui</button><button data-a="fav">★</button></div>`;
     // i popup di Leaflet vivono nello shadow DOM: servono gli stili del pannello; in 3D il popup va sulla vista 3D
@@ -2066,6 +2068,7 @@ class NavigatorPanel extends HTMLElement {
       if (popup) this._map.closePopup(popup);
       this._placeAction(b.dataset.a, place);
     }));
+    this._mapInfoLine(el.querySelector(".imgdate"), latlng);
     try {
       const r = await this._hass.callWS({ type: "navigator/reverse", lat: latlng.lat, lon: latlng.lng });
       place = { ...place, name: r.name, address: r.address };
@@ -2073,6 +2076,33 @@ class NavigatorPanel extends HTMLElement {
       el.querySelector(".a").textContent = r.address || el.querySelector(".a").textContent;
     } catch (err) {
       el.querySelector(".n").textContent = "Punto sulla mappa";
+    }
+  }
+
+  // riga sulla mappa nel popup: con il satellite la data dello scatto della foto in quel punto (metadati Esri),
+  // con le altre mappe il nome e che sono disegnate da dati aggiornati di continuo
+  async _mapInfoLine(box, latlng) {
+    if (!box) return;
+    const key = this._effLayer(this._layer);
+    const name = LAYERS[key]?.[0] || "";
+    if (key !== "sat") {
+      box.textContent = `Mappa ${name}: dati aggiornati di continuo`;
+      box.hidden = false;
+      return;
+    }
+    box.textContent = "Foto satellitare: cerco la data…";
+    box.hidden = false;
+    const zoom = this._3d && this._g3 ? this._g3.getZoom() + 1 : this._map.getZoom();
+    try {
+      const r = await this._hass.callWS({ type: "navigator/imagery", lat: latlng.lat, lon: latlng.lng, zoom });
+      if (!r?.found) { box.textContent = "Foto satellitare: data non disponibile qui"; return; }
+      const mesi = ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"];
+      const quando = r.month ? `${mesi[r.month - 1]} ${r.year}` : String(r.year);
+      const res = r.res ? (r.res < 1 ? `${Math.round(r.res * 100)} cm` : `${String(Math.round(r.res * 10) / 10).replace(".", ",")} m`) : "";
+      const chi = [r.source, r.sensor].filter(Boolean).join(" · ");
+      box.textContent = `Foto satellitare di ${quando}${res ? ` · dettaglio ${res}` : ""}${chi ? ` · ${chi}` : ""}`;
+    } catch (e) {
+      box.textContent = "Foto satellitare: data non disponibile";
     }
   }
 
