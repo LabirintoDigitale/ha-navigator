@@ -323,8 +323,8 @@ async def ws_live_all(hass: HomeAssistant, connection: websocket_api.ActiveConne
         for user_id, st in data.live.active().items():
             track = []
             if st.get("trip_id"):
-                t = data.trips.get(user_id, st["trip_id"])
-                track = list((t or {}).get("track") or [])[-600:]
+                t = await data.trips.get(user_id, st["trip_id"], last=600)
+                track = list((t or {}).get("track") or [])
             if st.get("plat") is not None and st.get("plon") is not None:
                 track.append([round(st["plat"], 5), round(st["plon"], 5)])
             out.append({**{k: v for k, v in st.items() if k != "trip_id"}, "user_id": user_id,
@@ -358,8 +358,8 @@ async def ws_trip_save(hass: HomeAssistant, connection: websocket_api.ActiveConn
         trip = {k: t.get(k) for k in ("start", "end", "from", "to", "mode", "km", "duration", "avg", "max")}
         veh = t.get("vehicle") if isinstance(t.get("vehicle"), dict) else {}
         trip["vehicle"] = {k: str(veh.get(k) or "")[:40] for k in ("id", "name", "plate", "type")}
-        trip["track"] = [[round(float(p[0]), 5), round(float(p[1]), 5)] for p in (t.get("track") or []) if len(p) >= 2][:20000]
-        item = _data(hass).trips.add(uid, trip)
+        trip["track"] = [[round(float(p[0]), 5), round(float(p[1]), 5)] for p in (t.get("track") or []) if len(p) >= 2][:50000]
+        item = await _data(hass).trips.add(uid, trip)
         return {"id": item["id"]}
 
     await _run(connection, msg["id"], go())
@@ -371,7 +371,7 @@ async def ws_trips(hass: HomeAssistant, connection: websocket_api.ActiveConnecti
     """Diario dei viaggi dell'utente collegato (senza le tracce)."""
     async def go():
         uid, _name = _user(connection)
-        return {"trips": _data(hass).trips.summaries(uid)}
+        return {"trips": await _data(hass).trips.summaries(uid)}
 
     await _run(connection, msg["id"], go())
 
@@ -381,7 +381,7 @@ async def ws_trips(hass: HomeAssistant, connection: websocket_api.ActiveConnecti
 async def ws_trip(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
     async def go():
         uid, _name = _user(connection)
-        trip = _data(hass).trips.get(uid, msg["trip_id"])
+        trip = await _data(hass).trips.get(uid, msg["trip_id"])
         if trip is None:
             raise NavigatorError("Viaggio non trovato")
         return trip
@@ -394,8 +394,8 @@ async def ws_trip(hass: HomeAssistant, connection: websocket_api.ActiveConnectio
 async def ws_trip_delete(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
     async def go():
         uid, _name = _user(connection)
-        _data(hass).trips.delete(uid, msg["trip_id"])
-        return {"trips": _data(hass).trips.summaries(uid)}
+        await _data(hass).trips.delete(uid, msg["trip_id"])
+        return {"trips": await _data(hass).trips.summaries(uid)}
 
     await _run(connection, msg["id"], go())
 
@@ -453,7 +453,7 @@ async def ws_trip_start(hass: HomeAssistant, connection: websocket_api.ActiveCon
         meta = {k: str(t.get(k) or "")[:80] for k in ("from", "to", "mode")}
         meta["start"] = float(t.get("start") or 0) or None
         meta["vehicle"] = _vehicle(t.get("vehicle"))
-        return {"id": _data(hass).trips.start(uid, meta)["id"]}
+        return {"id": (await _data(hass).trips.start(uid, meta))["id"]}
 
     await _run(connection, msg["id"], go())
 
@@ -472,8 +472,8 @@ async def ws_trip_append(hass: HomeAssistant, connection: websocket_api.ActiveCo
         stats = {k: float(st[k]) for k in ("km", "duration", "avg", "max", "end") if isinstance(st.get(k), (int, float))}
         if st.get("to"):
             stats["to"] = str(st["to"])[:80]
-        ok = _data(hass).trips.append(uid, msg["trip_id"], _points(msg["points"]), stats)
-        if ok is None:
+        ok = await _data(hass).trips.append(uid, msg["trip_id"], _points(msg["points"]), stats)
+        if not ok:
             raise NavigatorError("Viaggio non trovato")
         return {"ok": True}
 
@@ -485,7 +485,7 @@ async def ws_trip_append(hass: HomeAssistant, connection: websocket_api.ActiveCo
 async def ws_trip_finish(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
     async def go():
         uid, _name = _user(connection)
-        _data(hass).trips.finish(uid, msg["trip_id"])
+        await _data(hass).trips.finish(uid, msg["trip_id"])
         return {"ok": True}
 
     await _run(connection, msg["id"], go())

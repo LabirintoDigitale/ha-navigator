@@ -116,6 +116,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: NavigatorConfigEntry) -
     """Rimuove il pannello e i sensori."""
     ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     entry.runtime_data.live.async_unload()
+    await entry.runtime_data.trips.async_close()
     frontend.async_remove_panel(hass, PANEL_URL)
     hass.data.pop(DOMAIN, None)
     return ok

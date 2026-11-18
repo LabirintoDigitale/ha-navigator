@@ -1,10 +1,23 @@
-"""Diario dei viaggi e garage (veicoli) di ogni utente, salvati nello storage di Home Assistant."""
+"""Diario dei viaggi (database SQLite) e garage (veicoli) di ogni utente.
+
+I viaggi stanno in un database SQLite nella cartella di configurazione di Home Assistant (`navigator_trips.db`):
+una riga per viaggio e una riga per ogni punto della traccia. Così l'archivio può crescere per anni senza
+riscrivere ogni volta un unico file JSON, e senza limite al numero di viaggi. Garage e veicolo scelto, piccoli,
+restano nello storage di Home Assistant. Alla prima partenza i viaggi del vecchio file JSON vengono copiati nel
+database e tolti dal file.
+
+Le operazioni sul database girano fuori dal ciclo di Home Assistant (executor), una alla volta.
+"""
 
 from __future__ import annotations
 
+import json
 import re
+import sqlite3
+import threading
 import time
 import uuid
+from pathlib import Path
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -12,21 +25,190 @@ from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN
 
-MAX_TRIPS = 300   # per utente
-MAX_TRACK = 3000  # punti della traccia
+MAX_TRACK = 5000  # punti di una traccia restituiti alla mappa (quelli salvati sono tutti)
 STALE_S = 30 * 60  # un viaggio "in corso" senza notizie da 30 minuti è interrotto (app chiusa senza Esci)
+DB_FILE = "navigator_trips.db"
+# campi con una colonna propria; tutti gli altri (da, a, mezzo, veicolo, statistiche) stanno in "info" (JSON)
+COLS = ("id", "start", "end", "status", "updated")
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS trips (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    start REAL,
+    "end" REAL,
+    status TEXT,
+    updated REAL,
+    info TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS trips_user ON trips (user_id, start DESC);
+CREATE TABLE IF NOT EXISTS points (
+    trip_id TEXT NOT NULL REFERENCES trips (id) ON DELETE CASCADE,
+    seq INTEGER NOT NULL,
+    lat REAL NOT NULL,
+    lon REAL NOT NULL,
+    PRIMARY KEY (trip_id, seq)
+) WITHOUT ROWID;
+"""
+
+
+def _thin(track: list, n: int) -> list:
+    """Al massimo n punti distribuiti su tutto il viaggio (l'ultimo sempre)."""
+    if len(track) <= n:
+        return track
+    step = len(track) / n
+    return [track[int(i * step)] for i in range(n)] + [track[-1]]
+
+
+class TripDb:
+    """Accesso sincrono al database (da chiamare nell'executor)."""
+
+    def __init__(self, path: Path) -> None:
+        self._lock = threading.Lock()
+        self._con = sqlite3.connect(str(path), check_same_thread=False, isolation_level=None)
+        self._con.execute("PRAGMA journal_mode=WAL")
+        self._con.execute("PRAGMA foreign_keys=ON")
+        self._con.executescript(SCHEMA)
+
+    def close(self) -> None:
+        with self._lock:
+            self._con.close()
+
+    @staticmethod
+    def _row(r: tuple) -> dict:
+        item = json.loads(r[5] or "{}")
+        item.update(id=r[0], start=r[1], end=r[2], status=r[3], updated=r[4])
+        if item.get("updated") is None:
+            item.pop("updated")
+        return item
+
+    def _put(self, user_id: str, item: dict) -> None:
+        info = {k: v for k, v in item.items() if k not in COLS and k != "track"}
+        self._con.execute(
+            # aggiornamento sul posto (non REPLACE: cancellerebbe la riga e, a cascata, i punti della traccia)
+            'INSERT INTO trips (id, user_id, start, "end", status, updated, info) VALUES (?,?,?,?,?,?,?) '
+            'ON CONFLICT (id) DO UPDATE SET start = excluded.start, "end" = excluded."end", status = excluded.status, '
+            'updated = excluded.updated, info = excluded.info',
+            (item["id"], user_id, item.get("start"), item.get("end"), item.get("status"), item.get("updated"),
+             json.dumps(info, ensure_ascii=False)))
+
+    def _add_points(self, trip_id: str, points: list) -> None:
+        cur = self._con.execute("SELECT COALESCE(MAX(seq), -1) FROM points WHERE trip_id = ?", (trip_id,))
+        base = cur.fetchone()[0] + 1
+        self._con.executemany("INSERT INTO points (trip_id, seq, lat, lon) VALUES (?,?,?,?)",
+                              [(trip_id, base + i, float(p[0]), float(p[1])) for i, p in enumerate(points)])
+
+    def insert(self, user_id: str, item: dict, track: list) -> None:
+        with self._lock:
+            self._con.execute("BEGIN")
+            try:
+                self._put(user_id, item)
+                self._con.execute("DELETE FROM points WHERE trip_id = ?", (item["id"],))
+                self._add_points(item["id"], track)
+                self._con.execute("COMMIT")
+            except Exception:
+                self._con.execute("ROLLBACK")
+                raise
+
+    def import_many(self, users: dict[str, list[dict]]) -> int:
+        """Copia i viaggi del vecchio file JSON (una transazione sola). Restituisce quanti."""
+        n = 0
+        with self._lock:
+            self._con.execute("BEGIN")
+            try:
+                for user_id, trips in users.items():
+                    for t in trips:
+                        if not t.get("id"):
+                            continue
+                        self._put(user_id, t)
+                        self._con.execute("DELETE FROM points WHERE trip_id = ?", (t["id"],))
+                        self._add_points(t["id"], [p for p in (t.get("track") or []) if len(p) >= 2])
+                        n += 1
+                self._con.execute("COMMIT")
+            except Exception:
+                self._con.execute("ROLLBACK")
+                raise
+        return n
+
+    def close_open(self, user_id: str) -> None:
+        with self._lock:
+            self._con.execute("UPDATE trips SET status = 'interrotto' WHERE user_id = ? AND status = 'in_corso'", (user_id,))
+
+    def get(self, user_id: str, trip_id: str, with_track: bool = True, last: int | None = None) -> dict | None:
+        with self._lock:
+            r = self._con.execute('SELECT id, start, "end", status, updated, info FROM trips WHERE id = ? AND user_id = ?',
+                                  (trip_id, user_id)).fetchone()
+            if r is None:
+                return None
+            item = self._row(r)
+            if with_track:
+                if last:
+                    rows = self._con.execute("SELECT lat, lon FROM points WHERE trip_id = ? ORDER BY seq DESC LIMIT ?",
+                                             (trip_id, last)).fetchall()[::-1]
+                else:
+                    rows = self._con.execute("SELECT lat, lon FROM points WHERE trip_id = ? ORDER BY seq",
+                                             (trip_id,)).fetchall()
+                item["track"] = [[a, b] for a, b in rows]
+        return item
+
+    def count_points(self, trip_id: str) -> int:
+        with self._lock:
+            return self._con.execute("SELECT COUNT(*) FROM points WHERE trip_id = ?", (trip_id,)).fetchone()[0]
+
+    def append(self, user_id: str, trip_id: str, points: list, stats: dict[str, Any]) -> bool:
+        with self._lock:
+            r = self._con.execute('SELECT id, start, "end", status, updated, info FROM trips WHERE id = ? AND user_id = ?',
+                                  (trip_id, user_id)).fetchone()
+            if r is None:
+                return False
+            item = self._row(r)
+            for k in ("km", "duration", "avg", "max", "end", "to"):
+                if stats.get(k) is not None:
+                    item[k] = stats[k]
+            item["updated"] = time.time()
+            if item.get("status") != "concluso":
+                item["status"] = "in_corso"
+            self._con.execute("BEGIN")
+            try:
+                self._put(user_id, item)
+                if points:
+                    self._add_points(trip_id, points)
+                self._con.execute("COMMIT")
+            except Exception:
+                self._con.execute("ROLLBACK")
+                raise
+        return True
+
+    def set_status(self, trip_id: str, status: str) -> None:
+        with self._lock:
+            self._con.execute("UPDATE trips SET status = ? WHERE id = ?", (status, trip_id))
+
+    def summaries(self, user_id: str) -> list[dict]:
+        with self._lock:
+            rows = self._con.execute(
+                'SELECT id, start, "end", status, updated, info FROM trips WHERE user_id = ? ORDER BY start DESC',
+                (user_id,)).fetchall()
+        return [self._row(r) for r in rows]
+
+    def delete(self, user_id: str, trip_id: str) -> None:
+        with self._lock:
+            self._con.execute("DELETE FROM trips WHERE id = ? AND user_id = ?", (trip_id, user_id))
 
 
 class Trips:
     def __init__(self, hass: HomeAssistant) -> None:
+        self._hass = hass
         self._store: Store[dict] = Store(hass, 1, f"{DOMAIN}.trips")
-        self.data: dict[str, list[dict]] = {}
+        self._db: TripDb | None = None
         self.garage: list[dict] = []  # garage condiviso: gli stessi veicoli per tutti gli utenti di Home Assistant
         self.selected: dict[str, str] = {}  # utente -> veicolo scelto l'ultima volta ("base" o id del garage)
 
+    async def _run(self, fn, *args):
+        return await self._hass.async_add_executor_job(fn, *args)
+
     async def async_load(self) -> None:
+        self._db = await self._run(TripDb, Path(self._hass.config.path(DB_FILE)))
         stored = await self._store.async_load() or {}
-        self.data = stored.get("users", {})
         garage = stored.get("garage", [])
         if isinstance(garage, dict):
             # versioni fino alla 1.9.14: un garage per utente. Si uniscono in quello condiviso (stessa targa o stesso
@@ -43,9 +225,19 @@ class Trips:
             garage = merged
         self.garage = garage
         self.selected = stored.get("selected", {})
+        # versioni fino alla 1.9.84: viaggi nel file JSON. Si copiano nel database e poi si tolgono dal file
+        users = stored.get("users")
+        if users:
+            await self._run(self._db.import_many, users)
+            await self._store.async_save({"garage": self.garage, "selected": self.selected})
+
+    async def async_close(self) -> None:
+        if self._db is not None:
+            db, self._db = self._db, None
+            await self._run(db.close)
 
     def _save(self) -> None:
-        self._store.async_delay_save(lambda: {"users": self.data, "garage": self.garage, "selected": self.selected}, 5)
+        self._store.async_delay_save(lambda: {"garage": self.garage, "selected": self.selected}, 5)
 
     def vehicles(self, user_id: str) -> list[dict]:  # noqa: ARG002 - garage uguale per tutti
         return self.garage
@@ -71,70 +263,50 @@ class Trips:
         self._save()
         return clean
 
-    def add(self, user_id: str, trip: dict[str, Any]) -> dict:
+    # ------------------------------------------------------------------ viaggi (database)
+
+    async def add(self, user_id: str, trip: dict[str, Any]) -> dict:
         track = trip.get("track") or []
-        if len(track) > MAX_TRACK:  # si tengono punti distribuiti su tutto il viaggio
-            step = len(track) / MAX_TRACK
-            track = [track[int(i * step)] for i in range(MAX_TRACK)] + [track[-1]]
-        item = {**trip, "track": track, "id": uuid.uuid4().hex[:12]}
-        trips = self.data.setdefault(user_id, [])
-        trips.insert(0, item)
-        del trips[MAX_TRIPS:]
-        self._save()
+        item = {**{k: v for k, v in trip.items() if k != "track"}, "id": uuid.uuid4().hex[:12]}
+        await self._run(self._db.insert, user_id, item, track)
         return item
 
     # viaggio salvato man mano: creato alla partenza, punti aggiunti durante la guida, concluso con Esci
-    def start(self, user_id: str, meta: dict[str, Any]) -> dict:
+    async def start(self, user_id: str, meta: dict[str, Any]) -> dict:
         now = time.time()
-        item = {**meta, "id": uuid.uuid4().hex[:12], "track": [], "km": 0, "duration": 0, "avg": 0, "max": 0,
+        item = {**meta, "id": uuid.uuid4().hex[:12], "km": 0, "duration": 0, "avg": 0, "max": 0,
                 "start": meta.get("start") or now, "end": now, "status": "in_corso", "updated": now}
-        trips = self.data.setdefault(user_id, [])
-        for t in trips:  # un viaggio rimasto aperto (app chiusa senza Esci) è interrotto
-            if t.get("status") == "in_corso":
-                t["status"] = "interrotto"
-        trips.insert(0, item)
-        del trips[MAX_TRIPS:]
-        self._save()
+        await self._run(self._db.close_open, user_id)  # un viaggio rimasto aperto (app chiusa senza Esci) è interrotto
+        await self._run(self._db.insert, user_id, item, [])
         return item
 
-    def append(self, user_id: str, trip_id: str, points: list, stats: dict[str, Any]) -> dict | None:
-        t = self.get(user_id, trip_id)
-        if t is None:
-            return None
-        t["track"].extend(points)
-        if len(t["track"]) > MAX_TRACK:  # si dimezzano i punti più vecchi, l'ultimo resta
-            t["track"] = t["track"][: len(t["track"]) - 1 : 2] + [t["track"][-1]]
-        for k in ("km", "duration", "avg", "max", "end", "to"):
-            if stats.get(k) is not None:
-                t[k] = stats[k]
-        t["updated"] = time.time()
-        if t.get("status") != "concluso":
-            t["status"] = "in_corso"
-        self._save()
-        return t
+    async def append(self, user_id: str, trip_id: str, points: list, stats: dict[str, Any]) -> bool:
+        return await self._run(self._db.append, user_id, trip_id, points, stats)
 
-    def finish(self, user_id: str, trip_id: str) -> None:
-        t = self.get(user_id, trip_id)
+    async def finish(self, user_id: str, trip_id: str) -> None:
+        t = await self._run(self._db.get, user_id, trip_id, False)
         if t is None:
             return
-        if (t.get("km") or 0) < 0.3 or len(t.get("track") or []) < 2:  # troppo corto: non serve in archivio
-            self.delete(user_id, trip_id)
+        n = await self._run(self._db.count_points, trip_id)
+        if (t.get("km") or 0) < 0.3 or n < 2:  # troppo corto: non serve in archivio
+            await self._run(self._db.delete, user_id, trip_id)
             return
-        t["status"] = "concluso"
-        self._save()
+        await self._run(self._db.set_status, trip_id, "concluso")
 
-    def summaries(self, user_id: str) -> list[dict]:
-        out = []
-        for t in self.data.get(user_id, []):
-            item = {k: v for k, v in t.items() if k != "track"}
-            if item.get("status") == "in_corso" and time.time() - item.get("updated", 0) > STALE_S:
+    async def summaries(self, user_id: str) -> list[dict]:
+        out = await self._run(self._db.summaries, user_id)
+        now = time.time()
+        for item in out:
+            if item.get("status") == "in_corso" and now - (item.get("updated") or 0) > STALE_S:
                 item["status"] = "interrotto"
-            out.append(item)
         return out
 
-    def get(self, user_id: str, trip_id: str) -> dict | None:
-        return next((t for t in self.data.get(user_id, []) if t["id"] == trip_id), None)
+    async def get(self, user_id: str, trip_id: str, last: int | None = None) -> dict | None:
+        """Viaggio con la traccia (sfoltita per la mappa); con last solo gli ultimi punti (scheda Live)."""
+        t = await self._run(self._db.get, user_id, trip_id, True, last)
+        if t is not None and not last:
+            t["track"] = _thin(t["track"], MAX_TRACK)
+        return t
 
-    def delete(self, user_id: str, trip_id: str) -> None:
-        self.data[user_id] = [t for t in self.data.get(user_id, []) if t["id"] != trip_id]
-        self._save()
+    async def delete(self, user_id: str, trip_id: str) -> None:
+        await self._run(self._db.delete, user_id, trip_id)
