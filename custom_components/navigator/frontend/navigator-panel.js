@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.81";
+const PANEL_VERSION = "1.9.82";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -3376,6 +3376,13 @@ class NavigatorPanel extends HTMLElement {
         if (!this._g3gest.size) { this._g3key = null; this._sync3d(); }
       });
     }
+    // MapLibre "congela" la quota del centro durante easeTo e la sblocca solo a fine animazione: la guida ne avvia una
+    // nuova a ogni GPS interrompendo la precedente e il congelamento restava per sempre (sbloccato solo da un gesto con
+    // le dita). Con la quota vecchia la vista e il mezzo erano spostati, in montagna anche fuori dallo schermo.
+    this._g3thaw = () => {
+      if (g._elevationFreeze && !g.isMoving()) { g._elevationFreeze = false; g.triggerRepaint(); }
+    };
+    g.on("moveend", () => setTimeout(() => this._g3thaw?.(), 0));
     g.on("moveend", () => this._schedulePois()); // i punti di interesse della zona ora visibile
     g.on("moveend", () => this._scheduleClouds()); // nuvole della zona ora visibile
     g.on("moveend", (e) => {
@@ -4062,7 +4069,17 @@ class NavigatorPanel extends HTMLElement {
         if (!mtx) return;
         const tr = self._g3.transform;
         const ml = window.maplibregl;
-        const mc = ml.MercatorCoordinate.fromLngLat([c.lon, c.lat], c.elev || 0);
+        // quota: la matrice mercatore mette a terra il punto al CENTRO della vista (quota tr.elevation); il mezzo non
+        // è mai proprio al centro (in guida sta più in basso) e, appena partiti, il centro può avere ancora la quota
+        // vecchia: si usa la quota del terreno sotto il mezzo meno quella del centro, ricalcolata a ogni fotogramma.
+        // Prima era 0 fisso: in montagna il mezzo appariva spostato finché un pizzico non aggiornava la vista.
+        let elev = 0;
+        try {
+          const q = self._g3.terrain ? self._g3.queryTerrainElevation([c.lon, c.lat]) : null;
+          if (q != null && Number.isFinite(q) && Number.isFinite(tr.elevation)) elev = q - tr.elevation;
+        } catch (e) { elev = 0; }
+        c.meters = self._car3dMeters(self._g3.getZoom()); // misura secondo lo zoom di questo fotogramma
+        const mc = ml.MercatorCoordinate.fromLngLat([c.lon, c.lat], elev);
         const s = mc.meterInMercatorCoordinateUnits() * c.meters; // metri → unità mercatore (× ingrandimento)
         // ricetta classica: base mercatore→schermo × [posizione · scala(Y ribaltato) · 90°X (Y-su→Z-su) · direzione]
         const base = tr.mercatorMatrix ? new THREE.Matrix4().fromArray(Array.from(tr.mercatorMatrix)) : new THREE.Matrix4().fromArray(mtx);
@@ -4262,13 +4279,14 @@ class NavigatorPanel extends HTMLElement {
     const z = this._g3.getZoom();
     // da vicino (zoom ≥ 18,5) dimensione costante sullo schermo; allontanandosi rimpicciolisce anche sullo schermo,
     // ma più piano della mappa (si vede sempre) e con un tetto: prima restava grande uguale e diventava un gigante
-    c.meters = z >= 18.5 ? Math.max(1, 4 * Math.pow(2, 18.5 - z)) : Math.min(9, 4 * Math.pow(2, (18.5 - z) * 0.45));
-    // quota 0: la matrice mercatore tiene GIÀ conto del rilievo del terreno. Aggiungere la quota del terreno
-    // faceva galleggiare il mezzo in aria (altezza errata). A terra = quota 0.
-    c.elev = 0;
+    c.meters = this._car3dMeters(z);
     c.visible = true;
     c.lastMove = Date.now();
     this._g3?.triggerRepaint?.();
+  }
+
+  _car3dMeters(z) {
+    return z >= 18.5 ? Math.max(1, 4 * Math.pow(2, 18.5 - z)) : Math.min(9, 4 * Math.pow(2, (18.5 - z) * 0.45));
   }
 
   _disposeMesh(obj) {
@@ -4500,6 +4518,7 @@ class NavigatorPanel extends HTMLElement {
     }
     if (this._g3gest?.size && !this._g3interacting && now - (this._g3gestT || 0) > 2500) this._g3gest.clear();
     if (!this._3d || !g || this._from3d || this._g3interacting || this._g3gest?.size || this._stepAnim || this._stepK != null) return;
+    this._g3thaw?.();
     const nav = this._nav;
     // MapLibre misura lo zoom con riquadri da 512 pixel, Leaflet da 256; in guida si aggiunge la distanza scelta dall'utente
     const z = nav?.fix && nav.follow && this._isGuida() ? this._base3dZoom() + this._zoom3dOff() : this._map.getZoom() - 1;
