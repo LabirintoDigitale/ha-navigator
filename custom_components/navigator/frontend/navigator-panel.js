@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.91";
+const PANEL_VERSION = "1.9.92";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -38,6 +38,9 @@ const LAYERS = {
     "Mappa &copy; Esri — Esri, HERE, Garmin"],
   sat: ["Satellite (Esri)", `${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`, 19,
     "Immagini &copy; Esri, Maxar, Earthstar Geographics"],
+  // le stesse foto del satellite ricolorate color sabbia: prati e boschi diventano deserto, le montagne dune
+  deserto: ["Deserto (satellite)", `${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`, 19,
+    "Immagini &copy; Esri, Maxar, Earthstar Geographics (ricolorate)"],
   otm: ["Escursionistica (OpenTopoMap)", "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", 17,
     `${OSM_C}, SRTM | &copy; <a href="https://opentopomap.org" target="_blank" rel="noopener">OpenTopoMap</a>`],
 };
@@ -1382,6 +1385,9 @@ const STYLE = `
   .trip .nm { flex: 1; min-width: 0; cursor: pointer; } .trip .nm small { display: block; color: var(--secondary-text-color); }
   /* notte: satellite ed escursionistica più scuri */
   #map.night .leaflet-tile-pane { filter: brightness(.6) contrast(1.1) saturate(.8); }
+  /* deserto (2D): foto del satellite color sabbia */
+  #map.desert .leaflet-tile-pane { filter: sepia(.75) saturate(1.5) hue-rotate(-8deg) brightness(1.08) contrast(.95); }
+  #map.desert.night .leaflet-tile-pane { filter: sepia(.75) saturate(1.2) hue-rotate(-8deg) brightness(.65) contrast(1.05); }
   /* schede del pannello laterale: Viaggio e Archivio */
   .sidetabs.solo { display: none; } /* app NaviHA: solo Viaggio, niente barra delle schede */
   .sidetabs { display: flex; gap: 0; position: sticky; top: 0; z-index: 5; background: var(--card-background-color, var(--primary-background-color));
@@ -1734,6 +1740,7 @@ class NavigatorPanel extends HTMLElement {
     this._tiles = L.tileLayer(url, { maxZoom, attribution, subdomains: "abc" });
     if (!this._3d) this._tiles.addTo(this._map); // in 3D le mappe le scarica solo MapLibre
     this._layer = key;
+    this.$("map")?.classList.toggle("desert", key === "deserto");
     if (this._3d) this._set3dBase();
   }
 
@@ -2127,7 +2134,7 @@ class NavigatorPanel extends HTMLElement {
     if (!box) return;
     const key = this._effLayer(this._layer);
     const name = LAYERS[key]?.[0] || "";
-    if (key !== "sat") {
+    if (key !== "sat" && key !== "deserto") {
       box.textContent = `Mappa ${name}: dati aggiornati di continuo`;
       box.hidden = false;
       return;
@@ -3401,7 +3408,7 @@ class NavigatorPanel extends HTMLElement {
     this._g3 = g;
     this._g3markers = [];
     // pronta appena c'è lo stile, senza aspettare i primi riquadri (con rete lenta il "load" arriva tardi)
-    this._g3ready = new Promise((ok) => { g.once("style.load", ok); g.once("load", ok); }).then(() => { this._g3ok = true; });
+    this._g3ready = new Promise((ok) => { g.once("style.load", ok); g.once("load", ok); }).then(() => { this._g3ok = true; try { this._desertVeil(); } catch (e) { /* stile non pronto */ } });
     g.on("error", (e) => console.debug("Navigator 3D:", e?.error?.message || e)); // riquadri mancanti: la vista va avanti
     // movimenti fatti a mano nella vista 3D: la guida smette di seguire, Leaflet si sposta nello stesso punto
     // In guida il mezzo resta SEMPRE centrato: zoom, rotazione, inclinazione e anche il trascinamento con le dita
@@ -3913,6 +3920,22 @@ class NavigatorPanel extends HTMLElement {
     g.removeSource("base");
     g.addSource("base", this._baseSource());
     g.addLayer({ id: "base", type: "raster", source: "base", paint: this._basePaint() }, "hs");
+    this._desertVeil();
+  }
+
+  // deserto in 3D: velo color sabbia sopra la foto in bianco e nero (le zone scure diventano dune in ombra)
+  _desertVeil() {
+    const g = this._g3;
+    if (!g) return;
+    const on = this._layer === "deserto";
+    if (!on) { if (g.getLayer("desert")) g.removeLayer("desert"); return; }
+    if (!g.getSource("desert")) {
+      g.addSource("desert", { type: "geojson", data: { type: "Feature", properties: {},
+        geometry: { type: "Polygon", coordinates: [[[-180, -85], [180, -85], [180, 85], [-180, 85], [-180, -85]]] } } });
+    }
+    const paint = { "fill-color": this._nightOn ? "#8a6a3c" : "#e0a95e", "fill-opacity": this._nightOn ? 0.4 : 0.55 };
+    if (g.getLayer("desert")) g.removeLayer("desert");
+    g.addLayer({ id: "desert", type: "fill", source: "desert", paint }, "hs");
   }
 
   // percorso e segnaposto ricopiati da Leaflet (una volta per fotogramma, anche se cambiano più cose insieme)
@@ -6680,7 +6703,12 @@ class NavigatorPanel extends HTMLElement {
   }
 
   _basePaint() {
-    return this._nightOn && (this._layer === "sat" || this._layer === "otm") ? { "raster-brightness-max": 0.6, "raster-saturation": -0.2 } : {};
+    // deserto: verde → sabbia (rotazione del colore), meno saturo e con le ombre schiarite, come dune
+    // (in 3D: foto in bianco e nero, il colore sabbia lo dà il velo "desert" steso sopra)
+    const desert = this._layer === "deserto"
+      ? { "raster-saturation": -1, "raster-contrast": 0.1, "raster-brightness-min": 0.22 } : {};
+    const dim = this._nightOn && ["sat", "deserto", "otm"].includes(this._layer) ? { "raster-brightness-max": 0.6, "raster-saturation": -0.2 } : {};
+    return { ...desert, ...dim, ...(desert["raster-saturation"] ? { "raster-saturation": -1 } : {}) };
   }
 
   _skySpec() {
