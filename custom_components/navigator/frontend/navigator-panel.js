@@ -1733,6 +1733,9 @@ class NavigatorPanel extends HTMLElement {
     this._renderPoints();
     this._renderFavs();
     this._drawMarkers();
+    // app NaviHA in Android Auto: un percorso avviato con Parti sul telefono arriva qui e parte da solo
+    window.__navihaHandoff = () => this._takeHandoff();
+    if (await this._takeHandoff()) return;
     if (this._points.every((p) => p)) this._compute(true);
   }
 
@@ -2453,6 +2456,14 @@ class NavigatorPanel extends HTMLElement {
   async _startNav(source, force = false) {
     if (this._stepK != null) this._stepClose(); // in guida la barra in alto è della guida
     if (!this._result) return;
+    // app NaviHA con Android Auto collegato: il percorso (partenza, tappe, arrivo, mezzo, opzioni) va all'auto,
+    // dove parte la guida; il telefono non naviga in parallelo
+    if (window.NaviHAApp?.carConnected?.()) {
+      const spec = { points: this._points, mode: this._mode, avoid: this._avoid, excluded: this._excluded, source: "gps" };
+      let sent = false;
+      try { sent = window.NaviHAApp.sendToCar(JSON.stringify(spec)); } catch (e) { /* app vecchia */ }
+      if (sent) { this._msg("Percorso inviato ad Android Auto: la guida parte sullo schermo dell'auto"); return; }
+    }
     // persona o dispositivo con una posizione vecchia: la guida partirebbe da lì (es. app Companion chiusa)
     if (source !== "gps" && !source.startsWith("zone.") && !force) { // casa: posizione fissa, mai "vecchia"
       const st = this._hass?.states?.[source];
@@ -2499,6 +2510,29 @@ class NavigatorPanel extends HTMLElement {
     } else {
       this._entityFix();
     }
+  }
+
+  // app NaviHA sullo schermo dell'auto: prende il percorso mandato dal telefono (se c'è), lo calcola e parte
+  async _takeHandoff() {
+    let raw = "";
+    try { raw = window.NaviHAApp?.takeHandoff?.() || ""; } catch (e) { /* app vecchia */ }
+    if (!raw) return false;
+    let h;
+    try { h = JSON.parse(raw); } catch (e) { return false; }
+    if (!Array.isArray(h.points) || h.points.length < 2 || !h.points.every((p) => p && p.lat != null && p.lon != null)) return false;
+    if (this._nav) this._stopNav();
+    this._points = h.points;
+    if (h.mode) this._mode = h.mode;
+    if (h.avoid) this._avoid = { ...this._avoid, ...h.avoid };
+    if (Array.isArray(h.excluded)) this._excluded = h.excluded;
+    this._saveState();
+    this._renderModes();
+    this._renderPoints();
+    this._drawMarkers();
+    await this._compute(true);
+    if (!this._result) return true; // percorso non calcolabile: resta l'errore a schermo
+    this._startNav(h.source || "gps", true);
+    return true;
   }
 
   _stopNav() {
