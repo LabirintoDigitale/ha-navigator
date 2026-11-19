@@ -241,8 +241,12 @@ class Pois:
             t = it.pop("tags")
             closed = t.get("access") == "no" or t.get("motor_vehicle") == "no" or t.get("motorcar") == "no"
             kind = "lavori" if t.get("highway") == "construction" and not closed else "chiusa"
+            # dettagli per il popup (verifica): cosa dice OpenStreetMap su questi lavori/questa chiusura
+            info = {k: str(t[k])[:120] for k in ("highway", "construction", "ref", "access", "motor_vehicle", "motorcar",
+                                                  "opening_date", "start_date", "construction:start_date", "check_date",
+                                                  "note", "description", "fixme") if t.get(k)}
             items.append({"lat": it["lat"], "lon": it["lon"], "id": it["id"], "kind": kind,
-                          "name": t.get("name") or t.get("ref") or t.get("construction") or ""})
+                          "name": t.get("name") or t.get("ref") or t.get("construction") or "", "info": info})
         near = await self._exec(_near_line, items, line, radius)
         return {"items": near, "source": "OpenStreetMap", "updated": int(time.time())}
 

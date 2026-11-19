@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.95";
+const PANEL_VERSION = "1.9.96";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1254,7 +1254,11 @@ const STYLE = `
   .pmark { width: 26px; height: 26px; border-radius: 50%; border: 2px solid #fff; display: flex; align-items: center; justify-content: center;
     font-size: 14px; box-shadow: 0 1px 4px rgba(0,0,0,.45); }
   .box.traffic { background: rgba(2,136,209,.12); border-left: 3px solid #0288d1; }
-  .rwm { font-size: 20px; line-height: 1; filter: drop-shadow(0 1px 2px rgba(0,0,0,.6)); text-align: center; }
+  .rwpop .rwinfo { font-size: 13px; margin: 6px 0; display: grid; gap: 2px; }
+  .rwpop .rwlinks { font-size: 13px; }
+  .rwlist { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin-top: 4px; }
+  .rwlist .link { text-align: left; }
+  .rwm { cursor: pointer; font-size: 20px; line-height: 1; filter: drop-shadow(0 1px 2px rgba(0,0,0,.6)); text-align: center; }
   .navbot .lim { width: 30px; height: 30px; border-radius: 50%; border: 4px solid #d32f2f; background: #fff; color: #111;
     display: inline-flex; align-items: center; justify-content: center; font: 700 13px sans-serif; flex: none; box-sizing: border-box; }
   /* schermo intero: solo la mappa, sopra la barra laterale e l'intestazione di Home Assistant.
@@ -6038,6 +6042,44 @@ class NavigatorPanel extends HTMLElement {
     this._renderResults();
   }
 
+  // tocco su lavori/strada chiusa: cosa dice OpenStreetMap, dove si trova (indirizzo e km del percorso) e il link per
+  // controllarlo (o correggerlo, se non c'è più) direttamente su openstreetmap.org
+  async _roadworkPopup(it) {
+    const [ico, label] = it.kind === "lavori" ? ["🚧", "Lavori in corso"] : ["⛔", "Strada chiusa al traffico"];
+    const inf = it.info || {};
+    const NAMES = { construction: "Tipo di strada in costruzione", ref: "Strada", opening_date: "Apertura prevista",
+      start_date: "Inizio", "construction:start_date": "Inizio lavori", check_date: "Ultima verifica su OSM", note: "Nota",
+      description: "Descrizione", fixme: "Da verificare" };
+    const rows = Object.entries(NAMES).filter(([k]) => inf[k]).map(([k, n]) => `<div><span class="muted">${n}:</span> ${esc(inf[k])}</div>`);
+    const lim = [inf.access && `accesso ${inf.access}`, inf.motor_vehicle && `veicoli a motore ${inf.motor_vehicle}`,
+      inf.motorcar && `auto ${inf.motorcar}`].filter(Boolean);
+    if (lim.length) rows.push(`<div><span class="muted">Divieto:</span> ${esc(lim.join(", ").replace(/\bno\b/g, "vietato"))}</div>`);
+    // km dall'inizio del percorso (vertice più vicino) e distanza dalla linea
+    let where = "";
+    const rt = this._result?.routes?.[this._sel];
+    if (rt) {
+      const g = this._geom(rt);
+      let best = 0, bd = Infinity;
+      g.shape.forEach((p, k) => { const d = distM(p, [it.lat, it.lon]); if (d < bd) { bd = d; best = k; } });
+      where = `km ${(g._cum[best] / 1000).toFixed(1).replace(".", ",")} del percorso · a ${Math.round(it.off ?? bd)} m dalla strada che fai`;
+    }
+    const m = /^([nwr])(\d+)$/.exec(it.id || "");
+    const type = m ? { n: "node", w: "way", r: "relation" }[m[1]] : null;
+    const el = document.createElement("div");
+    el.className = "popup rwpop";
+    el.innerHTML = `<div class="n">${ico} ${label}${it.name ? ` · ${esc(it.name)}` : ""}</div>
+      <div class="a addr">Cerco dove si trova…</div>${where ? `<div class="a">${where}</div>` : ""}
+      <div class="rwinfo">${rows.join("") || '<div class="muted">Nessun dettaglio (date, note) su OpenStreetMap.</div>'}</div>
+      ${type ? `<div class="rwlinks"><a href="https://www.openstreetmap.org/${type}/${m[2]}" target="_blank" rel="noopener">Verifica su OpenStreetMap</a>
+        · <a href="https://www.openstreetmap.org/edit?${type}=${m[2]}" target="_blank" rel="noopener">Non c'è più? Correggi</a></div>` : ""}
+      <div class="muted" style="font-size:11px;margin-top:4px">Dati OpenStreetMap: possono non essere aggiornati. Il percorso non viene deviato.</div>`;
+    L.popup({ maxWidth: 300 }).setLatLng([it.lat, it.lon]).setContent(el).openOn(this._map);
+    try {
+      const r = await this._hass.callWS({ type: "navigator/reverse", lat: it.lat, lon: it.lon });
+      el.querySelector(".addr").textContent = [r.name, r.address].filter(Boolean).join(", ");
+    } catch (e) { el.querySelector(".addr").textContent = `${it.lat.toFixed(5)}, ${it.lon.toFixed(5)}`; }
+  }
+
   _drawRoadworks() {
     const lay = this._rwLayer;
     if (!lay) return;
@@ -6046,7 +6088,8 @@ class NavigatorPanel extends HTMLElement {
     for (const it of this._roadworks || []) {
       const [ico, label] = it.kind === "lavori" ? ["🚧", "Lavori in corso"] : ["⛔", "Strada chiusa"];
       L.marker([it.lat, it.lon], { title: `${label}${it.name ? ` · ${it.name}` : ""}`, zIndexOffset: 800,
-        icon: L.divIcon({ className: "", html: `<div class="rwm">${ico}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] }) }).addTo(lay);
+        icon: L.divIcon({ className: "", html: `<div class="rwm">${ico}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] }) })
+        .on("click", () => this._roadworkPopup(it)).addTo(lay);
     }
     this._schedule3d();
   }
@@ -7189,7 +7232,13 @@ class NavigatorPanel extends HTMLElement {
       if (this._roadworks?.length) {
         const lav = this._roadworks.filter((x) => x.kind === "lavori").length, chi = this._roadworks.length - lav;
         const parti = [lav ? `🚧 ${lav} ${lav === 1 ? "lavoro" : "lavori"}` : "", chi ? `⛔ ${chi} ${chi === 1 ? "strada chiusa" : "strade chiuse"}` : ""].filter(Boolean);
-        html += `<div class="box warn">${parti.join(" · ")} vicino al percorso (segnalati su OpenStreetMap, non sempre aggiornati)</div>`;
+        // elenco: dove sono (km del percorso); toccando la mappa ci va e apre i dettagli per verificarli
+        const g = this._geom(rt);
+        const kmOf = (it) => { let best = 0, bd = Infinity; g.shape.forEach((p, k) => { const d = distM(p, [it.lat, it.lon]); if (d < bd) { bd = d; best = k; } }); return g._cum[best] / 1000; };
+        const list = this._roadworks.map((it, k) => ({ it, k, km: kmOf(it) })).sort((a, b) => a.km - b.km);
+        html += `<div class="box warn">${parti.join(" · ")} vicino al percorso (segnalati su OpenStreetMap, non sempre aggiornati). Tocca per vedere dove e verificare:
+          <div class="rwlist">${list.slice(0, 12).map(({ it, k, km }) => `<button class="link" data-a="rw" data-k="${k}">${it.kind === "lavori" ? "🚧" : "⛔"} ${
+            esc(it.name || (it.kind === "lavori" ? "Lavori" : "Strada chiusa"))} · km ${km.toFixed(1).replace(".", ",")}</button>`).join("")}</div></div>`;
       }
 
       // tratte a pagamento
@@ -7279,6 +7328,9 @@ class NavigatorPanel extends HTMLElement {
         this._autoCompute(false);
       } else if (a === "navstart") {
         this._startNav(this.$("navsrc")?.value || this._meSource() || "gps");
+      } else if (a === "rw") {
+        const it = this._roadworks?.[k];
+        if (it) { this._map.setView([it.lat, it.lon], Math.max(this._map.getZoom(), 16)); this._roadworkPopup(it); }
       } else if (a.startsWith("near-")) {
         this._openNearby(a.slice(5));
       } else if (a === "gpshelp") {
