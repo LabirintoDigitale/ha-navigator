@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.90";
+const PANEL_VERSION = "1.9.91";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1023,12 +1023,14 @@ const STYLE = `
   .steps li.toll .tx::after { content: " 💶"; }
   .steps li.legsep { background: var(--secondary-background-color, #f5f5f5); font-weight: 500; cursor: default; }
   /* intestazioni di sezione richiudibili (freccia a sinistra; chiuse di default) */
-  h3.cbh { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 6px; }
+  h3.cbh { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 6px; font-weight: 700;
+    color: var(--primary-text-color); } /* sezioni che si aprono e chiudono: titolo in grassetto */
+  h3.cbh .muted { font-weight: 400; }
   h3.cbh .cbcar { display: inline-block; transition: transform .15s; font-size: 12px; opacity: .65; }
   h3.cbh.open .cbcar { transform: rotate(90deg); }
   h3.cbh:not(.open) + .cbbody { display: none; }
   /* ricerca, veicolo e itinerario: dopo "Calcola percorso" si richiudono in una riga col riassunto del viaggio */
-  h3.cbh.planh { margin: 0; padding: 12px 14px; border-bottom: 1px solid var(--divider-color); font-size: 14px; font-weight: 500;
+  h3.cbh.planh { margin: 0; padding: 12px 14px; border-bottom: 1px solid var(--divider-color); font-size: 14px; font-weight: 700;
     text-transform: none; letter-spacing: 0; color: var(--primary-text-color); background: var(--secondary-background-color, rgba(127,127,127,.08)); }
   h3.cbh.planh[hidden] { display: none; }
   h3.cbh.planh .cbcar { font-size: 14px; opacity: .8; }
