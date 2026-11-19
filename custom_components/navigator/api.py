@@ -534,6 +534,45 @@ class MapServices:
             body["exclude_locations"] = [{"lat": p["lat"], "lon": p["lon"]} for p in exclude]
         if alternatives and len(points) == 2:
             body["alternates"] = 2
+        data = await self._valhalla_post(body, bool(exclude))
+        trips = [data["trip"]] + [a["trip"] for a in data.get("alternates", []) if "trip" in a]
+        if alternatives and 2 < len(points) <= 5:
+            trips += await self._leg_alternates(body, data["trip"])
+        return {"engine": "valhalla", "routes": [self._norm_valhalla(t) for t in trips]}
+
+    async def _leg_alternates(self, body: dict, main: dict) -> list[dict]:
+        """Con le tappe Valhalla non dà percorsi alternativi (solo fra due punti): si chiedono tappa per tappa e si
+        mettono insieme. Alternativa k = per ogni tratto la sua k-esima alternativa (o, se non c'è, il tratto principale).
+        """
+        locs = body["locations"]
+
+        async def leg(i: int) -> list[dict]:
+            b = {**body, "locations": [locs[i], locs[i + 1]], "alternates": 2}
+            try:
+                d = await self._valhalla_post(b, False)
+            except NavigatorError:
+                return []
+            return [t["legs"][0] for t in [d["trip"]] + [a["trip"] for a in d.get("alternates", []) if "trip" in a]
+                    if t.get("legs")]
+
+        per_leg = await asyncio.gather(*(leg(i) for i in range(len(locs) - 1)))
+        main_legs = main.get("legs", [])
+        if len(main_legs) != len(per_leg):
+            return []
+        out = []
+        for k in (1, 2):
+            if not any(len(alts) > k for alts in per_leg):
+                continue
+            legs = [alts[k] if len(alts) > k else main_legs[i] for i, alts in enumerate(per_leg)]
+            sm = [lg.get("summary", {}) for lg in legs]
+            out.append({"legs": legs, "summary": {
+                "time": sum(x.get("time", 0) for x in sm), "length": round(sum(x.get("length", 0) for x in sm), 3),
+                "has_toll": any(x.get("has_toll") for x in sm), "has_highway": any(x.get("has_highway") for x in sm),
+                "has_ferry": any(x.get("has_ferry") for x in sm)}})
+        return out
+
+    async def _valhalla_post(self, body: dict, excluded: bool) -> dict:
+        exclude = excluded
         try:
             async with self._session.post(f"{self.valhalla}/route", json=body, headers=self._headers,
                                           timeout=TIMEOUT) as resp:
@@ -554,8 +593,7 @@ class MapServices:
                 err.no_route = True  # type: ignore[attr-defined]
                 raise err
             raise NavigatorError(f"errore {status} {msg or ''}".strip())
-        trips = [data["trip"]] + [a["trip"] for a in data.get("alternates", []) if "trip" in a]
-        return {"engine": "valhalla", "routes": [self._norm_valhalla(t) for t in trips]}
+        return data
 
     @staticmethod
     def _norm_valhalla(trip: dict) -> dict:
