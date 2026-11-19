@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.88";
+const PANEL_VERSION = "1.9.89";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -2326,6 +2326,11 @@ class NavigatorPanel extends HTMLElement {
   _navSources() {
     const secure = window.isSecureContext && !!window.navigator.geolocation;
     const out = [{ id: "gps", name: secure ? "📱 GPS di questo dispositivo" : "📱 GPS di questo dispositivo (serve HTTPS)", ok: secure }];
+    // casa: le coordinate impostate in Home Assistant (zona "Casa"), sempre disponibili e senza attese
+    const home = this._hass?.states?.["zone.home"];
+    if (home?.attributes?.latitude != null && home.attributes.longitude != null) {
+      out.push({ id: "zone.home", name: `🏠 ${home.attributes.friendly_name || "Casa"} (posizione di Home Assistant)`, ok: true });
+    }
     for (const [id, st] of Object.entries(this._hass?.states || {})) {
       if (!id.startsWith("person.") && !id.startsWith("device_tracker.")) continue;
       if (st.attributes.latitude == null || st.attributes.longitude == null) continue;
@@ -2345,6 +2350,13 @@ class NavigatorPanel extends HTMLElement {
   _defaultNavSource(list) {
     let saved = null;
     try { saved = localStorage.getItem(`${STORE_KEY}-navsrc`); } catch (e) { /* storage non disponibile */ }
+    // Home Assistant aperto dal browser (PC, non le app): il GPS del computer non risponde o è solo una stima e la
+    // posizione di una persona può essere vecchia (si chiedeva al telefono e si restava ad aspettare). Si parte da casa,
+    // a meno che sia stata scelta una persona/dispositivo con una posizione recente.
+    if (!this._companion() && list.some((s) => s.id === "zone.home")) {
+      const sv = saved && list.find((s) => s.id === saved && s.ok && s.id !== "gps");
+      return sv && !(sv.age > STALE_MS) ? saved : "zone.home";
+    }
     if (saved && list.some((s) => s.id === saved && s.ok)) return saved;
     // nell'app Android il GPS si può scegliere, ma di norma si parte dalla propria persona, che funziona sempre
     // (non in NaviHA, che passa il GPS del telefono alla pagina anche in http)
@@ -2365,7 +2377,8 @@ class NavigatorPanel extends HTMLElement {
       v.type ? vehIcon(v.type) : "🧭"} ${esc(v.name || "Veicolo")}${v.plate ? ` · ${esc(v.plate)}` : ""}</option>`).join("")}</select>`;
     const list = this._navSources();
     const curS = sb.querySelector("#navsrc")?.value;
-    const def = list.some((x) => x.id === curS && x.ok) ? curS : this._defaultNavSource(list);
+    // finché non la sceglie l'utente, la fonte segue quella predefinita (es. la zona Casa arriva dopo il primo disegno)
+    const def = this._srcPicked && list.some((x) => x.id === curS && x.ok) ? curS : this._defaultNavSource(list);
     // accanto a persone e dispositivi: da quanto è aggiornata la loro posizione (⚠ se vecchia)
     sb.innerHTML = `<label class="muted" style="display:block;margin-bottom:4px">Segui la posizione di</label>
       <select class="inp" id="navsrc">${list.map((x) => `<option value="${esc(x.id)}" ${x.id === def ? "selected" : ""} ${x.ok ? "" : "disabled"}>${esc(x.name)}${
@@ -2380,6 +2393,7 @@ class NavigatorPanel extends HTMLElement {
     this._applyVehicle(false);
     sb.querySelector("#navsrc").addEventListener("change", (e) => {
       try { localStorage.setItem(`${STORE_KEY}-navsrc`, e.target.value); } catch (err) { /* storage non disponibile */ }
+      this._srcPicked = true;
       if (this._me) this._locate(false, e.target.value);
       if (this._result) this._renderResults();
     });
@@ -2429,7 +2443,7 @@ class NavigatorPanel extends HTMLElement {
     if (this._stepK != null) this._stepClose(); // in guida la barra in alto è della guida
     if (!this._result) return;
     // persona o dispositivo con una posizione vecchia: la guida partirebbe da lì (es. app Companion chiusa)
-    if (source !== "gps" && !force) {
+    if (source !== "gps" && !source.startsWith("zone.") && !force) { // casa: posizione fissa, mai "vecchia"
       const st = this._hass?.states?.[source];
       const age = st ? Date.now() - Date.parse(st.last_updated) : 0;
       if (age > STALE_MS) {
