@@ -360,6 +360,7 @@ async def ws_trip_save(hass: HomeAssistant, connection: websocket_api.ActiveConn
         trip["vehicle"] = {k: str(veh.get(k) or "")[:40] for k in ("id", "name", "plate", "type")}
         trip["track"] = [[round(float(p[0]), 5), round(float(p[1]), 5)] for p in (t.get("track") or []) if len(p) >= 2][:50000]
         item = await _data(hass).trips.add(uid, trip)
+        hass.async_create_task(_trip_elev(hass, uid, item["id"]))
         return {"id": item["id"]}
 
     await _run(connection, msg["id"], go())
@@ -384,6 +385,12 @@ async def ws_trip(hass: HomeAssistant, connection: websocket_api.ActiveConnectio
         trip = await _data(hass).trips.get(uid, msg["trip_id"])
         if trip is None:
             raise NavigatorError("Viaggio non trovato")
+        if "elev" not in trip and trip.get("status") != "in_corso" and len(trip.get("track") or []) > 1:
+            # viaggi salvati prima del dislivello: si calcola la prima volta che si aprono
+            e = await _data(hass).maps.elevation(trip["track"])
+            if e:  # se il servizio non risponde si riprova la prossima volta
+                trip["elev"] = e
+                await _data(hass).trips.set_info(trip["id"], {"elev": e})
         return trip
 
     await _run(connection, msg["id"], go())
@@ -432,6 +439,16 @@ async def ws_garage_save(hass: HomeAssistant, connection: websocket_api.ActiveCo
         return {"vehicles": _data(hass).trips.set_vehicles(uid, msg["vehicles"])}
 
     await _run(connection, msg["id"], go())
+
+
+async def _trip_elev(hass: HomeAssistant, user_id: str, trip_id: str) -> None:
+    """Dislivello della traccia registrata, salvato nel viaggio (in sottofondo: Esci non lo aspetta)."""
+    data = _data(hass)
+    t = await data.trips.get(user_id, trip_id)
+    if t and len(t.get("track") or []) > 1:
+        e = await data.maps.elevation(t["track"])
+        if e:
+            await data.trips.set_info(trip_id, {"elev": e})
 
 
 def _vehicle(v) -> dict:
@@ -485,7 +502,8 @@ async def ws_trip_append(hass: HomeAssistant, connection: websocket_api.ActiveCo
 async def ws_trip_finish(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
     async def go():
         uid, _name = _user(connection)
-        await _data(hass).trips.finish(uid, msg["trip_id"])
+        if await _data(hass).trips.finish(uid, msg["trip_id"]):
+            hass.async_create_task(_trip_elev(hass, uid, msg["trip_id"]))
         return {"ok": True}
 
     await _run(connection, msg["id"], go())

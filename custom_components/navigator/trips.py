@@ -179,6 +179,15 @@ class TripDb:
                 raise
         return True
 
+    def set_info(self, trip_id: str, extra: dict) -> None:
+        """Aggiunge campi (es. dislivello) alle informazioni del viaggio."""
+        with self._lock:
+            r = self._con.execute("SELECT info FROM trips WHERE id = ?", (trip_id,)).fetchone()
+            if r is None:
+                return
+            info = {**json.loads(r[0] or "{}"), **extra}
+            self._con.execute("UPDATE trips SET info = ? WHERE id = ?", (json.dumps(info, ensure_ascii=False), trip_id))
+
     def set_status(self, trip_id: str, status: str) -> None:
         with self._lock:
             self._con.execute("UPDATE trips SET status = ? WHERE id = ?", (status, trip_id))
@@ -283,15 +292,20 @@ class Trips:
     async def append(self, user_id: str, trip_id: str, points: list, stats: dict[str, Any]) -> bool:
         return await self._run(self._db.append, user_id, trip_id, points, stats)
 
-    async def finish(self, user_id: str, trip_id: str) -> None:
+    async def finish(self, user_id: str, trip_id: str) -> bool:
+        """Chiude il viaggio; False se era troppo corto ed è stato tolto."""
         t = await self._run(self._db.get, user_id, trip_id, False)
         if t is None:
-            return
+            return False
         n = await self._run(self._db.count_points, trip_id)
         if (t.get("km") or 0) < 0.3 or n < 2:  # troppo corto: non serve in archivio
             await self._run(self._db.delete, user_id, trip_id)
-            return
+            return False
         await self._run(self._db.set_status, trip_id, "concluso")
+        return True
+
+    async def set_info(self, trip_id: str, extra: dict) -> None:
+        await self._run(self._db.set_info, trip_id, extra)
 
     async def summaries(self, user_id: str) -> list[dict]:
         out = await self._run(self._db.summaries, user_id)

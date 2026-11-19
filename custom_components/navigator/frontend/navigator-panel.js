@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.97";
+const PANEL_VERSION = "1.9.98";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -651,6 +651,19 @@ function zoomForSpeed(kmh) {
 const OFF_ROUTE_MS = 6000;
 
 // distanza in metri fra due punti [lat, lon]
+// metri con il punto delle migliaia (1.240 m)
+function fmtM(v) {
+  return `${Math.round(v || 0).toLocaleString("it-IT")} m`;
+}
+
+// dislivello di un percorso: totale (salite + discese), salite, discese, arrivo − partenza e quota massima
+function elevLine(e) {
+  if (!e || e.total == null) return "";
+  const diff = e.diff ? ` · arrivo ${e.diff > 0 ? "+" : "−"}${fmtM(Math.abs(e.diff))}` : "";
+  return `<div class="elev" title="Salite e discese sommate (variazioni sotto i 6 m non contano); quote da ${e.min} a ${e.max} m">⛰ ${
+    fmtM(e.total)} di dislivello (↗ ${fmtM(e.up)} · ↘ ${fmtM(e.down)})${diff} · max ${fmtM(e.max)}</div>`;
+}
+
 function distM(a, b) {
   const kx = 111320 * Math.cos((a[0] * Math.PI) / 180);
   const dx = (b[1] - a[1]) * kx;
@@ -1256,6 +1269,7 @@ const STYLE = `
   .box.traffic { background: rgba(2,136,209,.12); border-left: 3px solid #0288d1; }
   .rwpop .rwinfo { font-size: 13px; margin: 6px 0; display: grid; gap: 2px; }
   .rwpop .rwlinks { font-size: 13px; }
+  .alt .elev { font-size: 12px; color: var(--secondary-text-color); margin-top: 4px; }
   .rwlist { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin-top: 4px; }
   .rwlist .link { text-align: left; }
   .rwm { cursor: pointer; font-size: 20px; line-height: 1; filter: drop-shadow(0 1px 2px rgba(0,0,0,.6)); text-align: center; }
@@ -6572,7 +6586,8 @@ class NavigatorPanel extends HTMLElement {
         html += `<div class="trip"><input type="checkbox" data-tc="${k}" ${col ? "checked" : ""} style="--tc:${col || ""}" title="Mostra sulla mappa">
           ${col ? `<span class="sw" style="background:${col}"></span>` : ""}
           <div class="nm" data-tv="${k}">${esc(t.from || "?")} → ${esc(t.to || "?")}
-          <small>${t.status === "in_corso" ? "🔴 in corso · " : t.status === "interrotto" ? "⚠ interrotto (senza Esci) · " : ""}${when}${veh} · ${fmtKm(t.km || 0)} · ${fmtTime(t.duration || 0)} · media ${Math.round(t.avg || 0)} · max ${Math.round(t.max || 0)} km/h</small></div>
+          <small>${t.status === "in_corso" ? "🔴 in corso · " : t.status === "interrotto" ? "⚠ interrotto (senza Esci) · " : ""}${when}${veh} · ${fmtKm(t.km || 0)} · ${fmtTime(t.duration || 0)} · media ${Math.round(t.avg || 0)} · max ${Math.round(t.max || 0)} km/h${
+            t.elev?.total != null ? ` · ⛰ ${fmtM(t.elev.total)} (↗ ${fmtM(t.elev.up)} · ↘ ${fmtM(t.elev.down)})` : ""}</small></div>
           <button class="icon" data-td="${k}" title="Elimina">🗑</button></div>`;
       });
     }
@@ -6604,7 +6619,9 @@ class NavigatorPanel extends HTMLElement {
     } else {
       if (!this._tripTracks.has(t.id)) {
         try {
-          this._tripTracks.set(t.id, (await this._hass.callWS({ type: "navigator/trip", trip_id: t.id })).track || []);
+          const full = await this._hass.callWS({ type: "navigator/trip", trip_id: t.id });
+          this._tripTracks.set(t.id, full.track || []);
+          if (full.elev) t.elev = full.elev; // dislivello calcolato adesso (viaggi salvati prima)
         } catch (e) { this._msg(e.message || String(e)); return; }
       }
       if (!this._tripSel.has(t.id)) {
@@ -7217,7 +7234,7 @@ class NavigatorPanel extends HTMLElement {
         if (r.routes.length > 1 && x.summary.length_km === shortest && x.summary.time !== fastest) tags.push(`<span class="tag">Più breve</span>`);
         html += `<div class="alt ${i === this._sel ? "on" : ""}" data-i="${i}"><span class="arr">arrivo ≈ ${arrival(x.summary.time)}</span>
           <span class="tm" style="color:${ROUTE_COLORS[i % ROUTE_COLORS.length]}">${fmtTime(x.summary.time)}</span><span class="km">${fmtKm(x.summary.length_km)}</span>
-          <div class="tags">${tags.join("")}</div></div>`;
+          <div class="tags">${tags.join("")}</div>${elevLine(x.elev)}</div>`;
       });
       html += `</div>`;
       const tr = this._trafficEta();

@@ -79,6 +79,36 @@ def imagery_meta(data: dict, zoom: int) -> dict:
     best.pop("fits", None)
     return {"found": True, **best}
 
+ELEV_TIMEOUT = aiohttp.ClientTimeout(total=8)  # quote: un di più, il percorso non le aspetta a lungo
+ELEV_MAX_POINTS = 1500  # punti mandati al servizio delle quote (la linea viene poi ricampionata ogni ELEV_STEP m)
+ELEV_STEP = 50
+ELEV_MIN_CHANGE = 6  # variazioni più piccole non contano: le quote "ballano" di qualche metro
+
+
+def elevation_stats(heights: list) -> dict | None:
+    """Dislivello da una serie di quote: salite, discese, totale, quota minima/massima, arrivo − partenza.
+
+    Le quote vengono smussate (media su 5 punti) e una salita o discesa conta solo quando supera ELEV_MIN_CHANGE
+    dall'ultimo punto di svolta: così il rumore delle quote non gonfia il totale.
+    """
+    h = [float(x) for x in heights if isinstance(x, (int, float)) and -500 < x < 9000]
+    if len(h) < 2:
+        return None
+    sm = [sum(h[max(0, i - 2):i + 3]) / len(h[max(0, i - 2):i + 3]) for i in range(len(h))]
+    up = down = 0.0
+    ref = sm[0]
+    for v in sm[1:]:
+        d = v - ref
+        if d >= ELEV_MIN_CHANGE:
+            up += d
+            ref = v
+        elif d <= -ELEV_MIN_CHANGE:
+            down -= d
+            ref = v
+    return {"up": round(up), "down": round(down), "total": round(up + down), "min": round(min(h)), "max": round(max(h)),
+            "diff": round(sm[-1] - sm[0])}
+
+
 LANES_TIMEOUT = aiohttp.ClientTimeout(total=6)  # le corsie sono un di più: il percorso non le aspetta a lungo
 
 _LOGGER = logging.getLogger(__name__)
@@ -405,6 +435,12 @@ class MapServices:
                     warnings.append("Non è stato possibile evitare tutte le tratte a pagamento: "
                                     "probabilmente non esiste una strada alternativa.")
             result["auto_excluded"] = auto_excluded
+            # dislivello di ogni percorso (in parallelo; se il servizio non risponde semplicemente non c'è)
+            if alternatives:
+                elev = await asyncio.gather(*(self.elevation(r["shape"]) for r in result["routes"]))
+                for r, e in zip(result["routes"], elev):
+                    if e:
+                        r["elev"] = e
             if MODES[mode][0] in ("auto", "motorcycle"):
                 await self._speed_limits(result["routes"][0], MODES[mode][0])
                 await self._lanes(result["routes"], points, mode)
@@ -424,6 +460,27 @@ class MapServices:
             r.pop("_legs_enc", None)
             r.setdefault("speed_limits", [])
         return result
+
+    async def elevation(self, line: list) -> dict | None:
+        """Dislivello lungo una linea [[lat, lon], ...] dal servizio delle quote di Valhalla (None se non risponde)."""
+        pts = [p for p in line if isinstance(p, (list, tuple)) and len(p) >= 2]
+        if len(pts) < 2:
+            return None
+        if len(pts) > ELEV_MAX_POINTS:
+            step = len(pts) / ELEV_MAX_POINTS
+            pts = [pts[int(i * step)] for i in range(ELEV_MAX_POINTS)] + [pts[-1]]
+        body = {"shape": [{"lat": round(float(p[0]), 5), "lon": round(float(p[1]), 5)} for p in pts],
+                "range": False, "resample_distance": ELEV_STEP}
+        try:
+            async with self._session.post(f"{self.valhalla}/height", json=body, headers=self._headers,
+                                          timeout=ELEV_TIMEOUT) as resp:
+                if resp.status >= 400:
+                    return None
+                data = await resp.json(content_type=None)
+        except Exception as err:  # noqa: BLE001 - le quote sono un di più: qualsiasi problema, semplicemente non ci sono
+            _LOGGER.debug("Quote non disponibili: %s", err)
+            return None
+        return elevation_stats((data or {}).get("height") or [])
 
     async def _lanes(self, routes: list[dict], points: list[dict], mode: str) -> None:
         """Corsie agli incroci: Valhalla non le fornisce, OSRM sì (dalle corsie mappate in OpenStreetMap).
