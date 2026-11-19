@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.92";
+const PANEL_VERSION = "1.9.93";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1386,8 +1386,10 @@ const STYLE = `
   /* notte: satellite ed escursionistica più scuri */
   #map.night .leaflet-tile-pane { filter: brightness(.6) contrast(1.1) saturate(.8); }
   /* deserto (2D): foto del satellite color sabbia */
-  #map.desert .leaflet-tile-pane { filter: sepia(.75) saturate(1.5) hue-rotate(-8deg) brightness(1.08) contrast(.95); }
-  #map.desert.night .leaflet-tile-pane { filter: sepia(.75) saturate(1.2) hue-rotate(-8deg) brightness(.65) contrast(1.05); }
+  /* come in 3D: prima bianco e nero (niente più verde), poi tutto color sabbia; contrasto basso e ombre schiarite,
+     così boschi e alberi scuri diventano roccia/sassi invece che macchie quasi nere */
+  #map.desert .leaflet-tile-pane { filter: grayscale(1) contrast(.75) brightness(1.2) sepia(1) saturate(1.35) hue-rotate(-12deg); }
+  #map.desert.night .leaflet-tile-pane { filter: grayscale(1) contrast(.8) brightness(.75) sepia(1) saturate(1.3) hue-rotate(-12deg); }
   /* schede del pannello laterale: Viaggio e Archivio */
   .sidetabs.solo { display: none; } /* app NaviHA: solo Viaggio, niente barra delle schede */
   .sidetabs { display: flex; gap: 0; position: sticky; top: 0; z-index: 5; background: var(--card-background-color, var(--primary-background-color));
@@ -6706,7 +6708,7 @@ class NavigatorPanel extends HTMLElement {
     // deserto: verde → sabbia (rotazione del colore), meno saturo e con le ombre schiarite, come dune
     // (in 3D: foto in bianco e nero, il colore sabbia lo dà il velo "desert" steso sopra)
     const desert = this._layer === "deserto"
-      ? { "raster-saturation": -1, "raster-contrast": 0.1, "raster-brightness-min": 0.22 } : {};
+      ? { "raster-saturation": -1, "raster-contrast": -0.15, "raster-brightness-min": 0.3 } : {}; // alberi scuri → roccia
     const dim = this._nightOn && ["sat", "deserto", "otm"].includes(this._layer) ? { "raster-brightness-max": 0.6, "raster-saturation": -0.2 } : {};
     return { ...desert, ...dim, ...(desert["raster-saturation"] ? { "raster-saturation": -1 } : {}) };
   }
