@@ -26,6 +26,7 @@ from homeassistant.helpers.storage import Store
 from .const import DOMAIN
 
 MAX_TRACK = 5000  # punti di una traccia restituiti alla mappa (quelli salvati sono tutti)
+MIN_KM = 0.2  # tragitti più corti (200 m) non vanno in archivio
 STALE_S = 30 * 60  # un viaggio "in corso" senza notizie da 30 minuti è interrotto (app chiusa senza Esci)
 DB_FILE = "navigator_trips.db"
 # campi con una colonna propria; tutti gli altri (da, a, mezzo, veicolo, statistiche) stanno in "info" (JSON)
@@ -132,7 +133,17 @@ class TripDb:
 
     def close_open(self, user_id: str) -> None:
         with self._lock:
+            # rimasti aperti (app chiusa senza Esci): troppo corti si tolgono, gli altri risultano interrotti
+            self._con.execute("DELETE FROM trips WHERE user_id = ? AND status = 'in_corso' "
+                              "AND COALESCE(json_extract(info, '$.km'), 0) < ?", (user_id, MIN_KM))
             self._con.execute("UPDATE trips SET status = 'interrotto' WHERE user_id = ? AND status = 'in_corso'", (user_id,))
+
+    def purge_short(self) -> int:
+        """Toglie dall'archivio i viaggi chiusi più corti di MIN_KM (anche quelli salvati prima di questa regola)."""
+        with self._lock:
+            cur = self._con.execute("DELETE FROM trips WHERE status != 'in_corso' "
+                                    "AND COALESCE(json_extract(info, '$.km'), 0) < ?", (MIN_KM,))
+            return cur.rowcount
 
     def get(self, user_id: str, trip_id: str, with_track: bool = True, last: int | None = None) -> dict | None:
         with self._lock:
@@ -239,6 +250,7 @@ class Trips:
         if users:
             await self._run(self._db.import_many, users)
             await self._store.async_save({"garage": self.garage, "selected": self.selected})
+        await self._run(self._db.purge_short)
 
     async def async_close(self) -> None:
         if self._db is not None:
@@ -276,6 +288,8 @@ class Trips:
 
     async def add(self, user_id: str, trip: dict[str, Any]) -> dict:
         track = trip.get("track") or []
+        if float(trip.get("km") or 0) < MIN_KM:  # troppo corto: non si salva
+            return {**trip, "id": ""}
         item = {**{k: v for k, v in trip.items() if k != "track"}, "id": uuid.uuid4().hex[:12]}
         await self._run(self._db.insert, user_id, item, track)
         return item
@@ -298,7 +312,7 @@ class Trips:
         if t is None:
             return False
         n = await self._run(self._db.count_points, trip_id)
-        if (t.get("km") or 0) < 0.3 or n < 2:  # troppo corto: non serve in archivio
+        if (t.get("km") or 0) < MIN_KM or n < 2:  # troppo corto (meno di 200 m): non serve in archivio
             await self._run(self._db.delete, user_id, trip_id)
             return False
         await self._run(self._db.set_status, trip_id, "concluso")

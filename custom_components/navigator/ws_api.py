@@ -360,7 +360,8 @@ async def ws_trip_save(hass: HomeAssistant, connection: websocket_api.ActiveConn
         trip["vehicle"] = {k: str(veh.get(k) or "")[:40] for k in ("id", "name", "plate", "type")}
         trip["track"] = [[round(float(p[0]), 5), round(float(p[1]), 5)] for p in (t.get("track") or []) if len(p) >= 2][:50000]
         item = await _data(hass).trips.add(uid, trip)
-        hass.async_create_task(_trip_elev(hass, uid, item["id"]))
+        if item["id"]:
+            hass.async_create_task(_trip_elev(hass, uid, item["id"]))
         return {"id": item["id"]}
 
     await _run(connection, msg["id"], go())
