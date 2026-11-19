@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.93";
+const PANEL_VERSION = "1.9.94";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -5997,16 +5997,11 @@ class NavigatorPanel extends HTMLElement {
     if (this._result !== r || this._nav) return;
     this._roadworks = items;
     this._drawRoadworks();
-    // chiusure proprio sul percorso (entro ~22 m) non ancora evitate: le si esclude e si ricalcola intorno
-    const already = new Set((this._blocked || []).map((p) => `${p.lat.toFixed(4)},${p.lon.toFixed(4)}`));
-    const neu = items.filter((it) => it.off <= 22 && !already.has(`${it.lat.toFixed(4)},${it.lon.toFixed(4)}`));
-    if (neu.length && (this._blocked || []).length < 8) {
-      this._blocked = [...(this._blocked || []), ...neu.map((it) => ({ lat: it.lat, lon: it.lon }))];
-      this._msg(`⚠ Percorso rifatto per ${neu.length === 1 ? "lavori o una strada chiusa" : "lavori e strade chiuse"}`);
-      await this._compute(false);
-    } else {
-      this._renderResults(); // mostra il riepilogo dei lavori sul percorso
-    }
+    // solo segnalazione, niente ricalcolo: Valhalla usa già gli stessi dati di OpenStreetMap e non fa passare su strade
+    // in costruzione o chiuse. Prima si escludeva il punto di una strada chiusa VICINA al percorso: l'esclusione finiva
+    // sulla strada giusta e il percorso diventava assurdo ("lavori" che non c'erano)
+    this._blocked = [];
+    this._renderResults();
   }
 
   _drawRoadworks() {
@@ -7157,11 +7152,10 @@ class NavigatorPanel extends HTMLElement {
             : delay <= -1 ? " · strada libera" : ""}<div class="muted" style="font-size:11px;margin-top:3px">da ${esc(tr.name)} · vale per il percorso impostato in quel sensore</div></div>`;
       }
       for (const w of r.warnings || []) html += `<div class="box warn">${esc(w)}</div>`;
-      if (this._blocked?.length) html += `<div class="box ok">↩ Percorso ricalcolato per aggirare ${this._blocked.length === 1 ? "una strada chiusa o lavori" : "lavori e strade chiuse"}.</div>`;
       if (this._roadworks?.length) {
         const lav = this._roadworks.filter((x) => x.kind === "lavori").length, chi = this._roadworks.length - lav;
         const parti = [lav ? `🚧 ${lav} ${lav === 1 ? "lavoro" : "lavori"}` : "", chi ? `⛔ ${chi} ${chi === 1 ? "strada chiusa" : "strade chiuse"}` : ""].filter(Boolean);
-        html += `<div class="box warn">${parti.join(" · ")} vicino al percorso (OpenStreetMap)</div>`;
+        html += `<div class="box warn">${parti.join(" · ")} vicino al percorso (segnalati su OpenStreetMap, non sempre aggiornati)</div>`;
       }
 
       // tratte a pagamento
