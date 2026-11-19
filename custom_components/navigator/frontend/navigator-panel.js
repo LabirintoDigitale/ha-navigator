@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.89";
+const PANEL_VERSION = "1.9.90";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -6177,6 +6177,24 @@ class NavigatorPanel extends HTMLElement {
     this._schedule3d();
   }
 
+  // elenco delle indicazioni del percorso scelto (sezione che si chiude)
+  _stepsHtml(r) {
+    const rt = r.routes[this._sel];
+    let h = `<div class="sec">${this._secHead("indicazioni", `Indicazioni <span class="muted" style="text-transform:none">${rt.maneuvers.length} passi</span>`)}<div class="cbbody"><ul class="steps">`;
+    let leg = 0;
+    rt.maneuvers.forEach((m, k) => {
+      if (m.leg !== leg) {
+        leg = m.leg;
+        const p = this._points[leg];
+        h += `<li class="legsep"><span class="ic">📍</span><span class="tx">Tappa ${leg}: ${esc(p?.name || "")}</span></li>`;
+      }
+      h += `<li data-k="${k}" class="${m.toll ? "toll" : ""}"><span class="ic">${maneuverIcon(m)}</span><span class="tx">${esc(m.text)}</span>
+        <span class="d">${m.length_km > 0 ? fmtKm(m.length_km) : ""}</span></li>`;
+    });
+    h += `</ul></div></div>`;
+    return h;
+  }
+
   _wxHtml() {
     const wx = this._wx;
     if (!wx || !this._result || wx.rt !== this._result.routes[this._sel]) return "";
@@ -7133,6 +7151,7 @@ class NavigatorPanel extends HTMLElement {
     this._updateModeBtn();
     if (r) {
       html += this._navSectionHtml();
+      html += this._stepsHtml(r); // indicazioni sopra il meteo
       html += this._wxHtml();
       html += `<div class="sec"><h3>Nelle vicinanze</h3><div class="row">
         <button data-a="near-fuel">⛽ Distributori sul percorso</button>
@@ -7148,20 +7167,7 @@ class NavigatorPanel extends HTMLElement {
       html += `</div></div>`;
     }
     if (r) {
-      const rt = r.routes[this._sel];
       const dest = this._points[this._points.length - 1];
-      html += `<div class="sec">${this._secHead("indicazioni", `Indicazioni <span class="muted" style="text-transform:none">${rt.maneuvers.length} passi</span>`)}<div class="cbbody"><ul class="steps">`;
-      let leg = 0;
-      rt.maneuvers.forEach((m, k) => {
-        if (m.leg !== leg) {
-          leg = m.leg;
-          const p = this._points[leg];
-          html += `<li class="legsep"><span class="ic">📍</span><span class="tx">Tappa ${leg}: ${esc(p?.name || "")}</span></li>`;
-        }
-        html += `<li data-k="${k}" class="${m.toll ? "toll" : ""}"><span class="ic">${maneuverIcon(m)}</span><span class="tx">${esc(m.text)}</span>
-          <span class="d">${m.length_km > 0 ? fmtKm(m.length_km) : ""}</span></li>`;
-      });
-      html += `</ul></div></div>`;
       // apri altrove / condividi
       const pts = this._points;
       const g = new URL("https://www.google.com/maps/dir/");
