@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.10.10";
+const PANEL_VERSION = "1.10.11";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -662,6 +662,23 @@ function elevLine(e) {
   const diff = e.diff ? ` · arrivo ${e.diff > 0 ? "+" : "−"}${fmtM(Math.abs(e.diff))}` : "";
   return `<div class="elev" title="Salite e discese sommate (variazioni sotto i 6 m non contano); quote da ${e.min} a ${e.max} m">⛰ ${
     fmtM(e.total)} di dislivello (↗ ${fmtM(e.up)} · ↘ ${fmtM(e.down)})${diff} · max ${fmtM(e.max)}</div>`;
+}
+
+// due cifre a 7 segmenti, come i vecchi display a cristalli liquidi (segmenti spenti appena visibili)
+const SEG7 = (() => {
+  const h = (yc) => `2.3,${yc} 3.3,${yc - 1} 8.7,${yc - 1} 9.7,${yc} 8.7,${yc + 1} 3.3,${yc + 1}`;
+  const v = (xc, y0, y1) => `${xc},${y0} ${xc + 1},${y0 + 1} ${xc + 1},${y1 - 1} ${xc},${y1} ${xc - 1},${y1 - 1} ${xc - 1},${y0 + 1}`;
+  return { a: h(1.3), g: h(10), d: h(18.7), f: v(1.3, 1.7, 9.6), b: v(10.7, 1.7, 9.6), e: v(1.3, 10.4, 18.3), c: v(10.7, 10.4, 18.3) };
+})();
+const SEG7_ON = ["abcdef", "bc", "abged", "abgcd", "fgbc", "afgcd", "afgedc", "abc", "abcdefg", "abcdfg"];
+function seg7Svg(text) {
+  const digits = String(text).slice(0, 2).split("");
+  const body = digits.map((ch, i) => {
+    const on = SEG7_ON[+ch] || "";
+    return `<g transform="translate(${i * 13.5} 0)">${Object.entries(SEG7).map(([k, pts]) =>
+      `<polygon points="${pts}" class="${on.includes(k) ? "on" : "off"}"/>`).join("")}</g>`;
+  }).join("");
+  return `<svg class="seg7" viewBox="-1 -0.5 28 20.5" preserveAspectRatio="xMidYMid meet"><g transform="skewX(-6) translate(1.5 0)">${body}</g></svg>`;
 }
 
 function distM(a, b) {
@@ -1329,8 +1346,11 @@ const STYLE = `
   .pitchctl .mid { grid-area: 2 / 2; } .pitchctl .right { grid-area: 2 / 3; }
   .pitchctl .down { grid-area: 3 / 2; }
   /* angoli della croce (3D, in guida): ora attuale in alto (ore | minuti), ora d'arrivo in basso (verde) */
-  .pitchctl .clk { font: 700 15px sans-serif; color: #fff; align-self: center; justify-self: center; font-variant-numeric: tabular-nums; }
+  .pitchctl .clk { color: #fff; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
   .pitchctl .clk:empty { display: none; }
+  .pitchctl .clk svg.seg7 { width: 94% !important; height: 86% !important; display: block; } /* più forte delle icone della croce (anche in auto) */
+  .pitchctl .clk .seg7 .on { fill: currentColor; }
+  .pitchctl .clk .seg7 .off { fill: currentColor; opacity: .1; }
   .pitchctl .tl { grid-area: 1 / 1; } .pitchctl .tr { grid-area: 1 / 3; }
   .pitchctl .bl { grid-area: 3 / 1; color: #7ee08a; } .pitchctl .br { grid-area: 3 / 3; color: #7ee08a; }
   .pitchctl.twod .clk { display: none; }
@@ -3597,7 +3617,14 @@ class NavigatorPanel extends HTMLElement {
   // lampadina: accesa (gialla) di giorno, spenta di notte; il tocco passa all'altra modalità e la fissa
   // ore e minuti attuali e d'arrivo negli angoli della croce (solo in guida); senza guida restano vuoti
   _navClock(remTime) {
-    const set = (id, v) => { const el = this.$(id); if (el && el.textContent !== v) el.textContent = v; };
+    // cifre a 7 segmenti (SVG) grandi quanto l'angolo della croce; il testo resta per l'accessibilità
+    const set = (id, v) => {
+      const el = this.$(id);
+      if (!el || el.dataset.v === v) return;
+      el.dataset.v = v;
+      el.innerHTML = v ? seg7Svg(v) : "";
+      el.setAttribute("aria-label", v);
+    };
     if (!this._nav || remTime == null) { for (const id of ["clkh", "clkm", "arrh", "arrm"]) set(id, ""); return; }
     const two = (n) => String(n).padStart(2, "0");
     const now = new Date();
