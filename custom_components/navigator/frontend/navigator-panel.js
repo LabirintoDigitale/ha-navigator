@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.11.7";
+const PANEL_VERSION = "1.11.8";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -6553,7 +6553,6 @@ class NavigatorPanel extends HTMLElement {
     const modeIco = (MODES.find((m) => m[0] === this._mode) || MODES[0])[1];
     this._navClock(remTime);
     bot.querySelector(".info").innerHTML = `<span title="Mezzo del percorso">${modeIco}</span><span class="rem">${fmtTime(remTime)}</span><span>${fmtKm(remM / 1000)} · arrivo ${arrival(remTime)}</span>
-      ${kmh != null ? `<span class="spd ${nav.over ? "over" : ""}" title="Velocità">${kmh} km/h</span>` : ""}
 `;
     const c = bot.querySelector('[data-n="center"]');
     c.classList.toggle("attn", !nav.follow);
