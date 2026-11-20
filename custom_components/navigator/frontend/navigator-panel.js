@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.10.2";
+const PANEL_VERSION = "1.10.3";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1144,6 +1144,14 @@ const STYLE = `
     background: var(--card-background-color, #fff); color: var(--primary-text-color, #212121); border-radius: 12px;
     box-shadow: 0 4px 18px rgba(0,0,0,.4); padding: 8px 10px; }
   .adpop[hidden] { display: none; }
+  /* schermo dell'auto: più grande, da toccare col dito */
+  .adpop.big { max-width: 560px; top: 50%; transform: translateY(-50%); padding: 12px 14px; }
+  .adpop.big .adh { font-size: 22px; }
+  .adpop.big .adh button { width: 60px; height: 52px; font-size: 24px; }
+  .adpop.big .adl { max-height: 300px; }
+  .adpop.big .adi { font-size: 20px; padding: 12px 10px; }
+  .adpop.big .adi .vs { width: 44px; height: 44px; flex: none; }
+  .adpop.big .adi .vs svg { width: 44px; height: 44px; }
   .adpop .adh { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 15px; }
   .adpop .adh span { flex: 1; }
   .adpop .adh button { border: none; background: var(--secondary-background-color, #eee); color: var(--primary-text-color, #212121); width: 36px; height: 32px;
@@ -1602,6 +1610,7 @@ class NavigatorPanel extends HTMLElement {
           <div class="navbot" id="navbot" hidden></div>
           <div class="navpop" id="navpop" hidden></div>
           <div class="adpop" id="adpop" hidden></div>
+          <div class="adpop big" id="vehpop" hidden></div>
           <div class="gattr" id="gattr" hidden></div>
           <div class="ctl br">
             <button id="modebtn" class="mode go" hidden>▶ Parti</button>
@@ -6818,6 +6827,48 @@ class NavigatorPanel extends HTMLElement {
     if (this._result) this._renderResults();
     this._carAutoSelect();
     this._syncSplashes();
+    // schermo dell'auto: qualche secondo per riconoscere l'auto (Bluetooth), poi eventualmente la scelta del veicolo
+    if (window.NaviHAApp?.isCar?.() && !this._vehAsked) setTimeout(() => this._carVehiclePick(), 3000);
+  }
+
+  // Solo sullo schermo dell'auto, all'avvio: se nel garage ci sono veicoli e nessuno è associato a quest'auto,
+  // elenco dei veicoli (frecce per scegliere, tocco per confermare: il veicolo resta associato a quest'auto).
+  // ✕: si va con "Base". Non compare senza veicoli, se l'auto è già associata o se il riquadro è già stato usato.
+  _carVehiclePick() {
+    if (this._vehAsked || this._nav) return;
+    const list = (this._garage || []).filter((v) => v.type);
+    const car = this._carInfo();
+    if (!list.length || (car?.key && list.some((v) => v.car === car.key))) return;
+    this._vehAsked = true;
+    const el = this.$("vehpop");
+    if (!el) return;
+    let sel = Math.max(0, list.findIndex((v) => v.id === this._vehicleId()));
+    const pick = (id) => {
+      el.hidden = true;
+      const box = this.$("navveh");
+      if (box) box.value = id;
+      this._vehSel = id;
+      try { localStorage.setItem(`${STORE_KEY}-veh`, id); } catch (e) { /* storage non disponibile */ }
+      this._hass.callWS({ type: "navigator/garage_select", vehicle_id: id }).catch(() => { /* integrazione vecchia */ });
+      this._renderPlanSel();
+      this._applyVehicle(true);
+      if (this._result) this._renderResults();
+      this._syncSplashes();
+      if (id !== "base") this._carReassign(id);
+    };
+    const draw = () => {
+      el.innerHTML = `<div class="adh">🚗 <span>Con che veicolo sei?</span>
+          <button data-v="up" title="Su">▲</button><button data-v="down" title="Giù">▼</button><button data-v="x" title="Chiudi: Base">✕</button></div>
+        <div class="adl">${list.map((v, i) => `<div class="adi${i === sel ? " sel" : ""}" data-i="${i}"><span class="vs">${vehicleSvg(v)}</span>
+          <span class="nm">${esc(v.name || "Veicolo")}</span><small>${esc(v.plate || "")}</small></div>`).join("")}</div>`;
+      el.querySelector('[data-v="x"]').onclick = () => pick("base");
+      el.querySelector('[data-v="up"]').onclick = () => { sel = (sel - 1 + list.length) % list.length; draw(); };
+      el.querySelector('[data-v="down"]').onclick = () => { sel = (sel + 1) % list.length; draw(); };
+      el.querySelectorAll(".adi").forEach((it) => { it.onclick = () => pick(list[+it.dataset.i].id); });
+      el.querySelector(".adi.sel")?.scrollIntoView({ block: "nearest" });
+    };
+    draw();
+    el.hidden = false;
   }
 
   // veicoli: "Base" (il mezzo si sceglie con i bottoni Auto/Moto/Bici/A piedi) e poi quelli del garage
@@ -6869,6 +6920,7 @@ class NavigatorPanel extends HTMLElement {
   // collegandosi a un'auto associata a un veicolo del garage, quel veicolo diventa quello scelto
   _carAutoSelect() {
     const c = this._carInfo();
+    if (c?.key && (this._garage || []).some((x) => x.car === c.key)) { const vp = this.$("vehpop"); if (vp) vp.hidden = true; }
     if (!c?.key || this._carSelKey === c.key || !this._garage) return;
     this._carSelKey = c.key;
     const v = this._garage.find((x) => x.car === c.key);
