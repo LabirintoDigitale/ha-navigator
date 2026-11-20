@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.10.1";
+const PANEL_VERSION = "1.10.2";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -2572,6 +2572,7 @@ class NavigatorPanel extends HTMLElement {
       this._applyVehicle(true);
       if (this._result) this._renderResults();
       this._syncSplashes();
+      this._carReassign(e.target.value);
     });
     this._applyVehicle(false);
     sb.querySelector("#navsrc").addEventListener("change", (e) => {
@@ -6880,6 +6881,22 @@ class NavigatorPanel extends HTMLElement {
     if (this._result) this._renderResults();
     this._syncSplashes();
     this._msg(`Veicolo: ${v.name || "dal garage"} (auto collegata)`);
+  }
+
+  // veicolo scelto a mano mentre si è collegati a un'auto: da ora è quello di quest'auto (l'abbinamento passa a lui).
+  // "Base" non cambia l'abbinamento.
+  async _carReassign(id) {
+    const car = this._carInfo();
+    const v = (this._garage || []).find((x) => x.id === id);
+    if (!car?.key || !v || v.car === car.key) return;
+    const l = this._garage.map((x) => ({ ...x }));
+    for (const x of l) if (x.car === car.key) { delete x.car; delete x.carName; }
+    const t = l.find((x) => x.id === id);
+    t.car = car.key;
+    t.carName = car.label || "";
+    this._carSelKey = car.key;
+    await this._saveGarage(l);
+    this._msg(`${v.name || "Veicolo"} associato a quest'auto: la prossima volta si sceglie da solo`);
   }
 
   // loghi di avvio mandati all'app NaviHA, che li mostra sull'auto prima che il pannello sia pronto
