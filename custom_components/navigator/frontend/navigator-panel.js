@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.10.18";
+const PANEL_VERSION = "1.10.19";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1361,8 +1361,8 @@ const STYLE = `
   .pitchctl .clk:empty { display: none; }
   .pitchctl .clk svg.seg7 { width: 94% !important; height: 86% !important; display: block; stroke: none !important; }
   .pitchctl .clk svg.seg7 * { stroke: none !important; }
-  /* − + e frecce: bordo rosso scuro intorno al simbolo bianco */
-  .pitchctl button[data-z], .pitchctl button[data-p] { filter: drop-shadow(0 0 1px #7a0d0d) drop-shadow(0 0 1px #7a0d0d) drop-shadow(0 0 .5px #7a0d0d); } /* niente contorno delle icone della croce: ingrossava le cifre e chiudeva gli stacchi */
+  /* − + e frecce di colore rosso scuro */
+  .pitchctl button[data-z], .pitchctl button[data-p] { color: #c0262b !important; } /* niente contorno delle icone della croce: ingrossava le cifre e chiudeva gli stacchi */
   .pitchctl .tl { grid-area: 1 / 1; } .pitchctl .tr { grid-area: 1 / 3; }
   .pitchctl .bl { grid-area: 3 / 1; color: #7ee08a; } .pitchctl .br { grid-area: 3 / 3; color: #7ee08a; }
   .pitchctl.twod .clk { display: none; }
