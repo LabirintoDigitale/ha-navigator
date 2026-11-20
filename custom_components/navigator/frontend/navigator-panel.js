@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.11.10";
+const PANEL_VERSION = "1.11.11";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1399,7 +1399,6 @@ const STYLE = `
   .pitchctl.dragging, .spdbox.dragging { opacity: .9; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
   .pitchctl .tl { grid-area: 1 / 1; } .pitchctl .tr { grid-area: 1 / 3; }
   .pitchctl .bl { grid-area: 3 / 1; color: #7ee08a; } .pitchctl .br { grid-area: 3 / 3; color: #7ee08a; }
-  .pitchctl.twod.plan .clk { display: none; }
   .pitchctl button { width: 40px; height: 36px; padding: 0; border: none; background: transparent; color: #fff; font: 700 22px sans-serif; }
   .pitchctl button:disabled { opacity: .35; }
   .pitchctl svg { width: 22px; height: 22px; display: block; margin: auto; fill: none; stroke: currentColor; stroke-width: 2.6;
@@ -1409,12 +1408,8 @@ const STYLE = `
   .pitchctl .mid.day svg .base { fill: none; stroke: #fff; }
   .pitchctl .mid.night svg { stroke: #9aa0a6; }
   /* mappa piatta (2D): niente inclinazione, − lampadina + in fila */
-  /* 2D in guida: la stessa croce del 3D con l'orologio negli angoli, senza le frecce dell'inclinazione;
-     fuori dalla guida (orologio vuoto) una riga sola − 💡 + */
+  /* 2D: la stessa croce del 3D con l'orologio negli angoli, senza le frecce dell'inclinazione (anche fuori dalla guida) */
   .pitchctl.twod .up, .pitchctl.twod .down { visibility: hidden; }
-  .pitchctl.twod.plan { grid-template-rows: 36px; }
-  .pitchctl.twod.plan .up, .pitchctl.twod.plan .down { display: none; }
-  .pitchctl.twod.plan .left { grid-area: 1 / 1; } .pitchctl.twod.plan .mid { grid-area: 1 / 2; } .pitchctl.twod.plan .right { grid-area: 1 / 3; }
   /* fuori dalla guida: in alto a sinistra, al posto dello zoom di Leaflet */
   .pitchctl.plan { right: auto; left: 10px; top: 10px; }
   /* galleria: animazione stilizzata di un tunnel che si percorre (archi che vengono incontro, luci, strada) */
@@ -1724,6 +1719,7 @@ class NavigatorPanel extends HTMLElement {
     this._setLayer(this._layer);
     this._placePitchCtl();
     window.__navihaCar = () => this._carAutoSelect(); // NaviHA: auto riconosciuta adesso
+    this._navClock(null); // ora attuale nella croce anche senza guida
     this._carSide(false); // auto: tasto ☰ per il pannello di sinistra
     setTimeout(() => this._idleWatchSync(), 3000); // "Dove vai?": GPS anche senza guida (sul telefono)
     this._routeLayer = L.layerGroup().addTo(this._map);
@@ -2869,6 +2865,7 @@ class NavigatorPanel extends HTMLElement {
     clearTimeout(nav.popTimer);
     this._nav = null;
     this._spdBox(null, false); // via il riquadro della velocità
+    this._navClock(null); // la croce torna a mostrare solo l'ora attuale
     this._idleWatchSync();
     this._updateAwake();
     this._meMarker?.remove();
@@ -3731,9 +3728,15 @@ class NavigatorPanel extends HTMLElement {
       el.innerHTML = v ? seg7Svg(v) : "";
       el.setAttribute("aria-label", v);
     };
-    if (!this._nav || remTime == null) { for (const id of ["clkh", "clkm", "arrh", "arrm"]) set(id, ""); return; }
     const two = (n) => String(n).padStart(2, "0");
     const now = new Date();
+    if (!this._nav || remTime == null) {
+      // senza guida: solo l'ora attuale (in alto); l'arrivo compare quando si parte
+      set("clkh", two(now.getHours())); set("clkm", two(now.getMinutes())); set("arrh", ""); set("arrm", "");
+      clearTimeout(this._clkT);
+      this._clkT = setTimeout(() => { if (!this._nav) this._navClock(null); }, (60 - now.getSeconds()) * 1000 + 200);
+      return;
+    }
     const arr = new Date(Date.now() + remTime * 1000);
     set("clkh", two(now.getHours())); set("clkm", two(now.getMinutes()));
     set("arrh", two(arr.getHours())); set("arrm", two(arr.getMinutes()));
