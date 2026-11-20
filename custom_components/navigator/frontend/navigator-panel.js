@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.11.6";
+const PANEL_VERSION = "1.11.7";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -599,6 +599,9 @@ function bldHeight(f) {
   const id = Number(f?.id);
   return Number.isFinite(id) ? BLD_VAR[((id % 10) + 10) % 10] : 7;
 }
+// zoom della vista 3D rispetto alla mappa 2D (fuori dalla guida): a scala uguale sarebbe −1 (riquadri da 512 px contro
+// 256), ma con la vista inclinata la 3D sembrava lontanissima; con 0 è il doppio più vicina e appare come la 2D
+const Z3D = 0;
 const NIGHT_MODES = [["auto", "Automatica (al tramonto)"], ["on", "Sempre"], ["off", "Mai"]];
 const POI_MIN_ZOOM = 13;
 const NEAR_CATS = { fuel: ["⛽", "Distributori"], parking: ["🅿️", "Parcheggi"], cameras: ["📷", "Autovelox"] };
@@ -2307,7 +2310,7 @@ class NavigatorPanel extends HTMLElement {
         this._stepAnim = false;
         const cc = g.getCenter();
         this._from3d = true;
-        try { this._map.setView([cc.lat, cc.lng], g.getZoom() + 1, { animate: false }); } finally { this._from3d = false; }
+        try { this._map.setView([cc.lat, cc.lng], g.getZoom() - Z3D, { animate: false }); } finally { this._from3d = false; }
       });
     } else {
       if (dir != null && !this._isGuida()) {
@@ -2557,7 +2560,7 @@ class NavigatorPanel extends HTMLElement {
 
   // centra la mappa su un punto (zoom alla Leaflet). In 3D si sposta la vista 3D: la mappa 2D è nascosta e il suo
   // spostamento non arrivava alla 3D ("Centra" non faceva niente); a fine movimento la 2D la segue da sola
-  _flyTo(lat, lon, z = 15) {
+  _flyTo(lat, lon, z = 15, behind = false) {
     const g = this._g3;
     if (this._3d && g && this._g3ok) {
       // durante il volo la sincronizzazione con la 2D (ancora sul punto di prima) non deve riportarla indietro
@@ -2566,10 +2569,14 @@ class NavigatorPanel extends HTMLElement {
         this._g3flying = false;
         const cc = g.getCenter(); // anche la 2D sul punto: tornando al 2D si è già lì
         this._from3d = true;
-        try { this._map.setView([cc.lat, cc.lng], g.getZoom() + 1, { animate: false }); } finally { setTimeout(() => { this._from3d = false; }, 0); }
+        try { this._map.setView([cc.lat, cc.lng], g.getZoom() - Z3D, { animate: false }); } finally { setTimeout(() => { this._from3d = false; }, 0); }
       });
       setTimeout(() => { this._g3flying = false; }, 2500); // sicurezza
-      g.flyTo({ center: [lon, lat], zoom: z - 1, duration: 800, essential: true });
+      // "Centra" sulla propria posizione: quasi dietro l'auto come in guida (distanza, inclinazione e direzione di marcia)
+      const cam = behind
+        ? { zoom: 16 + this._zoom3dOff(), pitch: this._pitch3d(), bearing: this._meDir ?? g.getBearing() }
+        : { zoom: z + Z3D };
+      g.flyTo({ center: [lon, lat], ...cam, padding: { top: 0, bottom: 0, left: 0, right: 0 }, duration: 900, essential: true });
       return;
     }
     this._map.flyTo([lat, lon], z, { duration: 0.8 });
@@ -2591,7 +2598,7 @@ class NavigatorPanel extends HTMLElement {
         this._meTurn(st.attributes.latitude, st.attributes.longitude);
         this._me = { lat: st.attributes.latitude, lon: st.attributes.longitude, src, upd: st.last_updated };
         this._drawMarkers();
-        if (fly) this._flyTo(this._me.lat, this._me.lon, 15);
+        if (fly) this._flyTo(this._me.lat, this._me.lon, 15, true);
         return Promise.resolve(this._me);
       }
     }
@@ -2604,7 +2611,7 @@ class NavigatorPanel extends HTMLElement {
       const p = { lat, lon, src: "gps" };
       if (target === "dev") this._dev = p; else this._me = p;
       this._drawMarkers();
-      if (fly) this._flyTo(lat, lon, 15);
+      if (fly) this._flyTo(lat, lon, 15, target === "me");
       return p;
     };
     return new Promise((resolve) => {
@@ -3785,7 +3792,7 @@ class NavigatorPanel extends HTMLElement {
     const c = this._map.getCenter();
     const dem = { type: "raster-dem", tiles: [DEM_URL], tileSize: 256, maxzoom: 15, encoding: "terrarium" };
     const g = new ml.Map({
-      container: el, center: [c.lng, c.lat], zoom: this._map.getZoom() - 1, pitch: this._pitch3d(), maxPitch: 80,
+      container: el, center: [c.lng, c.lat], zoom: this._map.getZoom() + Z3D, pitch: this._pitch3d(), maxPitch: 80,
       attributionControl: { compact: true },
       style: {
         version: 8,
@@ -3856,7 +3863,7 @@ class NavigatorPanel extends HTMLElement {
       // il 3D muove la mappa 2D (nascosta), ma la sincronizzazione inversa non deve rimettere la telecamera dove stava:
       // _from3d resta attivo oltre il moveend asincrono della mappa 2D, così la vista resta dove l'hai lasciata
       this._from3d = true;
-      try { this._map.setView([cc.lat, cc.lng], g.getZoom() + 1, { animate: false }); } finally { setTimeout(() => { this._from3d = false; }, 0); }
+      try { this._map.setView([cc.lat, cc.lng], g.getZoom() - Z3D, { animate: false }); } finally { setTimeout(() => { this._from3d = false; }, 0); }
     });
     g.on("click", (e) => { if (Date.now() - (this._longAt || 0) >= 900) this._mapTap(e.originalEvent); });
     g.on("contextmenu", (e) => {
@@ -5120,7 +5127,7 @@ class NavigatorPanel extends HTMLElement {
     this._g3thaw?.();
     const nav = this._nav;
     // MapLibre misura lo zoom con riquadri da 512 pixel, Leaflet da 256; in guida si aggiunge la distanza scelta dall'utente
-    const z = nav?.fix && nav.follow && this._isGuida() ? this._base3dZoom() + this._zoom3dOff() : this._map.getZoom() - 1;
+    const z = nav?.fix && nav.follow && this._isGuida() ? this._base3dZoom() + this._zoom3dOff() : this._map.getZoom() + Z3D;
     const none = { top: 0, bottom: 0, left: 0, right: 0 };
     if (nav?.fix && nav.follow) {
       const guida = this._isGuida();
