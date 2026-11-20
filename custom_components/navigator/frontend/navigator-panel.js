@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.11.16";
+const PANEL_VERSION = "1.11.17";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1330,6 +1330,10 @@ const STYLE = `
   .alt .elev { font-size: 12px; color: var(--secondary-text-color); margin-top: 4px; }
   .garv .gextra { gap: 6px; align-items: center; margin-top: 6px; font-size: 13px; flex-wrap: wrap; }
   .garv .gextra select { width: auto; }
+  /* scelta dell'immagine: tocco diretto sul pulsante (aprire la scelta file da un menu a tendina alcuni telefoni lo bloccano) */
+  .garv .gfile { display: inline-flex; align-items: center; padding: 4px 10px; border: 1px solid var(--divider-color, #ccc); border-radius: 8px;
+    cursor: pointer; color: var(--primary-color); }
+  .garv .gfile input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
   .garv .gsplash { width: 40px; height: 40px; object-fit: contain; border-radius: 6px; background: #0d1b2a; }
   .rwlist { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin-top: 4px; }
   .rwlist .link { text-align: left; }
@@ -7601,10 +7605,9 @@ class NavigatorPanel extends HTMLElement {
             <label>Logo all'avvio in auto <select data-g="splash" data-k="${k}">
               <option value="navigator" ${!v.splash ? "selected" : ""}>Navigator</option>
               <option value="veicolo" ${v.splash === "veicolo" ? "selected" : ""}>Disegno del veicolo</option>
-              ${v.splash?.startsWith("data:") ? '<option value="custom" selected>Immagine scelta</option>' : ""}
-              <option value="file">Scegli un'immagine…</option></select></label>
+              ${v.splash?.startsWith("data:") ? '<option value="custom" selected>Immagine scelta</option>' : ""}</select></label>
             ${v.splash?.startsWith("data:") ? `<img class="gsplash" src="${v.splash}" alt="">` : ""}
-            <input type="file" accept="image/*" data-g="splashfile" data-k="${k}" hidden>
+            <label class="gfile" title="Scegli un'immagine dal telefono">🖼 Immagine…<input type="file" accept="image/*" data-g="splashfile" data-k="${k}"></label>
           </div>
           <div class="row gextra">🚗 ${v.car ? `Auto: <b>${esc(v.carName || v.car)}</b>
             <button class="link" data-g="carunlink" data-k="${k}">Togli</button>` : "Nessuna auto associata"}
@@ -7664,7 +7667,6 @@ class NavigatorPanel extends HTMLElement {
       } else if (g === "splash") {
         el.addEventListener("change", async () => {
           const k = +el.dataset.k;
-          if (el.value === "file") { wrap.querySelector(`[data-g="splashfile"][data-k="${k}"]`)?.click(); return; }
           if (el.value === "custom") return;
           const l = list();
           if (el.value === "veicolo") l[k].splash = "veicolo"; else delete l[k].splash;
