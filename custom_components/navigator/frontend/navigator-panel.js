@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.10.9";
+const PANEL_VERSION = "1.10.10";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1831,10 +1831,11 @@ class NavigatorPanel extends HTMLElement {
 
   _quickItems() {
     const items = [{ ico: "◎", name: "La mia posizione", address: "Posizione del dispositivo (GPS)", _geo: true }];
-    items.push({ ico: "🏠", ...this._homePoint() });
+    // Casa: le coordinate di Home Assistant. Niente persone e telefoni (persone/dispositivi): restano le altre zone
+    items.push({ ...this._homePoint(), ico: "🏡", name: "Casa" });
     for (const e of this._info?.entities || []) {
-      if (e.entity_id === "zone.home") continue;
-      items.push({ ico: e.kind === "zone" ? "📍" : "👤", name: e.name, address: e.entity_id, lat: e.lat, lon: e.lon });
+      if (e.entity_id === "zone.home" || e.kind !== "zone") continue;
+      items.push({ ico: "📍", name: e.name, address: e.entity_id, lat: e.lat, lon: e.lon });
     }
     const out = [{ head: "Rapidi" }, ...items];
     if (this._info?.favorites?.length) out.push({ head: "Preferiti" }, ...this._info.favorites.map((f) => ({ ico: f.icon || "★", ...f })));
