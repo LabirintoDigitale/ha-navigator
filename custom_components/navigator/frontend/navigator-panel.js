@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.12.1";
+const PANEL_VERSION = "1.12.2";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -7067,6 +7067,10 @@ class NavigatorPanel extends HTMLElement {
     try {
       await this._hass.callService(call[0], call[1], { entity_id: id });
       this._msg(`✓ ${st?.attributes?.friendly_name || id}`);
+      // a voce, sempre (anche con le indicazioni vocali spente): "Attivo cancello est"
+      const word = { it: "Attivo", en: "Activating", de: "Aktiviere", fr: "J'active", es: "Activo" }[this._settings.lang] || "Attivo";
+      this._unlockAudio?.();
+      this._speak(`${word} ${String(st?.attributes?.friendly_name || id).toLowerCase()}`, true, true);
     } catch (e) {
       this._msg(`Comando non riuscito: ${e.message || e}`);
     }
