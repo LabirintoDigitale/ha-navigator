@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.12.2";
+const PANEL_VERSION = "1.12.3";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -3022,6 +3022,12 @@ class NavigatorPanel extends HTMLElement {
     const dest = this._points[this._points.length - 1];
     const toDest = distM([fix.lat, fix.lon], [dest.lat, dest.lon]);
     if (nav.arrived && toDest > 150) nav.arrived = false; // ripartito: si continua a guidare
+    // Ferma automatico: a meno di 10 m dalla destinazione (o dalla fine del percorso sulla strada) la guida si ferma da sola
+    if (toDest < 10 || (snap.dist < limit && total - snap.along < 10)) {
+      if (!nav.arrived && !this._settings.muteGuide) this._speak(PHRASES[this._settings.lang].arrived, true);
+      this._autoStop(dest);
+      return;
+    }
     if (!nav.arrived && (toDest < 35 || (snap.dist < limit && total - snap.along < 25))) {
       nav.arrived = true;
       this._renderNav();
@@ -6994,9 +7000,10 @@ class NavigatorPanel extends HTMLElement {
     if (old) old.hidden = true;
     const nav = this._nav;
     const s = this._settings;
-    const dest = this._points[this._points.length - 1];
+    const keep = !nav && this._arrKeep && Date.now() < this._arrKeep.until ? this._arrKeep : null; // dopo il Ferma automatico
+    const dest = keep ? keep.dest : this._points[this._points.length - 1];
     const ids = (s.arrEntities || []).filter((id) => this._hass.states[id]);
-    let near = !!(nav?.fix && dest && ids.length) && distM([nav.fix.lat, nav.fix.lon], [dest.lat, dest.lon]) < 500;
+    let near = !!(ids.length && dest) && (keep ? true : !!nav?.fix && distM([nav.fix.lat, nav.fix.lon], [dest.lat, dest.lon]) < 500);
     if (near && s.arrHomeOnly) {
       const h = this._homePoint();
       near = distM([dest.lat, dest.lon], [h.lat, h.lon]) < 250;
@@ -7031,6 +7038,16 @@ class NavigatorPanel extends HTMLElement {
         if (this._arrTest) this._arrAsk(id); else this._pressEntity(id);
       });
     });
+  }
+
+  // arrivati (entro 10 m): Ferma automatico; i tasti all'arrivo restano ancora 2 minuti (cancello, garage…)
+  _autoStop(dest) {
+    this._arrKeep = { until: Date.now() + 120000, dest };
+    this._stopNav();
+    this._msg(`🏁 Arrivato${dest?.name ? ` a ${dest.name}` : ""}: guida fermata`);
+    this._arrivalButtons();
+    clearTimeout(this._arrKeepT);
+    this._arrKeepT = setTimeout(() => { this._arrKeep = null; this._arrivalButtons(); }, 120500);
   }
 
   // icona scelta per il tasto; senza scelta: lampadina per le luci, accensione per il resto
