@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.10.8";
+const PANEL_VERSION = "1.10.9";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -4630,7 +4630,9 @@ class NavigatorPanel extends HTMLElement {
       for (let i = n; i >= 0; i--) { const [z, y] = q(t0 + (t1 - t0) * i / n); sr.lineTo(z, y + 0.005); }
       const sg = new THREE.ExtrudeGeometry(sr, { depth: Wg * 0.9, bevelEnabled: false });
       sg.rotateY(-Math.PI / 2); sg.translate(Wg * 0.45, 0, 0);
-      grp.add(new THREE.Mesh(sg, lam(night ? "#0d1522" : "#1d2a3a")));
+      // vetro azzurrato e un po' lucido (scuro e opaco sembrava un pannello solare)
+      grp.add(new THREE.Mesh(sg, new THREE.MeshPhongMaterial({ color: new THREE.Color(night ? "#27507a" : "#4f8ec4"),
+        specular: new THREE.Color("#ffffff"), shininess: 90, side: THREE.DoubleSide })));
     }
     // lunotto piccolo nella capote
     const rw = new THREE.Mesh(new THREE.PlaneGeometry(Wg * 0.55, 0.2), glassM);
