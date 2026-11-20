@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.11.1";
+const PANEL_VERSION = "1.11.2";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -5981,7 +5981,7 @@ class NavigatorPanel extends HTMLElement {
     el.addEventListener("pointercancel", end);
   }
 
-  // velocità attuale (cifre LCD, "km/h" piccolo dopo): rossa e lampeggiante oltre 10 km/h sopra il limite; solo in guida
+  // velocità attuale (cifre LCD, "km/h" piccolo dopo): rossa e lampeggiante sopra il limite (come il beep); solo in guida
   _spdBox(kmh, over) {
     const el = this.$("spdbox");
     if (!el) return;
@@ -6453,7 +6453,7 @@ class NavigatorPanel extends HTMLElement {
     this._arrivalButtons();
     this._wxAhead(along);
     const kmh = nav.speed != null && nav.fix ? Math.round(nav.speed * 3.6) : null;
-    this._spdBox(kmh, nav.limit != null && kmh != null && kmh > nav.limit + 10); // rosso oltre 10 km/h sopra il limite
+    this._spdBox(kmh, !!nav.over); // rosso con la stessa soglia del beep (3 km/h, 5% sopra i 60)
     const modeIco = (MODES.find((m) => m[0] === this._mode) || MODES[0])[1];
     this._navClock(remTime);
     bot.querySelector(".info").innerHTML = `<span title="Mezzo del percorso">${modeIco}</span><span class="rem">${fmtTime(remTime)}</span><span>${fmtKm(remM / 1000)} · arrivo ${arrival(remTime)}</span>
