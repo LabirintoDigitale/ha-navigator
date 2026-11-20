@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.11.5";
+const PANEL_VERSION = "1.11.6";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -2003,7 +2003,7 @@ class NavigatorPanel extends HTMLElement {
     box.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => this._placeAction(b.dataset.a, p)));
     if (p.poi) this._loadPoiInfo(p);
     this._drawMarkers();
-    if (fly) this._map.flyTo([p.lat, p.lon], Math.max(this._map.getZoom(), 15), { duration: 0.8 });
+    if (fly) this._flyTo(p.lat, p.lon, Math.max(this._map.getZoom(), 15));
   }
 
   // scheda del punto di interesse: orari (aperto ora?), telefono, sito, indirizzo, servizi — da OpenStreetMap
@@ -2555,6 +2555,26 @@ class NavigatorPanel extends HTMLElement {
     }
   }
 
+  // centra la mappa su un punto (zoom alla Leaflet). In 3D si sposta la vista 3D: la mappa 2D è nascosta e il suo
+  // spostamento non arrivava alla 3D ("Centra" non faceva niente); a fine movimento la 2D la segue da sola
+  _flyTo(lat, lon, z = 15) {
+    const g = this._g3;
+    if (this._3d && g && this._g3ok) {
+      // durante il volo la sincronizzazione con la 2D (ancora sul punto di prima) non deve riportarla indietro
+      this._g3flying = true;
+      g.once("moveend", () => {
+        this._g3flying = false;
+        const cc = g.getCenter(); // anche la 2D sul punto: tornando al 2D si è già lì
+        this._from3d = true;
+        try { this._map.setView([cc.lat, cc.lng], g.getZoom() + 1, { animate: false }); } finally { setTimeout(() => { this._from3d = false; }, 0); }
+      });
+      setTimeout(() => { this._g3flying = false; }, 2500); // sicurezza
+      g.flyTo({ center: [lon, lat], zoom: z - 1, duration: 800, essential: true });
+      return;
+    }
+    this._map.flyTo([lat, lon], z, { duration: 0.8 });
+  }
+
   // fonte della posizione scelta in "Segui la posizione di" (anche prima di partire)
   _meSource() {
     const list = this._navSources();
@@ -2571,7 +2591,7 @@ class NavigatorPanel extends HTMLElement {
         this._meTurn(st.attributes.latitude, st.attributes.longitude);
         this._me = { lat: st.attributes.latitude, lon: st.attributes.longitude, src, upd: st.last_updated };
         this._drawMarkers();
-        if (fly) this._map.flyTo([this._me.lat, this._me.lon], 15, { duration: 0.8 });
+        if (fly) this._flyTo(this._me.lat, this._me.lon, 15);
         return Promise.resolve(this._me);
       }
     }
@@ -2584,7 +2604,7 @@ class NavigatorPanel extends HTMLElement {
       const p = { lat, lon, src: "gps" };
       if (target === "dev") this._dev = p; else this._me = p;
       this._drawMarkers();
-      if (fly) this._map.flyTo([lat, lon], 15, { duration: 0.8 });
+      if (fly) this._flyTo(lat, lon, 15);
       return p;
     };
     return new Promise((resolve) => {
@@ -5115,6 +5135,7 @@ class NavigatorPanel extends HTMLElement {
       g.easeTo({ ...cam, duration: 700, easing: (t) => t });
     } else {
       this._g3key = null;
+      if (this._g3flying) return; // "Centra" in 3D: la vista sta volando sul punto
       const c = this._map.getCenter();
       g.jumpTo(this._clearCamera({ center: [c.lng, c.lat], zoom: z, bearing: g.getBearing(), pitch: g.getPitch(), padding: none }));
     }
