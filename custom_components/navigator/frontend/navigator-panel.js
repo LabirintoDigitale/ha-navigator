@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.11.9";
+const PANEL_VERSION = "1.11.10";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1399,7 +1399,7 @@ const STYLE = `
   .pitchctl.dragging, .spdbox.dragging { opacity: .9; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
   .pitchctl .tl { grid-area: 1 / 1; } .pitchctl .tr { grid-area: 1 / 3; }
   .pitchctl .bl { grid-area: 3 / 1; color: #7ee08a; } .pitchctl .br { grid-area: 3 / 3; color: #7ee08a; }
-  .pitchctl.twod .clk { display: none; }
+  .pitchctl.twod.plan .clk { display: none; }
   .pitchctl button { width: 40px; height: 36px; padding: 0; border: none; background: transparent; color: #fff; font: 700 22px sans-serif; }
   .pitchctl button:disabled { opacity: .35; }
   .pitchctl svg { width: 22px; height: 22px; display: block; margin: auto; fill: none; stroke: currentColor; stroke-width: 2.6;
@@ -1409,9 +1409,12 @@ const STYLE = `
   .pitchctl .mid.day svg .base { fill: none; stroke: #fff; }
   .pitchctl .mid.night svg { stroke: #9aa0a6; }
   /* mappa piatta (2D): niente inclinazione, − lampadina + in fila */
-  .pitchctl.twod { grid-template-rows: 36px; }
-  .pitchctl.twod .up, .pitchctl.twod .down { display: none; }
-  .pitchctl.twod .left { grid-area: 1 / 1; } .pitchctl.twod .mid { grid-area: 1 / 2; } .pitchctl.twod .right { grid-area: 1 / 3; }
+  /* 2D in guida: la stessa croce del 3D con l'orologio negli angoli, senza le frecce dell'inclinazione;
+     fuori dalla guida (orologio vuoto) una riga sola − 💡 + */
+  .pitchctl.twod .up, .pitchctl.twod .down { visibility: hidden; }
+  .pitchctl.twod.plan { grid-template-rows: 36px; }
+  .pitchctl.twod.plan .up, .pitchctl.twod.plan .down { display: none; }
+  .pitchctl.twod.plan .left { grid-area: 1 / 1; } .pitchctl.twod.plan .mid { grid-area: 1 / 2; } .pitchctl.twod.plan .right { grid-area: 1 / 3; }
   /* fuori dalla guida: in alto a sinistra, al posto dello zoom di Leaflet */
   .pitchctl.plan { right: auto; left: 10px; top: 10px; }
   /* galleria: animazione stilizzata di un tunnel che si percorre (archi che vengono incontro, luci, strada) */
