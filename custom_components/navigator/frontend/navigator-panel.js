@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.11.11";
+const PANEL_VERSION = "1.11.12";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -3731,8 +3731,11 @@ class NavigatorPanel extends HTMLElement {
     const two = (n) => String(n).padStart(2, "0");
     const now = new Date();
     if (!this._nav || remTime == null) {
-      // senza guida: solo l'ora attuale (in alto); l'arrivo compare quando si parte
-      set("clkh", two(now.getHours())); set("clkm", two(now.getMinutes())); set("arrh", ""); set("arrm", "");
+      // senza guida: ora attuale in alto; in basso l'arrivo previsto se c'è un percorso calcolato (partendo adesso)
+      set("clkh", two(now.getHours())); set("clkm", two(now.getMinutes()));
+      const t = this._result?.routes?.[this._sel]?.summary?.time;
+      const arr = !this._nav && t ? new Date(now.getTime() + t * 1000) : null;
+      set("arrh", arr ? two(arr.getHours()) : ""); set("arrm", arr ? two(arr.getMinutes()) : "");
       clearTimeout(this._clkT);
       this._clkT = setTimeout(() => { if (!this._nav) this._navClock(null); }, (60 - now.getSeconds()) * 1000 + 200);
       return;
@@ -8001,6 +8004,7 @@ class NavigatorPanel extends HTMLElement {
 
   _renderResults() {
     this._planSync();
+    if (!this._nav) this._navClock(null); // arrivo previsto nella croce (percorso nuovo o altra alternativa)
     // percorso cambiato (nuovo calcolo o altra alternativa): l'anteprima dell'indicazione non vale più
     if (this._stepK != null && this._stepRt !== this._result?.routes[this._sel]) this._stepClose();
     const box = this.$("results");
