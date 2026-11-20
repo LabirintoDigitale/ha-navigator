@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.10.5";
+const PANEL_VERSION = "1.10.6";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -4565,11 +4565,111 @@ class NavigatorPanel extends HTMLElement {
     return grp;
   }
 
+  // utilitaria tonda (tipo city car cabrio): carrozzeria del colore del veicolo, capote del colore del tetto,
+  // fari tondi, baffo cromato, fanali verticali dietro. Forme estruse con gli spigoli arrotondati (bevel).
+  _buildCitycar(color, roofColor, plate) {
+    const THREE = this._THREE;
+    const night = this._nightOn;
+    const grp = new THREE.Group();
+    const L = 3.57, W = 1.63, zf = L / 2, zr = -L / 2;
+    const lam = (c) => new THREE.MeshLambertMaterial({ color: new THREE.Color(c), side: THREE.DoubleSide });
+    const body = lam(color || "#f2efe6"), roof = lam(roofColor || color || "#b3263a");
+    const black = lam("#17191c"), chrome = lam("#c9ced4"), glassM = lam(night ? "#162235" : "#2b3d55");
+    const lightM = lam(night ? "#fff1b0" : "#f1f3ee"), red = lam("#c4161c"), tyre = lam("#141414"), rimM = lam("#b9bec5");
+    // profilo laterale (z avanti, y alto) estruso sulla larghezza, centrato, con bordi arrotondati
+    const extrude = (shape, width, m, bevel = 0.07) => {
+      const g = new THREE.ExtrudeGeometry(shape, { depth: Math.max(0.01, width - 2 * bevel), bevelEnabled: true, bevelSize: bevel,
+        bevelThickness: bevel, bevelSegments: 4, curveSegments: 14 });
+      g.rotateY(-Math.PI / 2); g.translate((width - 2 * bevel) / 2, 0, 0);
+      const mesh = new THREE.Mesh(g, m); grp.add(mesh); return mesh;
+    };
+    const box = (w, h, l, m, x, y, z) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, l), m); b.position.set(x, y, z); grp.add(b); return b; };
+    const cyl = (r, len, m, x, y, z, axis) => {
+      const c = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 22), m);
+      if (axis === "x") c.rotation.z = Math.PI / 2; else if (axis === "z") c.rotation.x = Math.PI / 2;
+      c.position.set(x, y, z); grp.add(c); return c;
+    };
+    // carrozzeria bassa: muso tondo e corto, cofano bombato, coda arrotondata (fino alla linea di cintura)
+    const lo = new THREE.Shape();
+    lo.moveTo(zf - 0.12, 0.3);
+    lo.quadraticCurveTo(zf + 0.02, 0.32, zf, 0.62);
+    lo.quadraticCurveTo(zf - 0.08, 0.93, zf - 0.85, 0.99);
+    lo.lineTo(zr + 0.35, 0.99);
+    lo.quadraticCurveTo(zr - 0.02, 0.96, zr, 0.66);
+    lo.quadraticCurveTo(zr + 0.02, 0.32, zr + 0.14, 0.3);
+    lo.lineTo(zf - 0.12, 0.3);
+    extrude(lo, W, body, 0.09);
+    // abitacolo vetrato (cupola tonda) un po' più stretto
+    const Wg = W * 0.86;
+    const gh = new THREE.Shape();
+    gh.moveTo(zf - 0.85, 0.99);
+    gh.quadraticCurveTo(zf - 1.2, 1.3, zf - 1.42, 1.4);
+    gh.quadraticCurveTo(-0.3, 1.44, zr + 0.48, 1.38);
+    gh.quadraticCurveTo(zr + 0.2, 1.26, zr + 0.24, 0.99);
+    gh.lineTo(zf - 0.85, 0.99);
+    extrude(gh, Wg, glassM, 0.06);
+    // capote (tetto in tela) dal sopra del parabrezza fino alla coda, col lunotto piccolo
+    const rf = new THREE.Shape();
+    rf.moveTo(zf - 1.45, 1.47);
+    rf.quadraticCurveTo(-0.3, 1.62, zr + 0.44, 1.5);
+    rf.quadraticCurveTo(zr + 0.12, 1.32, zr + 0.17, 1.0);
+    rf.lineTo(zr + 0.34, 1.0);
+    rf.quadraticCurveTo(zr + 0.3, 1.25, zr + 0.52, 1.36);
+    rf.quadraticCurveTo(-0.3, 1.43, zf - 1.42, 1.37);
+    rf.lineTo(zf - 1.45, 1.47);
+    extrude(rf, Wg + 0.08, roof, 0.035);
+    // lunotto piccolo nella capote
+    const rw = new THREE.Mesh(new THREE.PlaneGeometry(Wg * 0.55, 0.2), glassM);
+    rw.rotation.y = Math.PI; rw.rotation.x = -0.35; rw.position.set(0, 1.24, zr + 0.2); grp.add(rw);
+    // montanti del parabrezza e centrali nel colore della carrozzeria
+    for (const sx of [-1, 1]) {
+      const p = box(0.06, 0.52, 0.07, body, sx * (Wg / 2 + 0.005), 1.21, zf - 1.12); p.rotation.x = -0.62;
+      box(0.05, 0.42, 0.12, body, sx * (Wg / 2 + 0.01), 1.2, -0.12);
+      box(0.1, 0.08, 0.16, body, sx * (W / 2 + 0.04), 1.04, zf - 0.95); // specchietti
+    }
+    // ruote con cerchi chiari
+    const zW = [zf - 0.7, zr + 0.62];
+    for (const zw of zW) for (const sx of [-1, 1]) {
+      cyl(0.3, 0.2, tyre, sx * (W / 2 - 0.08), 0.3, zw, "x");
+      cyl(0.2, 0.215, rimM, sx * (W / 2 - 0.08), 0.3, zw, "x");
+      cyl(0.06, 0.225, black, sx * (W / 2 - 0.08), 0.3, zw, "x");
+    }
+    // davanti: fari tondi grandi, luci tonde sotto, baffo cromato, griglia scura nel paraurti
+    for (const sx of [-1, 1]) {
+      cyl(0.135, 0.06, chrome, sx * 0.52, 0.8, zf - 0.07, "z");
+      cyl(0.11, 0.075, lightM, sx * 0.52, 0.8, zf - 0.07, "z");
+      cyl(0.075, 0.05, lightM, sx * 0.58, 0.57, zf - 0.02, "z");
+    }
+    box(0.7, 0.025, 0.04, chrome, 0, 0.72, zf + 0.0);
+    box(0.95, 0.15, 0.05, black, 0, 0.42, zf - 0.02);
+    // dietro: fanali verticali tondeggianti, fascia cromata, paraurti
+    for (const sx of [-1, 1]) {
+      box(0.17, 0.28, 0.05, red, sx * (W / 2 - 0.16), 0.84, zr + 0.01);
+      box(0.09, 0.14, 0.055, lightM, sx * (W / 2 - 0.16), 0.84, zr + 0.005);
+    }
+    box(0.62, 0.03, 0.04, chrome, 0, 0.78, zr - 0.005);
+    box(W - 0.2, 0.05, 0.04, chrome, 0, 0.42, zr + 0.0);
+    if (plate) {
+      const tex = this._plateTexture(plate);
+      const pw = 0.9, ph = pw * 0.22;
+      const pm = new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide, depthWrite: false });
+      const pl = new THREE.Mesh(new THREE.PlaneGeometry(pw, ph), pm);
+      pl.position.set(0, 0.62, zr - 0.035);
+      pl.rotation.y = Math.PI; grp.add(pl);
+      grp.userData.plateTex = tex;
+    }
+    return grp;
+  }
+
   // costruisce il mezzo come un unico gruppo di forme solide, con la targa sul retro
   _buildCar3dMesh(kind, color) {
     if (kind === "suv" || kind === "jeep") {
       const v0 = this._curVehicle();
       return this._buildFeroza(color, v0?.type && v0?.plate ? v0.plate : "");
+    }
+    if (kind === "utilitaria") {
+      const v0 = this._curVehicle();
+      return this._buildCitycar(color, okColor(v0?.roof) ? v0.roof : "", v0?.type && v0?.plate ? v0.plate : "");
     }
     const THREE = this._THREE;
     const night = this._nightOn;
@@ -4624,7 +4724,7 @@ class NavigatorPanel extends HTMLElement {
     const v = this._curVehicle();
     const [kind, color] = veh3dFor(v, this._mode);
     const plate = v?.type && v?.plate ? v.plate : "";
-    const key = `${kind}|${color}|${this._nightOn ? 1 : 0}|${plate}`;
+    const key = `${kind}|${color}|${v?.roof || ""}|${this._nightOn ? 1 : 0}|${plate}`;
     if (this._car3dMeshKey !== key) {
       this._car3dMeshKey = key;
       if (c.mesh) { this._carScene.remove(c.mesh); this._disposeMesh(c.mesh); }
@@ -7077,6 +7177,7 @@ class NavigatorPanel extends HTMLElement {
             <select data-g="type" data-k="${k}" style="width:auto">${VEHICLE_TYPES.map(([t, ico, n]) => `<option value="${t}" ${v.type === t ? "selected" : ""}>${ico} ${n}</option>`).join("")}</select>
             <select data-g="icon" data-k="${k}" style="flex:1;min-width:110px" title="Disegno sulla mappa">${icons.map((i) => `<option value="${i}" ${i === ic ? "selected" : ""}>${VEH_ICONS[i][0]}</option>`).join("")}</select>
             <input type="color" data-g="color" data-k="${k}" value="${col}" title="Colore${ic === "suv" ? " (cambia solo il blu)" : ""}">
+            ${ic === "utilitaria" ? `<input type="color" data-g="roof" data-k="${k}" value="${okColor(v.roof) ? v.roof : col}" title="Colore del tetto (capote) nel modello 3D">` : ""}
           </div>
           <div class="row" style="gap:6px;align-items:center;margin-top:6px">
             <input class="inp" data-g="name" data-k="${k}" placeholder="Nome (es. Panda)" value="${esc(v.name)}" style="flex:1;min-width:90px">
