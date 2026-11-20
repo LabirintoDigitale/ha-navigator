@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.11.4";
+const PANEL_VERSION = "1.11.5";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1091,6 +1091,11 @@ const STYLE = `
   @keyframes spin { to { transform: rotate(360deg); } }
   .ctl { position: absolute; z-index: 1000; display: flex; flex-direction: column; gap: 6px; }
   .ctl.tr { top: 10px; right: 10px; } .ctl.br { bottom: 24px; right: 10px; }
+  /* tipo di mappa (fuori dalla navigazione): riquadro scuro come la croce, solo l'icona dei livelli */
+  .ctl .layerbox { width: 48px; height: 44px; padding: 0; border: none; border-radius: 12px; background: rgba(32,33,36,.85); color: #fff;
+    box-shadow: 0 1px 5px rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+  .ctl .layerbox svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; }
+  #layer[hidden] { display: none; }
   .ctl select, .ctl button { box-shadow: 0 1px 5px rgba(0,0,0,.3); border: none; font-size: 13px; }
   .ctl select { padding: 6px; border-radius: 8px; background: #fff; color: #222; }
   .ctl button { background: #fff; color: #222; width: 38px; height: 38px; padding: 0; font-size: 18px; }
@@ -1676,7 +1681,8 @@ class NavigatorPanel extends HTMLElement {
             <span class="clk tl" id="clkh" title="Ora attuale"></span><span class="clk tr" id="clkm"></span>
             <span class="clk bl" id="arrh" title="Arrivo"></span><span class="clk br" id="arrm"></span>
           </div>
-          <div class="ctl tr" id="ctltr"><select id="layer"></select></div>
+          <div class="ctl tr" id="ctltr"><select id="layer" hidden></select>
+            <button id="layerbox" class="layerbox" title="Cambia tipo di mappa"><svg viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 12.5l9 5 9-5"/><path d="M3 16.5l9 5 9-5"/></svg></button></div>
           <div class="navtop" id="navtop" hidden></div>
           <div class="navbot" id="navbot" hidden></div>
           <div class="navpop" id="navpop" hidden></div>
@@ -1775,6 +1781,8 @@ class NavigatorPanel extends HTMLElement {
 
     // schermo intero e schermo sempre acceso
     $("fullbtn").addEventListener("click", () => this._toggleFull());
+    $("layerbox").addEventListener("click", () => this._cycleLayer());
+    $("layerbox").title = `Mappa: ${LAYERS[this._layer]?.[0] || ""} (tocca per cambiare)`;
     $("sidebtn").addEventListener("click", () => this._carSide(!this.classList.contains("sideopen")));
     $("b3dbtn").addEventListener("click", () => this._toggle3d());
     const tapOk = () => Date.now() - (this._longAt || 0) > 500; // subito dopo uno spostamento il tocco non vale
@@ -6563,8 +6571,9 @@ class NavigatorPanel extends HTMLElement {
     const next = keys[(keys.indexOf(this._layer) + 1) % keys.length];
     this._setLayer(next);
     const sel = this.$("layer"); if (sel) sel.value = next;
-    const btn = this.$("navbot")?.querySelector('[data-n="layer"]');
-    if (btn) btn.title = `Mappa: ${LAYERS[next][0]} (tocca per cambiare)`;
+    for (const btn of [this.$("navbot")?.querySelector('[data-n="layer"]'), this.$("layerbox")]) {
+      if (btn) btn.title = `Mappa: ${LAYERS[next][0]} (tocca per cambiare)`;
+    }
     if (this.$("gattr")) this.$("gattr").innerHTML = LAYERS[next][3];
     this._msg(LAYERS[next][0]);
     this._saveState();
