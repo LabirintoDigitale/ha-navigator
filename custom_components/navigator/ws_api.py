@@ -32,7 +32,7 @@ def async_setup(hass: HomeAssistant) -> None:
         return
     for handler in (ws_info, ws_search, ws_reverse, ws_route, ws_place_save, ws_place_delete, ws_recent_clear, ws_nearby,
                     ws_poi_tile, ws_live, ws_weather, ws_trip_save, ws_trips, ws_trip, ws_trip_delete, ws_garage,
-                    ws_garage_save, ws_trip_start, ws_trip_append, ws_trip_finish, ws_poi_tiles, ws_poi_info, ws_live_all, ws_garage_select, ws_cameras_area, ws_imagery, ws_layout):
+                    ws_garage_save, ws_trip_start, ws_trip_append, ws_trip_finish, ws_poi_tiles, ws_poi_info, ws_live_all, ws_garage_select, ws_cameras_area, ws_imagery, ws_layout, ws_speed_limit):
         websocket_api.async_register_command(hass, handler)
     hass.data[DATA_WS_REGISTERED] = True
 
@@ -465,6 +465,21 @@ async def ws_layout(hass: HomeAssistant, connection: websocket_api.ActiveConnect
         if "data" in msg:
             return {"data": trips.set_layout(msg["profile"], msg["data"])}
         return {"data": trips.layouts.get(msg["profile"][:40], {})}
+
+    await _run(connection, msg["id"], go())
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "navigator/speed_limit",
+    vol.Required("lat"): vol.Coerce(float),
+    vol.Required("lon"): vol.Coerce(float),
+    vol.Optional("heading"): vol.Coerce(float),
+})
+@websocket_api.async_response
+async def ws_speed_limit(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Limite della strada su cui si è adesso (anche senza percorso): per il riquadro della velocità."""
+    async def go():
+        return {"limit": await _data(hass).maps.speed_limit_at(msg["lat"], msg["lon"], msg.get("heading"))}
 
     await _run(connection, msg["id"], go())
 

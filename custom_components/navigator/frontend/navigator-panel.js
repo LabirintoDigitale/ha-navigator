@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.11.3";
+const PANEL_VERSION = "1.11.4";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1353,6 +1353,7 @@ const STYLE = `
     grid-template-columns: 40px 40px 40px; grid-template-rows: 36px 36px 36px; place-items: center;
     background: rgba(32,33,36,.85); border-radius: 12px; padding: 2px; box-shadow: 0 1px 5px rgba(0,0,0,.35); color: #fff; }
   .pitchctl[hidden] { display: none; }
+  .pitchctl { touch-action: none; } /* il gesto di spostamento non deve diventare uno scorrimento (lo interrompeva) */
   .pitchctl .up { grid-area: 1 / 2; } .pitchctl .left { grid-area: 2 / 1; }
   .pitchctl .mid { grid-area: 2 / 2; } .pitchctl .right { grid-area: 2 / 3; }
   .pitchctl .down { grid-area: 3 / 2; }
@@ -1371,6 +1372,11 @@ const STYLE = `
   .spdbox .v { height: 100%; }
   .spdbox .v svg { height: 100%; width: auto; display: block; }
   .spdbox .u { font: 700 12px sans-serif; opacity: .85; margin-bottom: 2px; }
+  /* senza percorso: cartello col limite della strada attuale */
+  .spdbox .lim { align-self: center; width: 34px; height: 34px; border-radius: 50%; border: 4px solid #d32f2f; background: #fff; color: #111;
+    display: flex; align-items: center; justify-content: center; font: 800 14px sans-serif; box-sizing: border-box; margin-right: 4px; }
+  .spdbox .lim[hidden] { display: none; }
+  .spdbox.big .lim { width: 64px; height: 64px; border-width: 7px; font-size: 26px; }
   .spdbox.over { background: #c62828; animation: spdblink 1s steps(1) infinite; }
   @keyframes spdblink { 50% { background: #6d0f0f; } }
   .spdbox.big { height: 110px; padding: 6px 14px 8px; border-radius: 18px; }
@@ -1660,7 +1666,7 @@ class NavigatorPanel extends HTMLElement {
           <div class="tunfx" id="tunfx" hidden><div class="tf-road"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -0 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -1 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -2 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -3 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -4 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -5 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -6 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -7 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -8 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -9 / 6)"></div>
             <div class="tf-vis" id="tfvis"></div>
             <div class="tf-label"><span>🚇 In galleria</span><small id="tunrem"></small></div></div>
-          <div class="spdbox" id="spdbox" hidden title="Velocità (tieni premuto per spostarlo)"><div class="v" id="spdv"></div><span class="u">km/h</span></div>
+          <div class="spdbox" id="spdbox" hidden title="Velocità (tieni premuto per spostarlo)"><span class="lim" id="spdlim" hidden></span><div class="v" id="spdv"></div><span class="u">km/h</span></div>
           <div class="pitchctl" id="pitchctl" hidden>
             <button class="up" data-p="-15" title="Più dall'alto"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></button>
             <button class="left" data-z="-1" title="Riduci">−</button>
@@ -2061,7 +2067,8 @@ class NavigatorPanel extends HTMLElement {
 
   // GPS di questo dispositivo anche senza guida (solo sul telefono: NaviHA o app Companion), per accorgersi della partenza
   _idleWatchSync() {
-    const want = this._settings.autoDest !== false && !this._nav && this._meSource() === "gps" && !!this._companion()
+    // (serve alla proposta della destinazione e al riquadro della velocità senza percorso)
+    const want = !this._nav && this._meSource() === "gps" && !!this._companion()
       && window.isSecureContext && !!window.navigator.geolocation;
     if (want && this._idleWatch == null) {
       this._idleWatch = window.navigator.geolocation.watchPosition((pos) => {
@@ -2071,11 +2078,30 @@ class NavigatorPanel extends HTMLElement {
         this._me = { lat, lon, src: "gps" };
         this._drawMarkers();
         this._autoDestCheck(this._me);
+        this._idleSpeed(lat, lon, pos.coords.speed, pos.coords.heading);
       }, () => { /* GPS non disponibile: niente proposte */ }, { enableHighAccuracy: true, maximumAge: 10000, timeout: 60000 });
     } else if (!want && this._idleWatch != null) {
       window.navigator.geolocation.clearWatch(this._idleWatch);
       this._idleWatch = null;
     }
+  }
+
+  // senza guida: velocità dal GPS e limite della strada attuale (chiesto ogni tanto: >150 m o 20 s)
+  async _idleSpeed(lat, lon, speed, heading) {
+    if (this._nav) return;
+    const kmh = typeof speed === "number" && speed >= 0 ? Math.round(speed * 3.6) : null;
+    const L = (this._idleLim ||= { at: 0, ll: null, limit: null });
+    if (kmh != null && kmh >= 5 && (!L.ll || distM(L.ll, [lat, lon]) > 150 || Date.now() - L.at > 20000) && !L.busy) {
+      L.busy = true; L.at = Date.now(); L.ll = [lat, lon];
+      try {
+        const r = await this._hass.callWS({ type: "navigator/speed_limit", lat, lon,
+          ...(typeof heading === "number" && heading >= 0 ? { heading } : {}) });
+        L.limit = r.limit ?? null;
+      } catch (e) { L.limit = null; } finally { L.busy = false; }
+    }
+    if (this._nav) return;
+    const lim = L.limit;
+    this._spdBox(kmh, lim != null && kmh != null && kmh > lim + Math.max(3, lim * 0.05), lim);
   }
 
   async _autoDestCheck(pos) {
@@ -3636,7 +3662,7 @@ class NavigatorPanel extends HTMLElement {
   // in alto a destra, sotto l'indicazione della guida (o sotto la scelta della mappa)
   _placePitchCtl(pitch) {
     const el = this.$("pitchctl");
-    if (!el) return;
+    if (!el || this._dragging) return; // durante uno spostamento non si tocca niente
     // sempre visibile: zoom −/+ con la lampadina giorno/notte in mezzo; in 3D anche l'inclinazione (croce)
     const guida = !!(this._isGuida() && this._nav);
     el.hidden = false;
@@ -3647,7 +3673,7 @@ class NavigatorPanel extends HTMLElement {
     el.style.top = !guida ? "" : top && !top.hidden ? `${top.offsetTop + top.offsetHeight + 8}px` : "56px";
     el.style.left = "";
     el.classList.remove("moved");
-    if (guida) this._applyFloat("pitchctl"); // spostata a mano: lì
+    this._applyFloat("pitchctl"); // spostata a mano: lì (in guida e fuori)
     if (!this._3d || !this._g3) return;
     const p = Math.round(pitch ?? this._g3.getPitch());
     el.querySelector('[data-p="-15"]').disabled = p <= 0;
@@ -3657,6 +3683,7 @@ class NavigatorPanel extends HTMLElement {
   // lampadina: accesa (gialla) di giorno, spenta di notte; il tocco passa all'altra modalità e la fissa
   // ore e minuti attuali e d'arrivo negli angoli della croce (solo in guida); senza guida restano vuoti
   _navClock(remTime) {
+    if (this._dragging) return;
     // cifre a 7 segmenti (SVG) grandi quanto l'angolo della croce; il testo resta per l'accessibilità
     const set = (id, v) => {
       const el = this.$(id);
@@ -5928,8 +5955,7 @@ class NavigatorPanel extends HTMLElement {
     const wrap = this.$("mapwrap");
     if (!el || !wrap || el.hidden) return;
     const pos = this._layout?.[id];
-    const guida = !!(this._isGuida() && this._nav);
-    if (!pos || !guida) {
+    if (!pos) {
       if (id === "spdbox") { el.classList.remove("moved"); el.style.left = ""; el.style.top = this._floatDefTop(); }
       return;
     }
@@ -5968,7 +5994,7 @@ class NavigatorPanel extends HTMLElement {
     if (!el || !wrap) return;
     let timer = null, drag = false, sx = 0, sy = 0, ox = 0, oy = 0, gh = null, nx = 0, ny = 0;
     el.addEventListener("pointerdown", (e) => {
-      if (e.button > 0 || !(this._isGuida() && this._nav)) return; // si spostano solo in guida
+      if (e.button > 0) return;
       sx = e.clientX; sy = e.clientY; drag = false;
       clearTimeout(timer);
       timer = setTimeout(() => {
@@ -5978,6 +6004,7 @@ class NavigatorPanel extends HTMLElement {
         ox = e.clientX - r.left; oy = e.clientY - r.top;
         gh = this._ghostStart(el);
         nx = gh.x0; ny = gh.y0;
+        this._dragging = true;
         try { window.navigator.vibrate?.(20); } catch (err) { /* niente vibrazione */ }
       }, 450);
     });
@@ -5998,6 +6025,7 @@ class NavigatorPanel extends HTMLElement {
       el.classList.add("moved");
       el.style.left = `${nx}px`; el.style.top = `${ny}px`;
       this._ghostEnd(el, gh); gh = null;
+      this._dragging = false;
       this._longAt = Date.now();
       (this._layout ||= {})[id] = { x: (parseFloat(el.style.left) || 0) / wrap.clientWidth, y: (parseFloat(el.style.top) || 0) / wrap.clientHeight };
       this._saveLayout();
@@ -6007,13 +6035,16 @@ class NavigatorPanel extends HTMLElement {
   }
 
   // velocità attuale (cifre LCD, "km/h" piccolo dopo): rossa e lampeggiante sopra il limite (come il beep); solo in guida
-  _spdBox(kmh, over) {
+  _spdBox(kmh, over, lim = null) {
     const el = this.$("spdbox");
-    if (!el) return;
-    const show = kmh != null && !!this._nav && this._isGuida();
+    if (!el || this._dragging) return;
+    // in guida e anche senza percorso (velocità dal GPS del telefono, limite della strada attuale)
+    const show = kmh != null && (!this._nav || this._isGuida());
     if (el.hidden === show) { el.hidden = !show; if (show) { el.classList.toggle("big", this._isCarScreen()); this._applyFloat("spdbox"); } }
     if (!show) return;
     el.classList.toggle("over", over);
+    const le = this.$("spdlim"); // in guida il cartello c'è già nella barra verde
+    if (le) { const t = !this._nav && lim ? String(lim) : ""; le.hidden = !t; if (le.textContent !== t) le.textContent = t; }
     const v = String(Math.min(999, Math.max(0, kmh)));
     if (el.dataset.v !== v) { el.dataset.v = v; this.$("spdv").innerHTML = seg7Svg(v, 3); el.setAttribute("aria-label", `${v} km/h`); }
   }
@@ -6062,6 +6093,7 @@ class NavigatorPanel extends HTMLElement {
         oy = e.clientY - r.top;
         gh = this._ghostStart(top); // sagoma leggera al posto della barra
         ny = gh.y0;
+        this._dragging = true;
         try { window.navigator.vibrate?.(20); } catch (err) { /* niente vibrazione */ }
       }, 450);
     });
@@ -6080,6 +6112,7 @@ class NavigatorPanel extends HTMLElement {
       top.classList.add("moved");
       top.style.setProperty("--nty", `${ny}px`);
       this._ghostEnd(top, gh); gh = null;
+      this._dragging = false;
       this._longAt = Date.now(); // evita che parta un clic sui bottoni subito dopo
       const y = ny;
       // rilasciata quasi in cima: torna al posto predefinito

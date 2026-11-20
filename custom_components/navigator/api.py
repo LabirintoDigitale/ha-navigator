@@ -461,6 +461,38 @@ class MapServices:
             r.setdefault("speed_limits", [])
         return result
 
+    async def speed_limit_at(self, lat: float, lon: float, heading: float | None = None) -> int | None:
+        """Limite di velocità della strada in quel punto (Valhalla /locate), anche senza percorso; None se non noto."""
+        key = f"lim|{lat:.4f}|{lon:.4f}|{int(heading // 45) if heading is not None else '-'}"
+        hit = self._cache_get(key)
+        if hit is not None:
+            return hit or None
+        loc: dict[str, Any] = {"lat": round(lat, 6), "lon": round(lon, 6)}
+        if heading is not None:
+            loc.update(heading=round(heading) % 360, heading_tolerance=60)
+        body = {"locations": [loc], "costing": "auto", "verbose": True}
+        try:
+            async with self._session.post(f"{self.valhalla}/locate", json=body, headers=self._headers,
+                                          timeout=ELEV_TIMEOUT) as resp:
+                if resp.status >= 400:
+                    return None
+                data = await resp.json(content_type=None)
+        except Exception as err:  # noqa: BLE001 - un di più: se non risponde, niente limite
+            _LOGGER.debug("Limite non disponibile: %s", err)
+            return None
+        limit = 0
+        try:
+            edges = sorted((data or [{}])[0].get("edges") or [], key=lambda e: e.get("distance", 1e9))
+            for e in edges:
+                v = (e.get("edge") or {}).get("speed_limit")
+                if isinstance(v, (int, float)) and 0 < v < 200:
+                    limit = int(v)
+                    break
+        except (AttributeError, IndexError, TypeError):
+            limit = 0
+        self._cache_put(key, limit)
+        return limit or None
+
     async def elevation(self, line: list) -> dict | None:
         """Dislivello lungo una linea [[lat, lon], ...] dal servizio delle quote di Valhalla (None se non risponde)."""
         pts = [p for p in line if isinstance(p, (list, tuple)) and len(p) >= 2]
