@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.10.14";
+const PANEL_VERSION = "1.10.15";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -667,7 +667,8 @@ function elevLine(e) {
 // due cifre a 7 segmenti come gli orologi a cristalli liquidi: dritte, segmenti grossi a trapezio con gli angoli
 // tagliati a 45°, stacchi sottili e netti tra un segmento e l'altro, segmenti spenti appena percettibili
 const SEG7 = (() => {
-  const W = 12, H = 20, T = 2.6, g = 0.32, m = H / 2;
+  // proporzioni prese dall'orologio LCD: cifra larga ~metà dell'altezza, segmento ~1/8 dell'altezza, stacchi netti
+  const W = 10.4, H = 20, T = 2.3, g = 0.6, m = H / 2;
   const P = (pts) => pts.map(([x, y]) => `${+x.toFixed(2)},${+y.toFixed(2)}`).join(" ");
   const mx = (pts) => pts.map(([x, y]) => [W - x, y]); // specchio orizzontale
   const f = [[0, g * 1.4], [T, T + g], [T, m - T / 2 - g], [T / 2, m - g], [0, m - g * 1.4]];
@@ -685,10 +686,10 @@ function seg7Svg(text) {
   const body = digits.map((ch, i) => {
     const on = SEG7_ON[+ch] || "";
     // segmenti spenti appena percettibili, come sui display veri
-    return `<g transform="translate(${i * 15} 0)">${Object.entries(SEG7)
+    return `<g transform="translate(${i * 13.6} 0)">${Object.entries(SEG7)
       .map(([k, pts]) => `<polygon points="${pts}"${on.includes(k) ? "" : ' opacity=".09"'}/>`).join("")}</g>`;
   }).join("");
-  return `<svg class="seg7" viewBox="-0.5 -0.5 28 21" preserveAspectRatio="xMidYMid meet"><g fill="currentColor">${body}</g></svg>`;
+  return `<svg class="seg7" viewBox="-0.5 -0.5 25 21" preserveAspectRatio="xMidYMid meet"><g fill="currentColor">${body}</g></svg>`;
 }
 
 function distM(a, b) {
