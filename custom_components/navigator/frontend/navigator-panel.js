@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.10.12";
+const PANEL_VERSION = "1.10.13";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -664,23 +664,30 @@ function elevLine(e) {
     fmtM(e.total)} di dislivello (↗ ${fmtM(e.up)} · ↘ ${fmtM(e.down)})${diff} · max ${fmtM(e.max)}</div>`;
 }
 
-// due cifre a 7 segmenti, come i vecchi display a cristalli liquidi (segmenti spenti appena visibili)
+// due cifre a 7 segmenti come gli orologi a cristalli liquidi: dritte, segmenti grossi a trapezio con gli angoli
+// tagliati a 45°, stacchi sottili e netti tra un segmento e l'altro, segmenti spenti invisibili
 const SEG7 = (() => {
-  // segmenti accorciati: tra uno e l'altro resta uno spazio ben visibile (effetto segmento dei display veri)
-  const t = 0.95;
-  const h = (yc) => `3.2,${yc} ${3.2 + t},${yc - t} ${8.8 - t},${yc - t} 8.8,${yc} ${8.8 - t},${yc + t} ${3.2 + t},${yc + t}`;
-  const v = (xc, y0, y1) => `${xc},${y0} ${xc + t},${y0 + t} ${xc + t},${y1 - t} ${xc},${y1} ${xc - t},${y1 - t} ${xc - t},${y0 + t}`;
-  return { a: h(1.3), g: h(10), d: h(18.7), f: v(1.3, 2.5, 9.2), b: v(10.7, 2.5, 9.2), e: v(1.3, 10.8, 17.5), c: v(10.7, 10.8, 17.5) };
+  const W = 12, H = 20, T = 2.6, g = 0.32, m = H / 2;
+  const P = (pts) => pts.map(([x, y]) => `${+x.toFixed(2)},${+y.toFixed(2)}`).join(" ");
+  const mx = (pts) => pts.map(([x, y]) => [W - x, y]); // specchio orizzontale
+  const f = [[0, g * 1.4], [T, T + g], [T, m - T / 2 - g], [T / 2, m - g], [0, m - g * 1.4]];
+  const e = [[0, m + g * 1.4], [T / 2, m + g], [T, m + T / 2 + g], [T, H - T - g], [0, H - g * 1.4]];
+  return {
+    a: P([[g * 1.4, 0], [W - g * 1.4, 0], [W - T - g, T], [T + g, T]]),
+    d: P([[T + g, H - T], [W - T - g, H - T], [W - g * 1.4, H], [g * 1.4, H]]),
+    g: P([[T / 2 + g, m], [T + g, m - T / 2], [W - T - g, m - T / 2], [W - T / 2 - g, m], [W - T - g, m + T / 2], [T + g, m + T / 2]]),
+    f: P(f), e: P(e), b: P(mx(f)), c: P(mx(e)),
+  };
 })();
 const SEG7_ON = ["abcdef", "bc", "abged", "abgcd", "fgbc", "afgcd", "afgedc", "abc", "abcdefg", "abcdfg"];
 function seg7Svg(text) {
   const digits = String(text).slice(0, 2).split("");
   const body = digits.map((ch, i) => {
     const on = SEG7_ON[+ch] || "";
-    return `<g transform="translate(${i * 16} 0)">${Object.entries(SEG7).map(([k, pts]) =>
-      `<polygon points="${pts}" class="${on.includes(k) ? "on" : "off"}"/>`).join("")}</g>`;
+    return `<g transform="translate(${i * 15} 0)">${Object.entries(SEG7).filter(([k]) => on.includes(k))
+      .map(([, pts]) => `<polygon points="${pts}"/>`).join("")}</g>`;
   }).join("");
-  return `<svg class="seg7" viewBox="-1 -0.5 31 20.5" preserveAspectRatio="xMidYMid meet"><g transform="skewX(-6) translate(1.5 0)">${body}</g></svg>`;
+  return `<svg class="seg7" viewBox="-0.5 -0.5 28 21" preserveAspectRatio="xMidYMid meet"><g fill="currentColor">${body}</g></svg>`;
 }
 
 function distM(a, b) {
@@ -1351,8 +1358,6 @@ const STYLE = `
   .pitchctl .clk { color: #fff; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
   .pitchctl .clk:empty { display: none; }
   .pitchctl .clk svg.seg7 { width: 94% !important; height: 86% !important; display: block; } /* più forte delle icone della croce (anche in auto) */
-  .pitchctl .clk .seg7 .on { fill: currentColor; }
-  .pitchctl .clk .seg7 .off { fill: currentColor; opacity: .1; }
   .pitchctl .tl { grid-area: 1 / 1; } .pitchctl .tr { grid-area: 1 / 3; }
   .pitchctl .bl { grid-area: 3 / 1; color: #7ee08a; } .pitchctl .br { grid-area: 3 / 3; color: #7ee08a; }
   .pitchctl.twod .clk { display: none; }
