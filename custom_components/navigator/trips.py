@@ -205,10 +205,19 @@ class TripDb:
 
     def summaries(self, user_id: str) -> list[dict]:
         with self._lock:
+            # con il punto d'arrivo (ultimo della traccia): serve a proporre le mete già fatte come destinazione
             rows = self._con.execute(
-                'SELECT id, start, "end", status, updated, info FROM trips WHERE user_id = ? ORDER BY start DESC',
-                (user_id,)).fetchall()
-        return [self._row(r) for r in rows]
+                'SELECT id, start, "end", status, updated, info, '
+                '(SELECT lat FROM points p WHERE p.trip_id = t.id ORDER BY seq DESC LIMIT 1), '
+                '(SELECT lon FROM points p WHERE p.trip_id = t.id ORDER BY seq DESC LIMIT 1) '
+                'FROM trips t WHERE user_id = ? ORDER BY start DESC', (user_id,)).fetchall()
+        out = []
+        for r in rows:
+            item = self._row(r[:6])
+            if r[6] is not None and r[7] is not None:
+                item["dest"] = [r[6], r[7]]
+            out.append(item)
+        return out
 
     def delete(self, user_id: str, trip_id: str) -> None:
         with self._lock:

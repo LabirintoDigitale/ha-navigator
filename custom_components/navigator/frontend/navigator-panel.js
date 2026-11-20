@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.9.99";
+const PANEL_VERSION = "1.10.0";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -540,7 +540,7 @@ const SETTINGS_KEY = "navigator-panel-settings";
 const DEFAULT_SETTINGS = { voice: false, lang: "it", voiceSel: "f", out: "auto", autoZoom: true, beep: false,
   fuelBrands: [], fuelKind: "", camAlert: true, view3d: false, b3d: true, clouds3d: true, veh3d: true, terrainEx: "1.5", pitch3d: 60, tunnelFx: true, zoom3dOff: 0,
   voiceStyle: "normale", voiceRate: 1, voicePitch: 1, bldStyle: "colorati",
-  poiKinds: ["farmacia", "ospedale", "supermercato"], arrEntities: [], arrHomeOnly: true, nightMode: "auto", wxAlert: true, muteGuide: false, trafficSensor: "" };
+  poiKinds: ["farmacia", "ospedale", "supermercato"], arrEntities: [], arrHomeOnly: true, nightMode: "auto", wxAlert: true, muteGuide: false, trafficSensor: "", autoDest: true };
 // marche dei distributori (come nell'anagrafica del MIMIT)
 const FUEL_BRANDS = ["Agip Eni", "Api-Ip", "Q8", "Esso", "Tamoil", "Shell", "Retitalia", "Beyfin", "Costantin", "Europam", "Pompe bianche"];
 const BRAND_COLORS = { "agip eni": "#f7c600", "eni": "#f7c600", "api-ip": "#0057a8", "ip": "#0057a8", "q8": "#0a3a7a", "esso": "#d71920",
@@ -1139,6 +1139,20 @@ const STYLE = `
     .navbot .tools { width: 100%; margin-left: 0; flex-wrap: nowrap; }
     .navbot select { flex: 1; min-width: 0; max-width: none; }
   }
+  /* "Dove vai?": partito senza percorso, mete probabili (preferiti, viaggi in archivio) */
+  .adpop { position: absolute; z-index: 1003; left: 10px; right: 10px; top: 10px; max-width: 420px; margin: 0 auto;
+    background: var(--card-background-color, #fff); color: var(--primary-text-color, #212121); border-radius: 12px;
+    box-shadow: 0 4px 18px rgba(0,0,0,.4); padding: 8px 10px; }
+  .adpop[hidden] { display: none; }
+  .adpop .adh { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 15px; }
+  .adpop .adh span { flex: 1; }
+  .adpop .adh button { border: none; background: var(--secondary-background-color, #eee); color: var(--primary-text-color, #212121); width: 36px; height: 32px;
+    border-radius: 8px; font-size: 16px; padding: 0; }
+  .adpop .adl { max-height: 168px; overflow-y: auto; margin-top: 6px; scroll-behavior: smooth; }
+  .adpop .adi { display: flex; align-items: center; gap: 8px; padding: 8px 6px; border-radius: 8px; cursor: pointer; font-size: 14px; }
+  .adpop .adi.sel { background: rgba(3,169,244,.15); outline: 2px solid var(--primary-color); }
+  .adpop .adi .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .adpop .adi small { color: var(--secondary-text-color, #727272); white-space: nowrap; }
   .navpop { position: absolute; z-index: 1002; left: 50%; top: 38%; transform: translate(-50%, -50%); min-width: 230px; max-width: 85%;
     background: rgba(33,33,33,.94); color: #fff; padding: 16px 20px; border-radius: 14px; text-align: center; font-size: 16px;
     box-shadow: 0 4px 18px rgba(0,0,0,.4); }
@@ -1467,6 +1481,7 @@ class NavigatorPanel extends HTMLElement {
       this._meTurn(ms.attributes.latitude, ms.attributes.longitude);
       this._me = { lat: ms.attributes.latitude, lon: ms.attributes.longitude, src: this._me.src, upd: ms.last_updated };
       this._drawMarkers();
+      this._autoDestCheck(this._me);
     }
     // Home Assistant passa hass prima di inserire il pannello nella pagina: la mappa va creata solo quando è visibile
     if (first && this.isConnected) this._init();
@@ -1583,6 +1598,7 @@ class NavigatorPanel extends HTMLElement {
           <div class="navtop" id="navtop" hidden></div>
           <div class="navbot" id="navbot" hidden></div>
           <div class="navpop" id="navpop" hidden></div>
+          <div class="adpop" id="adpop" hidden></div>
           <div class="gattr" id="gattr" hidden></div>
           <div class="ctl br">
             <button id="modebtn" class="mode go" hidden>▶ Parti</button>
@@ -1610,6 +1626,7 @@ class NavigatorPanel extends HTMLElement {
     $("layer").addEventListener("change", (e) => { this._setLayer(e.target.value); this._saveState(); });
     this._setLayer(this._layer);
     this._placePitchCtl();
+    setTimeout(() => this._idleWatchSync(), 3000); // "Dove vai?": GPS anche senza guida (sul telefono)
     this._routeLayer = L.layerGroup().addTo(this._map);
     this._markerLayer = L.layerGroup().addTo(this._map);
     this._poiLayer = L.layerGroup().addTo(this._map);
@@ -1948,6 +1965,135 @@ class NavigatorPanel extends HTMLElement {
         { n: "node", w: "way", r: "relation" }[osm[1]]}/${osm[2]}" target="_blank" rel="noopener">correggi o aggiungi orari</a></div>`;
     }
     el.innerHTML = html;
+  }
+
+  // ----------------------------------------------------------------- "Dove vai?": partito senza percorso
+  // Senza percorso impostato, dopo 400 m dalla posizione di partenza compare un riquadro con le mete probabili:
+  // preferiti, destinazioni recenti e arrivi dei viaggi in archivio verso cui ti stai davvero avvicinando (confronto con
+  // la posizione di ~1,5 km fa). Le mete che la strada smette di avvicinare spariscono; senza mete il riquadro si nasconde.
+  // Frecce su/giù per scegliere, tocco o "Vai" per partire, ✕ per chiuderlo fino alla prossima sosta.
+
+  // GPS di questo dispositivo anche senza guida (solo sul telefono: NaviHA o app Companion), per accorgersi della partenza
+  _idleWatchSync() {
+    const want = this._settings.autoDest !== false && !this._nav && this._meSource() === "gps" && !!this._companion()
+      && window.isSecureContext && !!window.navigator.geolocation;
+    if (want && this._idleWatch == null) {
+      this._idleWatch = window.navigator.geolocation.watchPosition((pos) => {
+        if (this._nav) return;
+        const lat = pos.coords.latitude, lon = pos.coords.longitude;
+        this._meTurn(lat, lon);
+        this._me = { lat, lon, src: "gps" };
+        this._drawMarkers();
+        this._autoDestCheck(this._me);
+      }, () => { /* GPS non disponibile: niente proposte */ }, { enableHighAccuracy: true, maximumAge: 10000, timeout: 60000 });
+    } else if (!want && this._idleWatch != null) {
+      window.navigator.geolocation.clearWatch(this._idleWatch);
+      this._idleWatch = null;
+    }
+  }
+
+  async _autoDestCheck(pos) {
+    if (!pos || this._settings.autoDest === false) return;
+    const now = Date.now();
+    const ad = (this._ad ||= { hist: [], closed: false });
+    // solo fuori dalla guida (un percorso calcolato ma non avviato, es. quello rimasto dall'ultima volta, non conta)
+    if (this._nav) { this._autoDestHide(); ad.hist = []; ad.start = null; return; }
+    const here = [pos.lat, pos.lon];
+    const last = ad.hist[ad.hist.length - 1];
+    // fermo da 5 minuti: nuova partenza (si ricomincia da qui, il riquadro chiuso può tornare)
+    if (last && distM(last.p, here) < 30) {
+      if (now - last.t > 300000) { ad.hist = []; ad.start = null; ad.closed = false; this._autoDestHide(); }
+      else return;
+    }
+    if (!ad.start) ad.start = here;
+    ad.hist.push({ p: here, t: now });
+    // percorso fatto: si tiene la storia fino a ~1,5 km indietro
+    let along = 0;
+    for (let i = ad.hist.length - 1; i > 0; i--) {
+      along += distM(ad.hist[i].p, ad.hist[i - 1].p);
+      if (along > 1500) { ad.hist = ad.hist.slice(i - 1); break; }
+    }
+    if (ad.closed || distM(ad.start, here) < 400) return;
+    const ref = ad.hist[0].p;
+    const moved = distM(ref, here);
+    if (moved < 250) return;
+    const cands = await this._autoDestCands();
+    const list = [];
+    for (const c of cands) {
+      const dNow = distM(here, [c.lat, c.lon]);
+      if (dNow < 300) continue; // già arrivato (o quasi)
+      // avvicinamento rispetto a ~1,5 km fa: almeno il 35% di quanto hai percorso (strade che girano comprese)
+      const gain = distM(ref, [c.lat, c.lon]) - dNow;
+      if (gain >= moved * 0.35) list.push({ ...c, d: dNow, r: gain / moved });
+    }
+    list.sort((a, b) => b.r - a.r || a.d - b.d);
+    this._autoDestShow(list.slice(0, 8));
+  }
+
+  // mete possibili: preferiti, destinazioni recenti e arrivi dei viaggi in archivio (vicine fra loro = una sola)
+  async _autoDestCands() {
+    if (!this._trips && !this._adTripsAsked) {
+      this._adTripsAsked = true;
+      try { this._trips = (await this._hass.callWS({ type: "navigator/trips" })).trips; } catch (e) { /* archivio non disponibile */ }
+    }
+    const out = [];
+    const add = (name, lat, lon, ico, kind) => {
+      if (lat == null || lon == null || !name) return;
+      if (out.some((o) => distM([o.lat, o.lon], [lat, lon]) < 200)) return;
+      out.push({ name, lat, lon, ico, kind });
+    };
+    for (const f of this._info?.favorites || []) add(f.name, f.lat, f.lon, f.icon || "★", "Preferito");
+    for (const r of this._info?.recent || []) add(r.name, r.lat, r.lon, "🕘", "Recente");
+    for (const t of this._trips || []) if (t.dest) add(t.to || "Meta di un viaggio", t.dest[0], t.dest[1], "🗂️", "Già fatto");
+    return out;
+  }
+
+  _autoDestHide() {
+    const el = this.$("adpop");
+    if (el) el.hidden = true;
+  }
+
+  _autoDestShow(list) {
+    const el = this.$("adpop");
+    if (!el) return;
+    const ad = this._ad;
+    if (!list.length) { el.hidden = true; return; }
+    // la meta scelta con le frecce resta scelta finché c'è
+    const keep = ad.selKey && list.findIndex((x) => `${x.lat},${x.lon}` === ad.selKey);
+    ad.sel = keep >= 0 ? keep : 0;
+    ad.list = list;
+    const draw = () => {
+      el.innerHTML = `<div class="adh">📍 <span>Seleziona destinazione</span>
+          <button data-ad="up" title="Su">▲</button><button data-ad="down" title="Giù">▼</button><button data-ad="x" title="Chiudi">✕</button></div>
+        <div class="adl">${ad.list.map((x, i) => `<div class="adi${i === ad.sel ? " sel" : ""}" data-i="${i}"><span>${esc(x.ico)}</span>
+          <span class="nm">${esc(x.name)}</span><small>${esc(x.kind)} · ${fmtKm(x.d / 1000)}</small></div>`).join("")}</div>`;
+      el.querySelector('[data-ad="x"]').onclick = () => { ad.closed = true; el.hidden = true; };
+      el.querySelector('[data-ad="up"]').onclick = () => move(-1);
+      el.querySelector('[data-ad="down"]').onclick = () => move(1);
+      el.querySelectorAll(".adi").forEach((it) => { it.onclick = () => this._autoDestGo(ad.list[+it.dataset.i]); });
+      el.querySelector(".adi.sel")?.scrollIntoView({ block: "nearest" });
+    };
+    const move = (d) => {
+      ad.sel = (ad.sel + d + ad.list.length) % ad.list.length;
+      ad.selKey = `${ad.list[ad.sel].lat},${ad.list[ad.sel].lon}`;
+      draw();
+    };
+    draw();
+    el.hidden = false;
+  }
+
+  // meta scelta: partenza da qui, percorso e guida subito (stai già guidando)
+  async _autoDestGo(c) {
+    this._autoDestHide();
+    this._ad = { hist: [], closed: false };
+    const me = this._me;
+    if (!me) return;
+    this._points = [{ name: "◎ La mia posizione", address: "", lat: me.lat, lon: me.lon },
+      { name: c.name, address: c.kind === "Già fatto" ? "Meta di un viaggio in archivio" : "", lat: c.lat, lon: c.lon }];
+    this._excluded = []; this._blocked = [];
+    this._afterPointsChange(false);
+    await this._compute(true);
+    if (this._result && !this._nav) this._startNav(this._meSource() || "gps");
   }
 
   _placeAction(action, p) {
@@ -2426,6 +2572,7 @@ class NavigatorPanel extends HTMLElement {
     sb.querySelector("#navsrc").addEventListener("change", (e) => {
       try { localStorage.setItem(`${STORE_KEY}-navsrc`, e.target.value); } catch (err) { /* storage non disponibile */ }
       this._srcPicked = true;
+      this._idleWatchSync();
       if (this._me) this._locate(false, e.target.value);
       if (this._result) this._renderResults();
     });
@@ -2504,6 +2651,8 @@ class NavigatorPanel extends HTMLElement {
     this._tripVehicle = tv.type ? tv : { id: "base", name: "Base", plate: "", type: { piedi: "altro" }[this._mode] || this._mode };
     this._nav = { source, follow: true, idx: 0, passed: 0, offSince: null, offCount: 0, rerouting: false, lastReroute: 0,
       lastKey: null, fix: null, arrived: false, view: "guida", dir: null };
+    this._idleWatchSync(); // in guida il GPS lo segue la guida
+    this._autoDestHide();
     this._tripBegin();
     this.$("ctltr").hidden = true;
     this._unlockAudio();
@@ -2565,6 +2714,7 @@ class NavigatorPanel extends HTMLElement {
     this._phoneGuida(false, nav);
     clearTimeout(nav.popTimer);
     this._nav = null;
+    this._idleWatchSync();
     this._updateAwake();
     this._meMarker?.remove();
     this._accCircle?.remove();
@@ -5725,6 +5875,7 @@ class NavigatorPanel extends HTMLElement {
         ${sw("autoZoom", "Zoom automatico in base alla velocità (mappa 2D)", "In guida: più vicino in città, più largo in autostrada. Dopo + o − resta il tuo zoom per 20 secondi")}
         ${sw("autoZoom3d", "Zoom automatico in base alla velocità (vista 3D)", "In guida la distanza dalla macchina cambia con la velocità, partendo da quella che hai scelto. Spento: la distanza resta sempre quella scelta")}
         <label class="line"><span>Modalità notte</span><select data-s="nightMode">${NIGHT_MODES.map(([v, n]) => `<option value="${v}" ${(s.nightMode || "auto") === v ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+        ${sw("autoDest", "Proponi la destinazione quando parti senza percorso", "Dopo 400 m senza un percorso impostato: i preferiti e le mete dei viaggi in archivio verso cui stai andando")}
         ${sw("wxAlert", "Avvisi meteo in guida", "Pioggia, neve, gelo, vento o nebbia a meno di 10 km davanti (meteo lungo il percorso, Open-Meteo)")}
         ${sw("tunnelFx", "Animazione in galleria", "In guida, dentro le gallerie riconosciute (con la vista 3D attiva), al posto della mappa un tunnel stilizzato che scorre")}
       </div>
@@ -5793,6 +5944,7 @@ class NavigatorPanel extends HTMLElement {
       s[el.dataset.s] = el.checked;
       this._saveSettings();
       if (el.dataset.s === "veh3d") { this._me3d?.remove(); this._me3d = null; this._drawVeh3d(); this._drawMe3d(); this._schedule3d(); }
+      if (el.dataset.s === "autoDest") { this._idleWatchSync(); if (!el.checked) this._autoDestHide(); }
       if (el.dataset.s === "clouds3d") { this._cloudKey = null; this._scheduleClouds(true); }
       if (el.dataset.s === "b3d") { this._apply3dSettings(); this._openSettings(); } // compare o sparisce lo stile degli edifici
       if (el.dataset.s === "autoZoom3d") { this._g3key = null; this._sync3d(); }
