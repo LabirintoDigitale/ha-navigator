@@ -290,6 +290,8 @@ class Trips:
                 item["color"] = str(v["color"]).lower()
             if re.fullmatch(r"#[0-9a-fA-F]{6}", str(v.get("roof") or "")):
                 item["roof"] = str(v["roof"]).lower()  # tetto/capote di un altro colore (utilitaria 3D)
+            if v.get("sunroof") == "no":
+                item["sunroof"] = "no"  # utilitaria 3D senza tettuccio in vetro
             # auto associata (dall'app NaviHA: Bluetooth dell'auto o marca/modello) e logo di avvio in auto
             if v.get("car"):
                 item["car"] = str(v["car"])[:120]

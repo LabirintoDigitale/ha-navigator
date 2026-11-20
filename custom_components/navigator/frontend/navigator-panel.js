@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.10.7";
+const PANEL_VERSION = "1.10.8";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -4567,7 +4567,7 @@ class NavigatorPanel extends HTMLElement {
 
   // utilitaria tonda (tipo city car cabrio): carrozzeria del colore del veicolo, capote del colore del tetto,
   // fari tondi, baffo cromato, fanali verticali dietro. Forme estruse con gli spigoli arrotondati (bevel).
-  _buildCitycar(color, roofColor, plate) {
+  _buildCitycar(color, roofColor, plate, sunroof = true) {
     const THREE = this._THREE;
     const night = this._nightOn;
     const grp = new THREE.Group();
@@ -4618,6 +4618,20 @@ class NavigatorPanel extends HTMLElement {
     rf.quadraticCurveTo(-0.3, 1.43, zf - 1.42, 1.37);
     rf.lineTo(zf - 1.45, 1.47);
     extrude(rf, Wg + 0.08, roof, 0.035);
+    // tettuccio in vetro scuro: grande pannello sulla parte davanti del tetto, che segue la curva
+    if (sunroof) {
+      const q = (t) => { // punto della curva esterna del tetto (z, y)
+        const a = [zf - 1.45, 1.47], c = [-0.3, 1.62], b = [zr + 0.44, 1.5], u = 1 - t;
+        return [u * u * a[0] + 2 * u * t * c[0] + t * t * b[0], u * u * a[1] + 2 * u * t * c[1] + t * t * b[1]];
+      };
+      const sr = new THREE.Shape();
+      const n = 10, t0 = 0.03, t1 = 0.6;
+      for (let i = 0; i <= n; i++) { const [z, y] = q(t0 + (t1 - t0) * i / n); if (i === 0) sr.moveTo(z, y + 0.045); else sr.lineTo(z, y + 0.045); }
+      for (let i = n; i >= 0; i--) { const [z, y] = q(t0 + (t1 - t0) * i / n); sr.lineTo(z, y + 0.005); }
+      const sg = new THREE.ExtrudeGeometry(sr, { depth: Wg * 0.9, bevelEnabled: false });
+      sg.rotateY(-Math.PI / 2); sg.translate(Wg * 0.45, 0, 0);
+      grp.add(new THREE.Mesh(sg, lam(night ? "#0d1522" : "#1d2a3a")));
+    }
     // lunotto piccolo nella capote
     const rw = new THREE.Mesh(new THREE.PlaneGeometry(Wg * 0.55, 0.2), glassM);
     rw.rotation.y = Math.PI; rw.rotation.x = -0.35; rw.position.set(0, 1.24, zr + 0.2); grp.add(rw);
@@ -4670,7 +4684,8 @@ class NavigatorPanel extends HTMLElement {
     }
     if (kind === "utilitaria") {
       const v0 = this._curVehicle();
-      return this._buildCitycar(color, okColor(v0?.roof) ? v0.roof : "", v0?.type && v0?.plate ? v0.plate : "");
+      // tetto nel colore della carrozzeria e tettuccio in vetro (salvo "Tetto pieno")
+      return this._buildCitycar(color, "", v0?.type && v0?.plate ? v0.plate : "", v0?.sunroof !== "no");
     }
     const THREE = this._THREE;
     const night = this._nightOn;
@@ -4725,7 +4740,7 @@ class NavigatorPanel extends HTMLElement {
     const v = this._curVehicle();
     const [kind, color] = veh3dFor(v, this._mode);
     const plate = v?.type && v?.plate ? v.plate : "";
-    const key = `${kind}|${color}|${v?.roof || ""}|${this._nightOn ? 1 : 0}|${plate}`;
+    const key = `${kind}|${color}|${v?.roof || ""}|${v?.sunroof || ""}|${this._nightOn ? 1 : 0}|${plate}`;
     if (this._car3dMeshKey !== key) {
       this._car3dMeshKey = key;
       if (c.mesh) { this._carScene.remove(c.mesh); this._disposeMesh(c.mesh); }
@@ -7178,7 +7193,9 @@ class NavigatorPanel extends HTMLElement {
             <select data-g="type" data-k="${k}" style="width:auto">${VEHICLE_TYPES.map(([t, ico, n]) => `<option value="${t}" ${v.type === t ? "selected" : ""}>${ico} ${n}</option>`).join("")}</select>
             <select data-g="icon" data-k="${k}" style="flex:1;min-width:110px" title="Disegno sulla mappa">${icons.map((i) => `<option value="${i}" ${i === ic ? "selected" : ""}>${VEH_ICONS[i][0]}</option>`).join("")}</select>
             <input type="color" data-g="color" data-k="${k}" value="${col}" title="Colore${ic === "suv" ? " (cambia solo il blu)" : ""}">
-            ${ic === "utilitaria" ? `<input type="color" data-g="roof" data-k="${k}" value="${okColor(v.roof) ? v.roof : col}" title="Colore del tetto (capote) nel modello 3D">` : ""}
+            ${ic === "utilitaria" ? `<select data-g="sunroof" data-k="${k}" style="width:auto" title="Tetto nel modello 3D">
+              <option value="" ${v.sunroof !== "no" ? "selected" : ""}>Tettuccio in vetro</option>
+              <option value="no" ${v.sunroof === "no" ? "selected" : ""}>Tetto pieno</option></select>` : ""}
           </div>
           <div class="row" style="gap:6px;align-items:center;margin-top:6px">
             <input class="inp" data-g="name" data-k="${k}" placeholder="Nome (es. Panda)" value="${esc(v.name)}" style="flex:1;min-width:90px">
