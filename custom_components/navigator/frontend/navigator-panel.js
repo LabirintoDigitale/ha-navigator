@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.11.14";
+const PANEL_VERSION = "1.11.15";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -4133,7 +4133,8 @@ class NavigatorPanel extends HTMLElement {
       if (p.warn.some((w) => /Neve/.test(w.txt))) routeSnow = 0.6;
       if (p.warn.some((w) => w.kind === "fog")) routeFog = 0.65;
     }
-    const v = Math.max(R.v, route), fog = Math.max(R.fog || 0, routeFog), snow = Math.max(R.snow || 0, routeSnow);
+    const snow = Math.max(R.snow || 0, routeSnow), fog = Math.max(R.fog || 0, routeFog);
+    const v = snow > 0 ? 0 : Math.max(R.v, route); // con la neve niente pioggia insieme
     if (v !== this._rainHere || fog !== this._fogHere || snow !== this._snowHere) {
       this._rainHere = v; this._fogHere = fog; this._snowHere = snow; this._scheduleCloudDraw?.();
     }
@@ -4374,7 +4375,8 @@ class NavigatorPanel extends HTMLElement {
     }
     x.lineWidth = 2;
     x.lineCap = "round";
-    x.strokeStyle = night ? "rgba(170,190,225," : "rgba(225,238,255,";
+    // colore completo (prima era scritto a metà, "rgba(…," : il browser lo scartava e le gocce uscivano nere)
+    x.strokeStyle = night ? "rgb(170,190,225)" : "rgb(225,238,255)";
     for (const d of this._rainDrops) {
       d.y += d.spd * dt;
       d.x += d.spd * dt * wind;
