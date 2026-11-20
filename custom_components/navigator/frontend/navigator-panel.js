@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.11.12";
+const PANEL_VERSION = "1.11.13";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -4063,6 +4063,7 @@ class NavigatorPanel extends HTMLElement {
     // nuvole volumetriche 3D disattivate: pesanti sulla WebView e rese non sempre bene. Gli avvisi meteo lungo il
     // percorso restano come icone. (Si possono riattivare in futuro.)
     this._clouds = [];
+    this._updateRainHere(); // la pioggia invece c'è: non dipende più dalle nuvole
     this._drawClouds();
     return; // eslint-disable-line no-unreachable
     const g = this._g3;
@@ -4102,6 +4103,34 @@ class NavigatorPanel extends HTMLElement {
     this._cloudKey = key;
     this._clouds = this._cloudList(c.lat, c.lng);
     this._drawClouds();
+  }
+
+  // pioggia nella zona inquadrata in 3D: adesso (Open-Meteo, al centro della vista; di nuovo dopo ~8 km o 20 min)
+  // oppure prevista dal meteo del percorso entro ~8 km. Intensità 0..1 per le gocce animate.
+  async _updateRainHere() {
+    const g = this._g3;
+    if (!this._3d || !g || !this._g3ok) { this._rainHere = 0; return; }
+    const c = g.getCenter();
+    const R = (this._rainWx ||= { at: 0, lat: 0, lon: 0, v: 0 });
+    if (!R.busy && (Date.now() - R.at > 1200000 || Math.abs(R.lat - c.lat) > 0.08 || Math.abs(R.lon - c.lng) > 0.08)) {
+      R.busy = true;
+      try {
+        const r = await this._hass.callWS({ type: "navigator/weather", points: [[+c.lat.toFixed(2), +c.lng.toFixed(2), Date.now() / 1000]] });
+        const w = r.points?.[0] || {};
+        const wet = (w.prec || 0) >= 0.3 || ((w.code ?? 0) >= 51 && (w.code ?? 0) < 100);
+        R.v = wet ? Math.min(1, 0.45 + (w.prec || 0) / 4) : 0;
+        R.fog = w.code === 45 || w.code === 48 ? 0.75 : 0; // nebbia adesso
+      } catch (e) { R.v = 0; R.fog = 0; }
+      R.at = Date.now(); R.lat = c.lat; R.lon = c.lng; R.busy = false;
+    }
+    let route = 0, routeFog = 0;
+    for (const p of this._wx?.done ? this._wx.items : []) {
+      if (!p.warn?.length || distM(p.ll, [c.lat, c.lng]) >= 8000) continue;
+      if (p.warn.some((w) => /Pioggia|Temporale|Neve/.test(w.txt))) route = 0.55;
+      if (p.warn.some((w) => w.kind === "fog")) routeFog = 0.65;
+    }
+    const v = Math.max(R.v, route), fog = Math.max(R.fog || 0, routeFog);
+    if (v !== this._rainHere || fog !== this._fogHere) { this._rainHere = v; this._fogHere = fog; this._scheduleCloudDraw?.(); }
   }
 
   // nuvole della zona: [{x, y (Mercatore), alt (m), rain, puffs: [{dx, dy, dz, r} in metri]}]
@@ -4199,7 +4228,15 @@ class NavigatorPanel extends HTMLElement {
     const x = cv.getContext("2d");
     x.setTransform(dpr, 0, 0, dpr, 0, 0);
     x.clearRect(0, 0, W, H);
-    if (!this._3d || !this._clouds?.length) return;
+    if (!this._3d) return;
+    if (!this._clouds?.length) { // senza nuvole 3D: pioggia e nebbia, se nella zona ci sono
+      const tilt = g.getPitch() > 25;
+      if ((this._fogHere || 0) > 0 && tilt) this._drawFog(x, W, H, this._fogHere);
+      if ((this._rainHere || 0) > 0 && tilt) this._drawRain(x, W, H, this._rainHere);
+      else this._rainDrops = null;
+      if (tilt && ((this._fogHere || 0) > 0 || (this._rainHere || 0) > 0)) g.triggerRepaint(); // animazione viva
+      return;
+    }
     let cam;
     try { // posizione della telecamera (MapLibre 5: dalla trasformazione della vista)
       const t = g.transform;
@@ -4261,6 +4298,32 @@ class NavigatorPanel extends HTMLElement {
   }
 
   // pioggia animata su un foglio sopra la mappa (2D): tante gocce-striscia che cadono con un po' di vento
+  // nebbia: velo biancastro più fitto verso l'orizzonte e banchi che scorrono lenti di lato (la strada in basso resta leggibile)
+  _drawFog(x, W, H, v) {
+    const t = performance.now() / 1000;
+    const night = this._nightOn;
+    const col = night ? "150,160,175" : "226,230,234";
+    const veil = x.createLinearGradient(0, 0, 0, H);
+    veil.addColorStop(0, `rgba(${col},${0.85 * v})`);
+    veil.addColorStop(0.45, `rgba(${col},${0.5 * v})`);
+    veil.addColorStop(0.8, `rgba(${col},${0.12 * v})`);
+    veil.addColorStop(1, `rgba(${col},0)`);
+    x.fillStyle = veil;
+    x.fillRect(0, 0, W, H);
+    for (let i = 0; i < 7; i++) {
+      const sp = 9 + (i % 3) * 7; // px al secondo, diversi per banco
+      const span = W * 1.8;
+      const cx = ((i * W * 0.41 + t * sp) % span) - W * 0.4;
+      const cy = H * (0.18 + ((i * 0.13) % 0.5));
+      const r = W * (0.35 + (i % 4) * 0.08);
+      const gr = x.createRadialGradient(cx, cy, 0, cx, cy, r);
+      gr.addColorStop(0, `rgba(${col},${0.32 * v})`);
+      gr.addColorStop(1, `rgba(${col},0)`);
+      x.fillStyle = gr;
+      x.fillRect(cx - r, cy - r, r * 2, r * 2);
+    }
+  }
+
   _drawRain(x, W, H, intensity) {
     const now = performance.now();
     let dt = now - (this._rainT || now); this._rainT = now;
@@ -6905,12 +6968,26 @@ class NavigatorPanel extends HTMLElement {
     const lay = this._wxLayer;
     if (!lay) return;
     lay.clearLayers();
-    for (const p of this._wx?.items || []) {
-      if (!p.warn?.length) continue;
+    // un'icona ogni ~1,5 km su tutto il tratto di ogni punto con un avviso (fino a metà strada dai punti vicini):
+    // si vede dove comincia e dove finisce la pioggia, non solo un'icona isolata
+    const items = this._wx?.items || [];
+    const rt = this._wx?.rt ? this._geom(this._wx.rt) : null;
+    const total = rt ? rt._cum[rt._cum.length - 1] : 0;
+    items.forEach((p, k) => {
+      if (!p.warn?.length) return;
       const w = p.warn[0];
-      L.marker(p.ll, { title: `${w.txt} · ${fmtClock(p.t)}${p.temp != null ? ` · ${Math.round(p.temp)} °C` : ""}`,
-        icon: L.divIcon({ className: "", html: `<div class="wxm">${wxIcon(w.kind)}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] }) }).addTo(lay);
-    }
+      const title = `${w.txt} · ${fmtClock(p.t)}${p.temp != null ? ` · ${Math.round(p.temp)} °C` : ""}`;
+      const icon = L.divIcon({ className: "", html: `<div class="wxm">${wxIcon(w.kind)}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
+      const spots = [p.ll];
+      if (rt && p.along != null) {
+        const a0 = k > 0 ? (items[k - 1].along + p.along) / 2 : Math.max(0, p.along - 2000);
+        const a1 = k < items.length - 1 ? (p.along + items[k + 1].along) / 2 : Math.min(total, p.along + 2000);
+        for (let a = p.along - 1500; a > a0; a -= 1500) spots.push(this._pointAt(rt, a).ll);
+        for (let a = p.along + 1500; a < a1; a += 1500) spots.push(this._pointAt(rt, a).ll);
+      }
+      for (const ll of spots) L.marker(ll, { title, icon }).addTo(lay);
+    });
+    if (this._3d) this._updateRainHere(); // pioggia prevista sul percorso: gocce in 3D anche lì
     this._schedule3d();
   }
 
