@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.10.6";
+const PANEL_VERSION = "1.10.7";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -4636,25 +4636,26 @@ class NavigatorPanel extends HTMLElement {
     }
     // davanti: fari tondi grandi, luci tonde sotto, baffo cromato, griglia scura nel paraurti
     for (const sx of [-1, 1]) {
-      cyl(0.135, 0.06, chrome, sx * 0.52, 0.8, zf - 0.07, "z");
-      cyl(0.11, 0.075, lightM, sx * 0.52, 0.8, zf - 0.07, "z");
-      cyl(0.075, 0.05, lightM, sx * 0.58, 0.57, zf - 0.02, "z");
+      // (gli spigoli arrotondati fanno sporgere muso e coda di ~9 cm: i dettagli stanno sulla superficie vera)
+      cyl(0.135, 0.06, chrome, sx * 0.52, 0.8, zf - 0.01, "z");
+      cyl(0.11, 0.075, lightM, sx * 0.52, 0.8, zf - 0.0, "z");
+      cyl(0.075, 0.05, lightM, sx * 0.58, 0.57, zf + 0.08, "z");
     }
-    box(0.7, 0.025, 0.04, chrome, 0, 0.72, zf + 0.0);
-    box(0.95, 0.15, 0.05, black, 0, 0.42, zf - 0.02);
+    box(0.7, 0.025, 0.04, chrome, 0, 0.72, zf + 0.06);
+    box(0.95, 0.15, 0.05, black, 0, 0.42, zf + 0.08);
     // dietro: fanali verticali tondeggianti, fascia cromata, paraurti
     for (const sx of [-1, 1]) {
-      box(0.17, 0.28, 0.05, red, sx * (W / 2 - 0.16), 0.84, zr + 0.01);
-      box(0.09, 0.14, 0.055, lightM, sx * (W / 2 - 0.16), 0.84, zr + 0.005);
+      box(0.17, 0.28, 0.05, red, sx * (W / 2 - 0.16), 0.84, zr - 0.06);
+      box(0.09, 0.14, 0.055, lightM, sx * (W / 2 - 0.16), 0.84, zr - 0.07);
     }
-    box(0.62, 0.03, 0.04, chrome, 0, 0.78, zr - 0.005);
-    box(W - 0.2, 0.05, 0.04, chrome, 0, 0.42, zr + 0.0);
+    box(0.62, 0.03, 0.04, chrome, 0, 0.76, zr - 0.085);
+    box(W - 0.2, 0.05, 0.04, chrome, 0, 0.42, zr - 0.07);
     if (plate) {
       const tex = this._plateTexture(plate);
       const pw = 0.9, ph = pw * 0.22;
       const pm = new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide, depthWrite: false });
       const pl = new THREE.Mesh(new THREE.PlaneGeometry(pw, ph), pm);
-      pl.position.set(0, 0.62, zr - 0.035);
+      pl.position.set(0, 0.6, zr - 0.115);
       pl.rotation.y = Math.PI; grp.add(pl);
       grp.userData.plateTex = tex;
     }
