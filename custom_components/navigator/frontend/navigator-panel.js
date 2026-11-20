@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.10.3";
+const PANEL_VERSION = "1.10.4";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -6834,10 +6834,16 @@ class NavigatorPanel extends HTMLElement {
   // Solo sullo schermo dell'auto, all'avvio: se nel garage ci sono veicoli e nessuno è associato a quest'auto,
   // elenco dei veicoli (frecce per scegliere, tocco per confermare: il veicolo resta associato a quest'auto).
   // ✕: si va con "Base". Non compare senza veicoli, se l'auto è già associata o se il riquadro è già stato usato.
-  _carVehiclePick() {
+  _carVehiclePick(force = false) {
     if (this._vehAsked || this._nav) return;
     const list = (this._garage || []).filter((v) => v.type);
     const car = this._carInfo();
+    // auto non ancora riconosciuta (il Bluetooth può arrivare dopo): si aspetta, al più 35 s, poi si chiede comunque
+    if (!car?.key && !force) {
+      if (!this._vehPickT) this._vehPickT = setTimeout(() => this._carVehiclePick(true), 35000);
+      return;
+    }
+    clearTimeout(this._vehPickT);
     if (!list.length || (car?.key && list.some((v) => v.car === car.key))) return;
     this._vehAsked = true;
     const el = this.$("vehpop");
@@ -6921,6 +6927,7 @@ class NavigatorPanel extends HTMLElement {
   _carAutoSelect() {
     const c = this._carInfo();
     if (c?.key && (this._garage || []).some((x) => x.car === c.key)) { const vp = this.$("vehpop"); if (vp) vp.hidden = true; }
+    else if (c?.key && this._vehPickT && !this._vehAsked) this._carVehiclePick(); // riconosciuta adesso: si chiede subito
     if (!c?.key || this._carSelKey === c.key || !this._garage) return;
     this._carSelKey = c.key;
     const v = this._garage.find((x) => x.car === c.key);
