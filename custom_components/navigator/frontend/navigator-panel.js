@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.10.17";
+const PANEL_VERSION = "1.10.18";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -668,7 +668,7 @@ function elevLine(e) {
 // tagliati a 45°, stacchi sottili e netti tra un segmento e l'altro, segmenti spenti appena percettibili
 const SEG7 = (() => {
   // proporzioni prese dall'orologio LCD: cifra larga ~metà dell'altezza, segmento ~1/8 dell'altezza, stacchi netti
-  const W = 10.4, H = 20, T = 1.9, g = 0.75, m = H / 2;
+  const W = 10.4, H = 20, T = 2.2, g = 0.68, m = H / 2;
   const P = (pts) => pts.map(([x, y]) => `${+x.toFixed(2)},${+y.toFixed(2)}`).join(" ");
   const mx = (pts) => pts.map(([x, y]) => [W - x, y]); // specchio orizzontale
   const f = [[0, g * 1.4], [T, T + g], [T, m - T / 2 - g], [T / 2, m - g], [0, m - g * 1.4]];
@@ -687,7 +687,7 @@ function seg7Svg(text) {
     const on = SEG7_ON[+ch] || "";
     // segmenti spenti appena percettibili, come sui display veri
     return `<g transform="translate(${i * 13.6} 0)">${Object.entries(SEG7)
-      .map(([k, pts]) => `<polygon points="${pts}"${on.includes(k) ? "" : ' opacity=".06"'}/>`).join("")}</g>`;
+      .map(([k, pts]) => `<polygon points="${pts}"${on.includes(k) ? "" : ' opacity=".13"'}/>`).join("")}</g>`;
   }).join("");
   return `<svg class="seg7" viewBox="-0.5 -0.5 25 21" preserveAspectRatio="xMidYMid meet"><g fill="currentColor">${body}</g></svg>`;
 }
@@ -1360,7 +1360,9 @@ const STYLE = `
   .pitchctl .clk { color: #fff; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
   .pitchctl .clk:empty { display: none; }
   .pitchctl .clk svg.seg7 { width: 94% !important; height: 86% !important; display: block; stroke: none !important; }
-  .pitchctl .clk svg.seg7 * { stroke: none !important; } /* niente contorno delle icone della croce: ingrossava le cifre e chiudeva gli stacchi */
+  .pitchctl .clk svg.seg7 * { stroke: none !important; }
+  /* − + e frecce: bordo rosso scuro intorno al simbolo bianco */
+  .pitchctl button[data-z], .pitchctl button[data-p] { filter: drop-shadow(0 0 1px #7a0d0d) drop-shadow(0 0 1px #7a0d0d) drop-shadow(0 0 .5px #7a0d0d); } /* niente contorno delle icone della croce: ingrossava le cifre e chiudeva gli stacchi */
   .pitchctl .tl { grid-area: 1 / 1; } .pitchctl .tr { grid-area: 1 / 3; }
   .pitchctl .bl { grid-area: 3 / 1; color: #7ee08a; } .pitchctl .br { grid-area: 3 / 3; color: #7ee08a; }
   .pitchctl.twod .clk { display: none; }

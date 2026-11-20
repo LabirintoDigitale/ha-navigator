@@ -1,7 +1,7 @@
 """Costanti dell'integrazione Navigator."""
 
 DOMAIN = "navigator"
-VERSION = "1.10.17"
+VERSION = "1.10.18"
 
 PANEL_URL = "navigator"
 PANEL_TITLE = "Navigator"
