@@ -231,6 +231,7 @@ class Trips:
         self._db: TripDb | None = None
         self.garage: list[dict] = []  # garage condiviso: gli stessi veicoli per tutti gli utenti di Home Assistant
         self.selected: dict[str, str] = {}  # utente -> veicolo scelto l'ultima volta ("base" o id del garage)
+        self.layouts: dict[str, dict] = {}
 
     async def _run(self, fn, *args):
         return await self._hass.async_add_executor_job(fn, *args)
@@ -254,11 +255,12 @@ class Trips:
             garage = merged
         self.garage = garage
         self.selected = stored.get("selected", {})
+        self.layouts = stored.get("layouts", {})  # posizioni dei riquadri della guida (es. "auto": schermo di Android Auto)
         # versioni fino alla 1.9.84: viaggi nel file JSON. Si copiano nel database e poi si tolgono dal file
         users = stored.get("users")
         if users:
             await self._run(self._db.import_many, users)
-            await self._store.async_save({"garage": self.garage, "selected": self.selected})
+            await self._store.async_save({"garage": self.garage, "selected": self.selected, "layouts": self.layouts})
         await self._run(self._db.purge_short)
 
     async def async_close(self) -> None:
@@ -267,7 +269,20 @@ class Trips:
             await self._run(db.close)
 
     def _save(self) -> None:
-        self._store.async_delay_save(lambda: {"garage": self.garage, "selected": self.selected}, 5)
+        self._store.async_delay_save(lambda: {"garage": self.garage, "selected": self.selected, "layouts": self.layouts}, 5)
+
+    def set_layout(self, profile: str, data: dict) -> dict:
+        """Posizioni dei riquadri spostati a mano (frazioni 0..1 della mappa) per un profilo (es. "auto")."""
+        clean = {}
+        for name, pos in list((data or {}).items())[:8]:
+            if not isinstance(pos, dict):
+                continue
+            item = {k: round(min(1.0, max(0.0, float(pos[k]))), 4) for k in ("x", "y") if isinstance(pos.get(k), (int, float))}
+            if item:
+                clean[str(name)[:16]] = item
+        self.layouts[str(profile)[:40]] = clean
+        self._save()
+        return clean
 
     def vehicles(self, user_id: str) -> list[dict]:  # noqa: ARG002 - garage uguale per tutti
         return self.garage

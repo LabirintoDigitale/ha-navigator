@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.10.20";
+const PANEL_VERSION = "1.11.0";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -681,15 +681,15 @@ const SEG7 = (() => {
   };
 })();
 const SEG7_ON = ["abcdef", "bc", "abged", "abgcd", "fgbc", "afgcd", "afgedc", "abc", "abcdefg", "abcdfg"];
-function seg7Svg(text) {
-  const digits = String(text).slice(0, 2).split("");
+function seg7Svg(text, slots = 2) {
+  const digits = String(text).padStart(slots, " ").slice(-slots).split("");
   const body = digits.map((ch, i) => {
-    const on = SEG7_ON[+ch] || "";
+    const on = ch === " " ? "" : SEG7_ON[+ch] || ""; // posto vuoto: solo i segmenti spenti
     // segmenti spenti appena percettibili, come sui display veri
     return `<g transform="translate(${i * 13.6} 0)">${Object.entries(SEG7)
       .map(([k, pts]) => `<polygon points="${pts}"${on.includes(k) ? "" : ' opacity=".13"'}/>`).join("")}</g>`;
   }).join("");
-  return `<svg class="seg7" viewBox="-0.5 -0.5 25 21" preserveAspectRatio="xMidYMid meet"><g fill="currentColor">${body}</g></svg>`;
+  return `<svg class="seg7" viewBox="-0.5 -0.5 ${(slots * 13.6 - 2.2).toFixed(1)} 21" preserveAspectRatio="xMidYMid meet"><g fill="currentColor">${body}</g></svg>`;
 }
 
 function distM(a, b) {
@@ -1363,6 +1363,21 @@ const STYLE = `
   .pitchctl .clk svg.seg7 * { stroke: none !important; } /* niente contorno delle icone della croce: ingrossava le cifre e chiudeva gli stacchi */
   /* − + e frecce color bordò */
   .pitchctl button[data-z], .pitchctl button[data-p] { color: #9b1b30 !important; }
+  /* velocità attuale in cifre LCD, "km/h" piccolo dopo; oltre il limite rossa e lampeggiante */
+  .spdbox { position: absolute; z-index: 1002; left: 10px; top: 56px; display: flex; align-items: flex-end; gap: 4px; height: 58px;
+    padding: 4px 9px 5px; background: rgba(32,33,36,.85); border-radius: 12px; box-shadow: 0 1px 5px rgba(0,0,0,.35); color: #fff;
+    touch-action: none; user-select: none; -webkit-user-select: none; }
+  .spdbox[hidden] { display: none; }
+  .spdbox .v { height: 100%; }
+  .spdbox .v svg { height: 100%; width: auto; display: block; }
+  .spdbox .u { font: 700 12px sans-serif; opacity: .85; margin-bottom: 2px; }
+  .spdbox.over { background: #c62828; animation: spdblink 1s steps(1) infinite; }
+  @keyframes spdblink { 50% { background: #6d0f0f; } }
+  .spdbox.big { height: 110px; padding: 6px 14px 8px; border-radius: 18px; }
+  .spdbox.big .u { font-size: 20px; }
+  /* riquadri spostati a mano (guida): posizione salvata */
+  .pitchctl.moved, .spdbox.moved { right: auto; }
+  .pitchctl.dragging, .spdbox.dragging { opacity: .9; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
   .pitchctl .tl { grid-area: 1 / 1; } .pitchctl .tr { grid-area: 1 / 3; }
   .pitchctl .bl { grid-area: 3 / 1; color: #7ee08a; } .pitchctl .br { grid-area: 3 / 3; color: #7ee08a; }
   .pitchctl.twod .clk { display: none; }
@@ -1641,6 +1656,7 @@ class NavigatorPanel extends HTMLElement {
           <div class="tunfx" id="tunfx" hidden><div class="tf-road"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -0 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -1 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -2 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -3 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -4 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -5 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -6 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -7 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -8 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -9 / 6)"></div>
             <div class="tf-vis" id="tfvis"></div>
             <div class="tf-label"><span>🚇 In galleria</span><small id="tunrem"></small></div></div>
+          <div class="spdbox" id="spdbox" hidden title="Velocità (tieni premuto per spostarlo)"><div class="v" id="spdv"></div><span class="u">km/h</span></div>
           <div class="pitchctl" id="pitchctl" hidden>
             <button class="up" data-p="-15" title="Più dall'alto"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></button>
             <button class="left" data-z="-1" title="Riduci">−</button>
@@ -1751,9 +1767,13 @@ class NavigatorPanel extends HTMLElement {
     $("fullbtn").addEventListener("click", () => this._toggleFull());
     $("sidebtn").addEventListener("click", () => this._carSide(!this.classList.contains("sideopen")));
     $("b3dbtn").addEventListener("click", () => this._toggle3d());
-    $("pitchctl").querySelectorAll("[data-p]").forEach((b) => b.addEventListener("click", () => this._setPitch3d(+b.dataset.p)));
-    $("nightbtn").addEventListener("click", () => this._toggleNight());
-    $("pitchctl").querySelectorAll("[data-z]").forEach((b) => b.addEventListener("click", () => this._zoomStep(+b.dataset.z)));
+    const tapOk = () => Date.now() - (this._longAt || 0) > 500; // subito dopo uno spostamento il tocco non vale
+    $("pitchctl").querySelectorAll("[data-p]").forEach((b) => b.addEventListener("click", () => { if (tapOk()) this._setPitch3d(+b.dataset.p); }));
+    $("nightbtn").addEventListener("click", () => { if (tapOk()) this._toggleNight(); });
+    $("pitchctl").querySelectorAll("[data-z]").forEach((b) => b.addEventListener("click", () => { if (tapOk()) this._zoomStep(+b.dataset.z); }));
+    this._bindFloatDrag("pitchctl");
+    this._bindFloatDrag("spdbox");
+    this._loadLayout();
     this._map.on("moveend zoomend", () => this._sync3d());
     if (this._settings.view3d) setTimeout(() => this._toggle3d(true), 0);
     document.addEventListener("fullscreenchange", () => {
@@ -2779,6 +2799,7 @@ class NavigatorPanel extends HTMLElement {
     this._phoneGuida(false, nav);
     clearTimeout(nav.popTimer);
     this._nav = null;
+    this._spdBox(null, false); // via il riquadro della velocità
     this._idleWatchSync();
     this._updateAwake();
     this._meMarker?.remove();
@@ -3620,6 +3641,9 @@ class NavigatorPanel extends HTMLElement {
     this._syncNightBtn();
     const top = this.$("navtop");
     el.style.top = !guida ? "" : top && !top.hidden ? `${top.offsetTop + top.offsetHeight + 8}px` : "56px";
+    el.style.left = "";
+    el.classList.remove("moved");
+    if (guida) this._applyFloat("pitchctl"); // spostata a mano: lì
     if (!this._3d || !this._g3) return;
     const p = Math.round(pitch ?? this._g3.getPitch());
     el.querySelector('[data-p="-15"]').disabled = p <= 0;
@@ -5062,6 +5086,7 @@ class NavigatorPanel extends HTMLElement {
     const m = this._map;
     if (!m) return;
     this._applyNavTopPos();
+    this._applyFloat("pitchctl"); this._applyFloat("spdbox");
     const c = m.getCenter();
     this._layoutRot();
     m.invalidateSize({ pan: false });
@@ -5868,12 +5893,113 @@ class NavigatorPanel extends HTMLElement {
   // L'altezza scelta resta per il tuo utente di Home Assistant (salvata come frazione, così vale a ogni dimensione dello schermo).
   // Trascinala fin quasi in cima per rimetterla al suo posto predefinito.
 
+  // ----------------------------------------------------------------- riquadri spostabili (guida)
+  // Croce e riquadro della velocità si spostano tenendoli premuti ~0,5 s e trascinandoli, come la barra verde.
+  // Posizioni in frazioni della mappa (valgono anche su schermi di misure diverse). Sul telefono o nel browser restano
+  // su quel dispositivo; sullo schermo dell'auto (Android Auto) si salvano in Home Assistant: uguali da qualunque telefono.
+
+  async _loadLayout() {
+    let lay = null;
+    if (this._isCarScreen()) {
+      try { lay = (await this._hass.callWS({ type: "navigator/layout", profile: "auto" })).data; } catch (e) { /* integrazione vecchia */ }
+    } else {
+      try { lay = JSON.parse(localStorage.getItem(`${STORE_KEY}-layout`) || "null"); } catch (e) { /* storage non disponibile */ }
+    }
+    this._layout = lay && typeof lay === "object" ? lay : {};
+    this._applyNavTopPos(); this._placePitchCtl(); this._applyFloat("spdbox");
+  }
+
+  _saveLayout() {
+    const lay = this._layout || {};
+    if (this._isCarScreen()) {
+      this._hass.callWS({ type: "navigator/layout", profile: "auto", data: lay }).catch(() => { /* integrazione vecchia */ });
+    } else {
+      try { localStorage.setItem(`${STORE_KEY}-layout`, JSON.stringify(lay)); } catch (e) { /* storage non disponibile */ }
+    }
+  }
+
+  // mette il riquadro dove l'ha lasciato l'utente (solo in guida); senza posizione salvata resta al posto predefinito
+  _applyFloat(id) {
+    const el = this.$(id);
+    const wrap = this.$("mapwrap");
+    if (!el || !wrap || el.hidden) return;
+    const pos = this._layout?.[id];
+    const guida = !!(this._isGuida() && this._nav);
+    if (!pos || !guida) {
+      if (id === "spdbox") { el.classList.remove("moved"); el.style.left = ""; el.style.top = this._floatDefTop(); }
+      return;
+    }
+    el.classList.add("moved");
+    const x = Math.max(4, Math.min(wrap.clientWidth - el.offsetWidth - 4, pos.x * wrap.clientWidth));
+    const y = Math.max(4, Math.min(wrap.clientHeight - el.offsetHeight - 4, pos.y * wrap.clientHeight));
+    el.style.left = `${x}px`; el.style.top = `${y}px`;
+  }
+
+  // posto predefinito del riquadro velocità: a sinistra, sotto la barra verde
+  _floatDefTop() {
+    const top = this.$("navtop");
+    return top && !top.hidden ? `${top.offsetTop + top.offsetHeight + 8}px` : "56px";
+  }
+
+  _bindFloatDrag(id) {
+    const el = this.$(id);
+    const wrap = this.$("mapwrap");
+    if (!el || !wrap) return;
+    let timer = null, drag = false, sx = 0, sy = 0, ox = 0, oy = 0;
+    el.addEventListener("pointerdown", (e) => {
+      if (e.button > 0 || !(this._isGuida() && this._nav)) return; // si spostano solo in guida
+      sx = e.clientX; sy = e.clientY; drag = false;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null; drag = true;
+        try { el.setPointerCapture(e.pointerId); } catch (err) { /* puntatore simulato */ }
+        const r = el.getBoundingClientRect(), wr = wrap.getBoundingClientRect();
+        el.classList.add("moved", "dragging");
+        el.style.left = `${r.left - wr.left}px`; el.style.top = `${r.top - wr.top}px`;
+        ox = e.clientX - r.left; oy = e.clientY - r.top;
+        try { window.navigator.vibrate?.(20); } catch (err) { /* niente vibrazione */ }
+      }, 450);
+    });
+    el.addEventListener("pointermove", (e) => {
+      if (timer && !drag && Math.hypot(e.clientX - sx, e.clientY - sy) > 8) { clearTimeout(timer); timer = null; }
+      if (!drag) return;
+      e.preventDefault();
+      const wr = wrap.getBoundingClientRect();
+      el.style.left = `${Math.max(4, Math.min(wrap.clientWidth - el.offsetWidth - 4, e.clientX - wr.left - ox))}px`;
+      el.style.top = `${Math.max(4, Math.min(wrap.clientHeight - el.offsetHeight - 4, e.clientY - wr.top - oy))}px`;
+    });
+    const end = () => {
+      clearTimeout(timer); timer = null;
+      if (!drag) return;
+      drag = false;
+      el.classList.remove("dragging");
+      this._longAt = Date.now();
+      (this._layout ||= {})[id] = { x: (parseFloat(el.style.left) || 0) / wrap.clientWidth, y: (parseFloat(el.style.top) || 0) / wrap.clientHeight };
+      this._saveLayout();
+    };
+    el.addEventListener("pointerup", end);
+    el.addEventListener("pointercancel", end);
+  }
+
+  // velocità attuale (cifre LCD, "km/h" piccolo dopo): rossa e lampeggiante oltre il limite; solo in guida
+  _spdBox(kmh, over) {
+    const el = this.$("spdbox");
+    if (!el) return;
+    const show = kmh != null && !!this._nav && this._isGuida();
+    if (el.hidden === show) { el.hidden = !show; if (show) { el.classList.toggle("big", this._isCarScreen()); this._applyFloat("spdbox"); } }
+    if (!show) return;
+    el.classList.toggle("over", over);
+    const v = String(Math.min(999, Math.max(0, kmh)));
+    if (el.dataset.v !== v) { el.dataset.v = v; this.$("spdv").innerHTML = seg7Svg(v, 3); el.setAttribute("aria-label", `${v} km/h`); }
+  }
+
   _navTopKey() {
     return `${STORE_KEY}-navtop-${this._hass?.user?.id || "def"}`;
   }
 
   // altezza memorizzata (frazione 0..1), con compatibilità col vecchio formato {x,y}
   _navTopY() {
+    if (typeof this._layout?.navtop?.y === "number") return this._layout.navtop.y;
     try {
       const p = JSON.parse(localStorage.getItem(this._navTopKey()) || "null");
       if (p && typeof p.y === "number") return p.y;
@@ -5932,12 +6058,16 @@ class NavigatorPanel extends HTMLElement {
       // rilasciata quasi in cima: torna al posto predefinito
       if (y < 24) {
         try { localStorage.removeItem(this._navTopKey()); } catch (err) { /* storage non disponibile */ }
+        if (this._layout?.navtop) { delete this._layout.navtop; this._saveLayout(); }
         top.classList.remove("moved");
         top.style.removeProperty("--nty");
         this._msg("Indicazioni rimesse in alto");
         return;
       }
       try { localStorage.setItem(this._navTopKey(), JSON.stringify({ y: y / wrap.clientHeight })); } catch (err) { /* storage non disponibile */ }
+      (this._layout ||= {}).navtop = { y: y / wrap.clientHeight };
+      this._saveLayout();
+      this._placePitchCtl(); this._applyFloat("spdbox");
     };
     top.addEventListener("pointerup", end);
     top.addEventListener("pointercancel", end);
@@ -6323,6 +6453,7 @@ class NavigatorPanel extends HTMLElement {
     this._arrivalButtons();
     this._wxAhead(along);
     const kmh = nav.speed != null && nav.fix ? Math.round(nav.speed * 3.6) : null;
+    this._spdBox(kmh, !!nav.over);
     const modeIco = (MODES.find((m) => m[0] === this._mode) || MODES[0])[1];
     this._navClock(remTime);
     bot.querySelector(".info").innerHTML = `<span title="Mezzo del percorso">${modeIco}</span><span class="rem">${fmtTime(remTime)}</span><span>${fmtKm(remM / 1000)} · arrivo ${arrival(remTime)}</span>

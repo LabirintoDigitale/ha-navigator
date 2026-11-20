@@ -32,7 +32,7 @@ def async_setup(hass: HomeAssistant) -> None:
         return
     for handler in (ws_info, ws_search, ws_reverse, ws_route, ws_place_save, ws_place_delete, ws_recent_clear, ws_nearby,
                     ws_poi_tile, ws_live, ws_weather, ws_trip_save, ws_trips, ws_trip, ws_trip_delete, ws_garage,
-                    ws_garage_save, ws_trip_start, ws_trip_append, ws_trip_finish, ws_poi_tiles, ws_poi_info, ws_live_all, ws_garage_select, ws_cameras_area, ws_imagery):
+                    ws_garage_save, ws_trip_start, ws_trip_append, ws_trip_finish, ws_poi_tiles, ws_poi_info, ws_live_all, ws_garage_select, ws_cameras_area, ws_imagery, ws_layout):
         websocket_api.async_register_command(hass, handler)
     hass.data[DATA_WS_REGISTERED] = True
 
@@ -450,6 +450,23 @@ async def _trip_elev(hass: HomeAssistant, user_id: str, trip_id: str) -> None:
         e = await data.maps.elevation(t["track"])
         if e:
             await data.trips.set_info(trip_id, {"elev": e})
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "navigator/layout",
+    vol.Required("profile"): str,
+    vol.Optional("data"): dict,
+})
+@websocket_api.async_response
+async def ws_layout(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Posizioni dei riquadri della guida (barra, croce, velocità) per un profilo condiviso, es. lo schermo dell'auto."""
+    async def go():
+        trips = _data(hass).trips
+        if "data" in msg:
+            return {"data": trips.set_layout(msg["profile"], msg["data"])}
+        return {"data": trips.layouts.get(msg["profile"][:40], {})}
+
+    await _run(connection, msg["id"], go())
 
 
 def _vehicle(v) -> dict:
