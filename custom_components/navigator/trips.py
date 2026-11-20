@@ -274,12 +274,12 @@ class Trips:
     def set_layout(self, profile: str, data: dict) -> dict:
         """Posizioni dei riquadri spostati a mano (frazioni 0..1 della mappa) per un profilo (es. "auto")."""
         clean = {}
-        for name, pos in list((data or {}).items())[:8]:
+        for name, pos in list((data or {}).items())[:40]:  # barra, croce, velocità e i tasti all'arrivo
             if not isinstance(pos, dict):
                 continue
             item = {k: round(min(1.0, max(0.0, float(pos[k]))), 4) for k in ("x", "y") if isinstance(pos.get(k), (int, float))}
             if item:
-                clean[str(name)[:16]] = item
+                clean[str(name)[:80]] = item
         self.layouts[str(profile)[:40]] = clean
         self._save()
         return clean

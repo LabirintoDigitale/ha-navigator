@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.11.17";
+const PANEL_VERSION = "1.12.0";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -582,6 +582,8 @@ const OFM_POI = { pharmacy: "farmacia", hospital: "ospedale", clinic: "ospedale"
   tobacco: "tabacchi" };
 // pulsanti all'arrivo: domini ammessi e servizio da chiamare
 const ARR_DOMAINS = ["cover", "lock", "switch", "light", "button", "input_button", "script", "scene", "input_boolean", "fan"];
+// nella scelta delle entità per i tasti all'arrivo: solo quelle acceso/spento
+const ARR_PICK = ["switch", "light", "input_boolean", "fan"];
 const ARR_ICONS = { cover: "🚪", lock: "🔒", switch: "⏻", light: "💡", button: "🔘", input_button: "🔘", script: "📜", scene: "🎬", input_boolean: "⏻", fan: "🌀" };
 // tipi di veicolo del garage
 const VEHICLE_TYPES = [["auto", "🚗", "Auto"], ["moto", "🏍️", "Moto"], ["scooter", "🛵", "Scooter"], ["furgone", "🚐", "Furgone"],
@@ -1394,8 +1396,22 @@ const STYLE = `
     50% { background: #7a1212; box-shadow: 0 0 14px 4px rgba(211,47,47,.45); } }
   .spdbox.big { height: 110px; padding: 6px 14px 8px; border-radius: 18px; }
   .spdbox.big .u { font-size: 20px; }
+  /* tasti all'arrivo: quadrati scuri come il riquadro velocità, icona grande e nome sotto; spostabili */
+  .arrsq { position: absolute; z-index: 1002; width: 78px; height: 78px; padding: 4px; border: none; border-radius: 14px;
+    background: rgba(32,33,36,.88); color: #fff; box-shadow: 0 1px 6px rgba(0,0,0,.4); display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 2px; touch-action: none; user-select: none; -webkit-user-select: none; cursor: pointer; }
+  .arrsq .i { font-size: 30px; line-height: 1; }
+  .arrsq .n { font: 600 11px sans-serif; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .arrsq.on { box-shadow: 0 0 0 3px #43a047, 0 1px 6px rgba(0,0,0,.4); }
+  .arrsq.big { width: 128px; height: 128px; border-radius: 20px; } .arrsq.big .i { font-size: 52px; } .arrsq.big .n { font-size: 17px; }
+  .arrask { position: absolute; z-index: 1020; left: 50%; top: 40%; transform: translate(-50%, -50%); background: var(--card-background-color, #fff);
+    color: var(--primary-text-color, #212121); border-radius: 14px; padding: 14px; box-shadow: 0 6px 24px rgba(0,0,0,.45); min-width: 240px; text-align: center; }
+  .arrask .acts { display: flex; gap: 8px; margin-top: 12px; justify-content: center; }
+  .arrask button { padding: 10px 14px; font-size: 15px; border-radius: 10px; }
+  .arrask .go { background: #0b6e3a; color: #fff; border-color: #0b6e3a; }
   /* riquadri spostati a mano (guida): posizione salvata */
   .pitchctl.moved, .spdbox.moved { right: auto; }
+  .arrsq.dragging-src { opacity: 0 !important; }
   /* durante lo spostamento: solo una sagoma semitrasparente (leggera), il riquadro vero è nascosto */
   .dragghost { position: absolute; z-index: 1010; pointer-events: none; border-radius: 12px; will-change: transform;
     background: rgba(255,255,255,.22); border: 2px dashed rgba(255,255,255,.85); box-shadow: 0 6px 20px rgba(0,0,0,.35); }
@@ -1677,6 +1693,7 @@ class NavigatorPanel extends HTMLElement {
           <div class="tunfx" id="tunfx" hidden><div class="tf-road"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -0 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -1 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -2 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -3 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -4 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -5 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -6 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -7 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -8 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -9 / 6)"></div>
             <div class="tf-vis" id="tfvis"></div>
             <div class="tf-label"><span>🚇 In galleria</span><small id="tunrem"></small></div></div>
+          <div id="arrbox"></div>
           <div class="spdbox" id="spdbox" hidden title="Velocità (tieni premuto per spostarlo)"><span class="lim" id="spdlim" hidden></span><div class="v" id="spdv"></div><span class="u">km/h</span></div>
           <div class="pitchctl" id="pitchctl" hidden>
             <button class="up" data-p="-15" title="Più dall'alto"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></button>
@@ -6100,11 +6117,11 @@ class NavigatorPanel extends HTMLElement {
   }
 
   // mette il riquadro dove l'ha lasciato l'utente (solo in guida); senza posizione salvata resta al posto predefinito
-  _applyFloat(id) {
+  _applyFloat(id, key = id) {
     const el = this.$(id);
     const wrap = this.$("mapwrap");
     if (!el || !wrap || el.hidden) return;
-    const pos = this._layout?.[id];
+    const pos = this._layout?.[key];
     if (!pos) {
       if (id === "spdbox") { el.classList.remove("moved"); el.style.left = ""; el.style.top = this._floatDefTop(); }
       return;
@@ -6138,7 +6155,7 @@ class NavigatorPanel extends HTMLElement {
     el.classList.remove("dragging-src");
   }
 
-  _bindFloatDrag(id) {
+  _bindFloatDrag(id, key = id) {
     const el = this.$(id);
     const wrap = this.$("mapwrap");
     if (!el || !wrap) return;
@@ -6177,7 +6194,7 @@ class NavigatorPanel extends HTMLElement {
       this._ghostEnd(el, gh); gh = null;
       this._dragging = false;
       this._longAt = Date.now();
-      (this._layout ||= {})[id] = { x: (parseFloat(el.style.left) || 0) / wrap.clientWidth, y: (parseFloat(el.style.top) || 0) / wrap.clientHeight };
+      (this._layout ||= {})[key] = { x: (parseFloat(el.style.left) || 0) / wrap.clientWidth, y: (parseFloat(el.style.top) || 0) / wrap.clientHeight };
       this._saveLayout();
     };
     el.addEventListener("pointerup", end);
@@ -6485,15 +6502,17 @@ class NavigatorPanel extends HTMLElement {
       </div>
       ${this._garageHtml()}
       <div class="grp"><h3>Pulsanti all'arrivo</h3>
-        <div class="note">In guida, a meno di 500 m dalla destinazione, tasti grandi nella barra in basso per azionare queste entità
-          (cancello, garage, serratura, luci, script…).</div>
+        <div class="note">In guida, a meno di 500 m dalla destinazione, tasti quadrati sulla mappa per azionare queste entità
+          (solo acceso/spento: cancello, garage, luci…). Si spostano tenendoli premuti; "Visualizza" li mostra subito per provarli
+          e metterli dove vuoi.</div>
         <div class="chips">${(s.arrEntities || []).map((id) => `<span class="chip on" data-arrdel="${esc(id)}">${ARR_ICONS[id.split(".")[0]] || "⏻"} ${
           esc(this._hass.states[id]?.attributes?.friendly_name || id)} ✕</span>`).join("")}</div>
         <div class="row" style="margin:6px 0"><select data-arradd style="flex:1"><option value="">＋ Aggiungi un'entità…</option>${
-          Object.values(this._hass.states).filter((st) => ARR_DOMAINS.includes(st.entity_id.split(".")[0]) && !(s.arrEntities || []).includes(st.entity_id))
+          Object.values(this._hass.states).filter((st) => ARR_PICK.includes(st.entity_id.split(".")[0]) && !(s.arrEntities || []).includes(st.entity_id))
             .sort((a, b) => (a.attributes.friendly_name || a.entity_id).localeCompare(b.attributes.friendly_name || b.entity_id))
             .map((st) => `<option value="${esc(st.entity_id)}">${ARR_ICONS[st.entity_id.split(".")[0]] || ""} ${esc(st.attributes.friendly_name || st.entity_id)}</option>`).join("")}</select></div>
         ${sw("arrHomeOnly", "Solo arrivando a Casa", "Spento: i tasti compaiono arrivando a qualsiasi destinazione")}
+        ${(s.arrEntities || []).length ? '<button data-arrtest>👁 Visualizza i tasti sulla mappa</button>' : ""}
       </div>
       <div class="grp"><h3>Punti di interesse sulla mappa</h3>
         <div class="note">Da OpenStreetMap, visibili da vicino. In 3D l'edificio prende il colore della categoria e sopra fluttua l'icona.
@@ -6557,6 +6576,12 @@ class NavigatorPanel extends HTMLElement {
       s.arrEntities = [...(s.arrEntities || []), e.target.value];
       this._saveSettings();
       this._openSettings();
+    });
+    wrap.querySelector("[data-arrtest]")?.addEventListener("click", () => {
+      this._arrTest = true; // prova: tasti visibili subito, da provare e spostare
+      this.$("setwrap").hidden = true; // si chiudono le impostazioni: i tasti compaiono sulla mappa
+      this._arrivalButtons();
+      this._msg("Tieni premuto un tasto per spostarlo, toccalo per provarlo");
     });
     wrap.querySelectorAll("[data-arrdel]").forEach((el) => el.addEventListener("click", () => {
       s.arrEntities = (s.arrEntities || []).filter((x) => x !== el.dataset.arrdel);
@@ -6936,26 +6961,65 @@ class NavigatorPanel extends HTMLElement {
   // entità scelte in ⚙ (cancello, garage, serratura, luci…): grandi tasti nella barra della guida a meno di 500 m dall'arrivo
 
   _arrivalButtons() {
-    const box = this.$("navbot")?.querySelector(".arr");
-    if (!box) return;
+    const box = this.$("arrbox");
+    const wrap = this.$("mapwrap");
+    if (!box || !wrap) return;
+    const old = this.$("navbot")?.querySelector(".arr"); // la vecchia fila nella barra in basso non si usa più
+    if (old) old.hidden = true;
     const nav = this._nav;
     const s = this._settings;
     const dest = this._points[this._points.length - 1];
     const ids = (s.arrEntities || []).filter((id) => this._hass.states[id]);
-    let show = !!(nav?.fix && dest && ids.length) && distM([nav.fix.lat, nav.fix.lon], [dest.lat, dest.lon]) < 500;
-    if (show && s.arrHomeOnly) {
+    let near = !!(nav?.fix && dest && ids.length) && distM([nav.fix.lat, nav.fix.lon], [dest.lat, dest.lon]) < 500;
+    if (near && s.arrHomeOnly) {
       const h = this._homePoint();
-      show = distM([dest.lat, dest.lon], [h.lat, h.lon]) < 250;
+      near = distM([dest.lat, dest.lon], [h.lat, h.lon]) < 250;
     }
-    const key = show ? ids.join(",") : "";
+    // "Nascondi": restano nascosti finché non si arriva di nuovo vicino (dopo essersi allontanati)
+    if (!near) this._arrHidden = false;
+    const show = ids.length && ((near && !this._arrHidden) || this._arrTest);
+    const key = show ? `${ids.join(",")}|${this._arrTest ? 1 : 0}|${ids.map((id) => this._hass.states[id]?.state).join(",")}` : "";
     if (box.dataset.k === key) return;
     box.dataset.k = key;
-    box.hidden = !show;
-    box.innerHTML = show ? ids.map((id) => {
+    box.innerHTML = "";
+    if (!show) return;
+    const big = this._isCarScreen();
+    const size = big ? 128 : 78, gap = 10;
+    const bot = this.$("navbot");
+    const baseY = wrap.clientHeight - (bot && !bot.hidden ? bot.offsetHeight + 34 : 30) - size;
+    ids.forEach((id, i) => {
       const st = this._hass.states[id];
-      return `<button data-arr="${esc(id)}">${ARR_ICONS[id.split(".")[0]] || "⏻"} ${esc(st.attributes.friendly_name || id)}</button>`;
-    }).join("") : "";
-    box.querySelectorAll("[data-arr]").forEach((b) => b.addEventListener("click", () => this._pressEntity(b.dataset.arr)));
+      const b = document.createElement("button");
+      b.id = `arrsq${i}`;
+      b.className = `arrsq${big ? " big" : ""}${st.state === "on" || st.state === "open" ? " on" : ""}`;
+      b.title = `${st.attributes.friendly_name || id} (tieni premuto per spostarlo)`;
+      b.innerHTML = `<span class="i">${ARR_ICONS[id.split(".")[0]] || "⏻"}</span><span class="n">${esc(st.attributes.friendly_name || id)}</span>`;
+      // posto predefinito: in fila in basso a sinistra; poi quello scelto (tenendo premuto e trascinando)
+      b.style.left = `${10 + i * (size + gap)}px`;
+      b.style.top = `${Math.max(60, baseY)}px`;
+      box.appendChild(b);
+      this._applyFloat(b.id, `arr:${id}`);
+      this._bindFloatDrag(b.id, `arr:${id}`);
+      b.addEventListener("click", () => {
+        if (Date.now() - (this._longAt || 0) < 500) return; // appena spostato: non è un tocco
+        if (this._arrTest) this._arrAsk(id); else this._pressEntity(id);
+      });
+    });
+  }
+
+  // prova dei tasti: "Eseguo il test?" Esegui manda il comando, Nascondi toglie i tasti fino al prossimo arrivo, Esci niente
+  _arrAsk(id) {
+    this.shadowRoot.querySelector(".arrask")?.remove();
+    const st = this._hass.states[id];
+    const el = document.createElement("div");
+    el.className = "arrask";
+    el.innerHTML = `<div><b>${ARR_ICONS[id.split(".")[0]] || "⏻"} ${esc(st?.attributes?.friendly_name || id)}</b></div>
+      <div style="margin-top:6px">Eseguo il test?</div>
+      <div class="acts"><button class="go" data-a="run">Esegui</button><button data-a="hide">Nascondi</button><button data-a="out">Esci</button></div>`;
+    this.$("mapwrap").appendChild(el);
+    el.querySelector('[data-a="run"]').onclick = () => { el.remove(); this._pressEntity(id); };
+    el.querySelector('[data-a="hide"]').onclick = () => { el.remove(); this._arrTest = false; this._arrHidden = true; this._arrivalButtons(); };
+    el.querySelector('[data-a="out"]').onclick = () => el.remove();
   }
 
   async _pressEntity(id) {
