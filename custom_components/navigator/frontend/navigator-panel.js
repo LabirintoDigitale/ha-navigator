@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.10.16";
+const PANEL_VERSION = "1.10.17";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -687,7 +687,7 @@ function seg7Svg(text) {
     const on = SEG7_ON[+ch] || "";
     // segmenti spenti appena percettibili, come sui display veri
     return `<g transform="translate(${i * 13.6} 0)">${Object.entries(SEG7)
-      .map(([k, pts]) => `<polygon points="${pts}"${on.includes(k) ? "" : ' opacity=".09"'}/>`).join("")}</g>`;
+      .map(([k, pts]) => `<polygon points="${pts}"${on.includes(k) ? "" : ' opacity=".06"'}/>`).join("")}</g>`;
   }).join("");
   return `<svg class="seg7" viewBox="-0.5 -0.5 25 21" preserveAspectRatio="xMidYMid meet"><g fill="currentColor">${body}</g></svg>`;
 }
@@ -1359,7 +1359,8 @@ const STYLE = `
   /* angoli della croce (3D, in guida): ora attuale in alto (ore | minuti), ora d'arrivo in basso (verde) */
   .pitchctl .clk { color: #fff; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
   .pitchctl .clk:empty { display: none; }
-  .pitchctl .clk svg.seg7 { width: 94% !important; height: 86% !important; display: block; } /* più forte delle icone della croce (anche in auto) */
+  .pitchctl .clk svg.seg7 { width: 94% !important; height: 86% !important; display: block; stroke: none !important; }
+  .pitchctl .clk svg.seg7 * { stroke: none !important; } /* niente contorno delle icone della croce: ingrossava le cifre e chiudeva gli stacchi */
   .pitchctl .tl { grid-area: 1 / 1; } .pitchctl .tr { grid-area: 1 / 3; }
   .pitchctl .bl { grid-area: 3 / 1; color: #7ee08a; } .pitchctl .br { grid-area: 3 / 3; color: #7ee08a; }
   .pitchctl.twod .clk { display: none; }
