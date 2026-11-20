@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.10.4";
+const PANEL_VERSION = "1.10.5";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1306,6 +1306,11 @@ const STYLE = `
   :host(.full) .toolbar, :host(.full) #verwarn, :host(.full) .main .side { display: none; }
   :host(.full) .main { flex: 1 1 auto; min-height: 0; height: auto; display: flex; }
   :host(.full) .main .mapwrap, :host(.full) .main.guida .mapwrap { flex: 1 1 auto; height: auto; min-height: 0; }
+  /* schermo dell'auto: il pannello di sinistra si apre sopra la mappa solo col tasto ☰ (e mai in guida) */
+  :host(.full.sideopen) .main { position: relative; }
+  :host(.full.sideopen) .main .side { display: block; position: absolute; left: 0; top: 0; bottom: 0; width: 400px; max-width: 70%;
+    z-index: 1005; background: var(--card-background-color, #1c1c1c); box-shadow: 4px 0 18px rgba(0,0,0,.5); }
+  .ctl .sidebtn { font-size: 22px; }
   .fsico { width: 18px; height: 18px; display: block; margin: auto; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
   /* vista 3D: la mappa MapLibre copre quella di Leaflet, che resta sotto (nascosta) e guida tutto il resto */
   #map3d { position: absolute; inset: 0; z-index: 450; }
@@ -1323,6 +1328,12 @@ const STYLE = `
   .pitchctl .up { grid-area: 1 / 2; } .pitchctl .left { grid-area: 2 / 1; }
   .pitchctl .mid { grid-area: 2 / 2; } .pitchctl .right { grid-area: 2 / 3; }
   .pitchctl .down { grid-area: 3 / 2; }
+  /* angoli della croce (3D, in guida): ora attuale in alto (ore | minuti), ora d'arrivo in basso (verde) */
+  .pitchctl .clk { font: 700 15px sans-serif; color: #fff; align-self: center; justify-self: center; font-variant-numeric: tabular-nums; }
+  .pitchctl .clk:empty { display: none; }
+  .pitchctl .tl { grid-area: 1 / 1; } .pitchctl .tr { grid-area: 1 / 3; }
+  .pitchctl .bl { grid-area: 3 / 1; color: #7ee08a; } .pitchctl .br { grid-area: 3 / 3; color: #7ee08a; }
+  .pitchctl.twod .clk { display: none; }
   .pitchctl button { width: 40px; height: 36px; padding: 0; border: none; background: transparent; color: #fff; font: 700 22px sans-serif; }
   .pitchctl button:disabled { opacity: .35; }
   .pitchctl svg { width: 22px; height: 22px; display: block; margin: auto; fill: none; stroke: currentColor; stroke-width: 2.6;
@@ -1338,7 +1349,7 @@ const STYLE = `
   /* fuori dalla guida: in alto a sinistra, al posto dello zoom di Leaflet */
   .pitchctl.plan { right: auto; left: 10px; top: 10px; }
   /* galleria: animazione stilizzata di un tunnel che si percorre (archi che vengono incontro, luci, strada) */
-  .tunfx { position: absolute; inset: 0; z-index: 960; pointer-events: none; overflow: hidden; opacity: 0; transition: opacity .6s;
+  .tunfx { position: absolute; inset: 0; z-index: 960; pointer-events: none; overflow: hidden; opacity: 0; transition: opacity .3s;
     background: radial-gradient(ellipse at 50% 45%, #4a3f2e 0%, #1d1913 40%, #060606 100%); --tfd: 2.4s; }
   .tunfx.on { opacity: 1; }
   .tunfx[hidden] { display: none; }
@@ -1604,6 +1615,8 @@ class NavigatorPanel extends HTMLElement {
             <button class="mid" id="nightbtn" title="Giorno / notte"></button>
             <button class="right" data-z="1" title="Ingrandisci">+</button>
             <button class="down" data-p="15" title="Più bassa, come dall'auto"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+            <span class="clk tl" id="clkh" title="Ora attuale"></span><span class="clk tr" id="clkm"></span>
+            <span class="clk bl" id="arrh" title="Arrivo"></span><span class="clk br" id="arrm"></span>
           </div>
           <div class="ctl tr" id="ctltr"><select id="layer"></select></div>
           <div class="navtop" id="navtop" hidden></div>
@@ -1613,6 +1626,7 @@ class NavigatorPanel extends HTMLElement {
           <div class="adpop big" id="vehpop" hidden></div>
           <div class="gattr" id="gattr" hidden></div>
           <div class="ctl br">
+            <button id="sidebtn" class="sidebtn" title="Ricerca, itinerario e impostazioni del percorso" hidden>☰</button>
             <button id="modebtn" class="mode go" hidden>▶ Parti</button>
             <button id="northbtn" class="northbtn" title="Nord in alto" hidden><svg viewBox="0 0 24 24"><path d="M12 2l4 10h-8z" fill="#e53935"/><path d="M12 22l-4-10h8z" fill="#9e9e9e"/></svg></button>
             <button id="locate" title="La mia posizione">◎</button>
@@ -1639,6 +1653,7 @@ class NavigatorPanel extends HTMLElement {
     this._setLayer(this._layer);
     this._placePitchCtl();
     window.__navihaCar = () => this._carAutoSelect(); // NaviHA: auto riconosciuta adesso
+    this._carSide(false); // auto: tasto ☰ per il pannello di sinistra
     setTimeout(() => this._idleWatchSync(), 3000); // "Dove vai?": GPS anche senza guida (sul telefono)
     this._routeLayer = L.layerGroup().addTo(this._map);
     this._markerLayer = L.layerGroup().addTo(this._map);
@@ -1702,6 +1717,7 @@ class NavigatorPanel extends HTMLElement {
 
     // schermo intero e schermo sempre acceso
     $("fullbtn").addEventListener("click", () => this._toggleFull());
+    $("sidebtn").addEventListener("click", () => this._carSide(!this.classList.contains("sideopen")));
     $("b3dbtn").addEventListener("click", () => this._toggle3d());
     $("pitchctl").querySelectorAll("[data-p]").forEach((b) => b.addEventListener("click", () => this._setPitch3d(+b.dataset.p)));
     $("nightbtn").addEventListener("click", () => this._toggleNight());
@@ -2679,6 +2695,7 @@ class NavigatorPanel extends HTMLElement {
     this._renderNav();
     this._updateAwake(); // schermo acceso durante la guida
     if (!this._full) this._toggleFull(true); // schermo intero automatico alla partenza (il tasto Parti è un gesto dell'utente)
+    this._carSide(false); // in auto il pannello di sinistra si chiude e il tasto ☰ sparisce
     if (source !== "gps") this._phoneGuida(true);
     if (source === "gps") {
       this._nav.watch = window.navigator.geolocation.watchPosition(
@@ -2744,7 +2761,8 @@ class NavigatorPanel extends HTMLElement {
     this._carAnim = null;
     this._carDisp = null;
     this._closeNearby();
-    if (this._full) this._toggleFull(false); // esce dallo schermo intero al Ferma
+    if (this._full && !this._isCarScreen()) this._toggleFull(false); // esce dallo schermo intero al Ferma (non in auto)
+    this._carSide(false);
     for (const id of ["navtop", "navbot", "navpop"]) this.$(id).hidden = true;
     this._placePitchCtl();
     this.$("ctltr").hidden = false;
@@ -2871,10 +2889,18 @@ class NavigatorPanel extends HTMLElement {
       // galleria: entrando nel tratto la si "arma" (60 m prima dell'imbocco), ma l'animazione e la posizione stimata
       // partono SOLO se il GPS si perde davvero (niente posizioni per un po' o precisione pessima). Sui ponti o dove il
       // segnale resta buono si continua col GPS vero: niente animazione per sbaglio.
-      const r = this._tunnelRanges(rt).find(([a, b]) => snap.along >= a - 60 && snap.along < b - 40);
+      // Gallerie lunghe (≥ 200 m): si entra SUBITO all'imbocco, senza aspettare che il GPS si perda (in galleria il
+      // telefono continua a mandare posizioni stimate e imprecise, che prima ritardavano l'animazione di 10-20 s).
+      // Gallerie corte: solo se il GPS buono (precisione ≤ 25 m) manca davvero da un po'. Una galleria appena uscita
+      // non riparte (prima entrava e usciva di continuo: animazione e mappa sfarfallavano).
+      const r = this._tunnelRanges(rt).find(([a, b]) => snap.along >= a - 60 && snap.along < b - 40 && b !== nav.tunDone);
       if (r && !nav.tun) {
-        nav.tunArm = { rt, r, along: snap.along, t: now };
-        if ((fix.acc || 0) > 60) { nav.tunArm = null; this._tunnelEnter(rt, r, snap.along, now); } else this._tunnelWatch();
+        const good = (fix.acc || 99) <= 25;
+        if (r[1] - r[0] >= 200 && snap.along >= r[0] - 5) { nav.tunArm = null; this._tunnelEnter(rt, r, snap.along, now); }
+        else {
+          nav.tunArm = { rt, r, along: good || !nav.tunArm ? snap.along : nav.tunArm.along, t: good || !nav.tunArm ? now : nav.tunArm.t };
+          if ((fix.acc || 0) > 60) { nav.tunArm = null; this._tunnelEnter(rt, r, snap.along, now); } else this._tunnelWatch();
+        }
       } else if (!r) nav.tunArm = null;
     }
     this._speedCheck(rt, snap.dist <= limit ? snap.idx : null);
@@ -2988,7 +3014,7 @@ class NavigatorPanel extends HTMLElement {
       const arm = nav?.tunArm;
       if (!nav || !arm || nav.tun) { clearInterval(this._tunWatchT); this._tunWatchT = null; return; }
       const gap = Date.now() - arm.t;
-      const wait = Math.max(3500, Math.min(15000, (nav.gapAvg || 1000) * 2.5));
+      const wait = Math.max(2500, Math.min(6000, (nav.gapAvg || 1000) * 2.5));
       if (gap > wait) { nav.tunArm = null; this._tunnelEnter(arm.rt, arm.r, arm.along, arm.t); }
     }, 1000);
   }
@@ -3008,7 +3034,11 @@ class NavigatorPanel extends HTMLElement {
   _tunnelExit() {
     clearInterval(this._tunTick);
     this._tunTick = null;
-    if (this._nav) { this._nav.tun = null; this._nav.userFrame = false; } // all'uscita si ricentra sul mezzo
+    if (this._nav) {
+      this._nav.tunDone = this._nav.tun?.end ?? this._nav.tunDone; // questa galleria non riparte
+      this._nav.tun = null;
+      this._nav.userFrame = false; // all'uscita si ricentra sul mezzo
+    }
     this._g3key = null;
     this._tunnelFx();
   }
@@ -3021,9 +3051,9 @@ class NavigatorPanel extends HTMLElement {
     if (t.rt !== rt) { this._tunnelExit(); return false; } // percorso cambiato
     const snap = this._snap(rt, fix, nav.idx);
     const limit = 45 + Math.min(fix.acc || 0, 80);
-    const good = (fix.acc || 99) <= 40;
-    if ((snap.dist <= limit && snap.along >= t.end - 25) || (good && snap.dist <= limit && snap.along >= t.end - 120)
-      || now - t.since > t.maxMs) {
+    // si esce solo con un GPS preciso oltre lo sbocco (le posizioni stimate del telefono in galleria non bastano)
+    const good = (fix.acc || 99) <= 25;
+    if ((good && snap.dist <= limit && snap.along >= t.end - 30) || now - t.since > t.maxMs) {
       this._tunnelExit();
       return false; // uscita (o stima scaduta): la posizione si usa normalmente
     }
@@ -3078,7 +3108,7 @@ class NavigatorPanel extends HTMLElement {
     const show = !!t && this._isGuida() && this._settings.tunnelFx !== false && (this._nav.snap?.along ?? 0) >= t.start - 10;
     if (!show) {
       el.classList.remove("on");
-      if (!el.hidden) setTimeout(() => { if (!el.classList.contains("on")) el.hidden = true; }, 600);
+      if (!el.hidden) setTimeout(() => { if (!el.classList.contains("on")) el.hidden = true; }, 350);
       this._tunnelVisitors(false);
       return;
     }
@@ -3335,7 +3365,24 @@ class NavigatorPanel extends HTMLElement {
 
   // schermo intero: prima quello vero del browser (nasconde anche le barre di Android), altrimenti
   // il pannello copre tutta la finestra di Home Assistant (barra laterale e intestazione comprese)
+  // schermo dell'auto (app NaviHA con Android Auto)
+  _isCarScreen() {
+    try { return !!window.NaviHAApp?.isCar?.(); } catch (e) { return false; }
+  }
+
+  // in auto: pannello di sinistra sopra la mappa, solo fuori dalla guida; il tasto ☰ compare solo lì
+  _carSide(open) {
+    const car = this._isCarScreen();
+    this.classList.toggle("sideopen", !!(car && open && !this._nav));
+    const b = this.$("sidebtn");
+    if (b) { b.hidden = !car || !!this._nav; b.classList.toggle("attn", this.classList.contains("sideopen")); }
+    const fb = this.$("fullbtn");
+    if (fb && car) fb.hidden = true; // in auto lo schermo intero è fisso
+    setTimeout(() => this._relayout(), 150);
+  }
+
   async _toggleFull(on = !this._full) {
+    if (!on && this._isCarScreen()) on = true; // in auto si resta sempre a schermo intero
     this._full = on;
     this.classList.toggle("full", on);
     if (on) {
@@ -3547,6 +3594,20 @@ class NavigatorPanel extends HTMLElement {
   }
 
   // lampadina: accesa (gialla) di giorno, spenta di notte; il tocco passa all'altra modalità e la fissa
+  // ore e minuti attuali e d'arrivo negli angoli della croce (solo in guida); senza guida restano vuoti
+  _navClock(remTime) {
+    const set = (id, v) => { const el = this.$(id); if (el && el.textContent !== v) el.textContent = v; };
+    if (!this._nav || remTime == null) { for (const id of ["clkh", "clkm", "arrh", "arrm"]) set(id, ""); return; }
+    const two = (n) => String(n).padStart(2, "0");
+    const now = new Date();
+    const arr = new Date(Date.now() + remTime * 1000);
+    set("clkh", two(now.getHours())); set("clkm", two(now.getMinutes()));
+    set("arrh", two(arr.getHours())); set("arrm", two(arr.getMinutes()));
+    this._clkRem = { rem: remTime, at: Date.now() };
+    clearTimeout(this._clkT); // anche senza posizioni nuove l'ora corrente avanza
+    this._clkT = setTimeout(() => { const c = this._clkRem; if (this._nav && c) this._navClock(Math.max(0, c.rem - (Date.now() - c.at) / 1000)); }, 20000);
+  }
+
   _syncNightBtn() {
     const b = this.$("nightbtn");
     if (!b) return;
@@ -6105,6 +6166,7 @@ class NavigatorPanel extends HTMLElement {
     this._wxAhead(along);
     const kmh = nav.speed != null && nav.fix ? Math.round(nav.speed * 3.6) : null;
     const modeIco = (MODES.find((m) => m[0] === this._mode) || MODES[0])[1];
+    this._navClock(remTime);
     bot.querySelector(".info").innerHTML = `<span title="Mezzo del percorso">${modeIco}</span><span class="rem">${fmtTime(remTime)}</span><span>${fmtKm(remM / 1000)} · arrivo ${arrival(remTime)}</span>
       ${kmh != null ? `<span class="spd ${nav.over ? "over" : ""}" title="Velocità">${kmh} km/h</span>` : ""}
 `;
