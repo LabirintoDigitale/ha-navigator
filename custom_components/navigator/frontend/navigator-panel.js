@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.10.11";
+const PANEL_VERSION = "1.10.12";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -666,19 +666,21 @@ function elevLine(e) {
 
 // due cifre a 7 segmenti, come i vecchi display a cristalli liquidi (segmenti spenti appena visibili)
 const SEG7 = (() => {
-  const h = (yc) => `2.3,${yc} 3.3,${yc - 1} 8.7,${yc - 1} 9.7,${yc} 8.7,${yc + 1} 3.3,${yc + 1}`;
-  const v = (xc, y0, y1) => `${xc},${y0} ${xc + 1},${y0 + 1} ${xc + 1},${y1 - 1} ${xc},${y1} ${xc - 1},${y1 - 1} ${xc - 1},${y0 + 1}`;
-  return { a: h(1.3), g: h(10), d: h(18.7), f: v(1.3, 1.7, 9.6), b: v(10.7, 1.7, 9.6), e: v(1.3, 10.4, 18.3), c: v(10.7, 10.4, 18.3) };
+  // segmenti accorciati: tra uno e l'altro resta uno spazio ben visibile (effetto segmento dei display veri)
+  const t = 0.95;
+  const h = (yc) => `3.2,${yc} ${3.2 + t},${yc - t} ${8.8 - t},${yc - t} 8.8,${yc} ${8.8 - t},${yc + t} ${3.2 + t},${yc + t}`;
+  const v = (xc, y0, y1) => `${xc},${y0} ${xc + t},${y0 + t} ${xc + t},${y1 - t} ${xc},${y1} ${xc - t},${y1 - t} ${xc - t},${y0 + t}`;
+  return { a: h(1.3), g: h(10), d: h(18.7), f: v(1.3, 2.5, 9.2), b: v(10.7, 2.5, 9.2), e: v(1.3, 10.8, 17.5), c: v(10.7, 10.8, 17.5) };
 })();
 const SEG7_ON = ["abcdef", "bc", "abged", "abgcd", "fgbc", "afgcd", "afgedc", "abc", "abcdefg", "abcdfg"];
 function seg7Svg(text) {
   const digits = String(text).slice(0, 2).split("");
   const body = digits.map((ch, i) => {
     const on = SEG7_ON[+ch] || "";
-    return `<g transform="translate(${i * 13.5} 0)">${Object.entries(SEG7).map(([k, pts]) =>
+    return `<g transform="translate(${i * 16} 0)">${Object.entries(SEG7).map(([k, pts]) =>
       `<polygon points="${pts}" class="${on.includes(k) ? "on" : "off"}"/>`).join("")}</g>`;
   }).join("");
-  return `<svg class="seg7" viewBox="-1 -0.5 28 20.5" preserveAspectRatio="xMidYMid meet"><g transform="skewX(-6) translate(1.5 0)">${body}</g></svg>`;
+  return `<svg class="seg7" viewBox="-1 -0.5 31 20.5" preserveAspectRatio="xMidYMid meet"><g transform="skewX(-6) translate(1.5 0)">${body}</g></svg>`;
 }
 
 function distM(a, b) {
