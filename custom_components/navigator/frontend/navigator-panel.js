@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.10.0";
+const PANEL_VERSION = "1.10.1";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1284,6 +1284,9 @@ const STYLE = `
   .rwpop .rwinfo { font-size: 13px; margin: 6px 0; display: grid; gap: 2px; }
   .rwpop .rwlinks { font-size: 13px; }
   .alt .elev { font-size: 12px; color: var(--secondary-text-color); margin-top: 4px; }
+  .garv .gextra { gap: 6px; align-items: center; margin-top: 6px; font-size: 13px; flex-wrap: wrap; }
+  .garv .gextra select { width: auto; }
+  .garv .gsplash { width: 40px; height: 40px; object-fit: contain; border-radius: 6px; background: #0d1b2a; }
   .rwlist { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin-top: 4px; }
   .rwlist .link { text-align: left; }
   .rwm { cursor: pointer; font-size: 20px; line-height: 1; filter: drop-shadow(0 1px 2px rgba(0,0,0,.6)); text-align: center; }
@@ -1626,6 +1629,7 @@ class NavigatorPanel extends HTMLElement {
     $("layer").addEventListener("change", (e) => { this._setLayer(e.target.value); this._saveState(); });
     this._setLayer(this._layer);
     this._placePitchCtl();
+    window.__navihaCar = () => this._carAutoSelect(); // NaviHA: auto riconosciuta adesso
     setTimeout(() => this._idleWatchSync(), 3000); // "Dove vai?": GPS anche senza guida (sul telefono)
     this._routeLayer = L.layerGroup().addTo(this._map);
     this._markerLayer = L.layerGroup().addTo(this._map);
@@ -2567,6 +2571,7 @@ class NavigatorPanel extends HTMLElement {
       this._hass.callWS({ type: "navigator/garage_select", vehicle_id: e.target.value }).catch(() => { /* integrazione vecchia */ });
       this._applyVehicle(true);
       if (this._result) this._renderResults();
+      this._syncSplashes();
     });
     this._applyVehicle(false);
     sb.querySelector("#navsrc").addEventListener("change", (e) => {
@@ -6810,6 +6815,8 @@ class NavigatorPanel extends HTMLElement {
     } catch (e) { this._garage = []; }
     this._renderPlanSel();
     if (this._result) this._renderResults();
+    this._carAutoSelect();
+    this._syncSplashes();
   }
 
   // veicoli: "Base" (il mezzo si sceglie con i bottoni Auto/Moto/Bici/A piedi) e poi quelli del garage
@@ -6853,17 +6860,74 @@ class NavigatorPanel extends HTMLElement {
     return list.some((v) => v.id === id) ? id : list[0].id;
   }
 
+  // auto collegata secondo l'app NaviHA ({key, label}) o null
+  _carInfo() {
+    try { const s = window.NaviHAApp?.carInfo?.(); return s ? JSON.parse(s) : null; } catch (e) { return null; }
+  }
+
+  // collegandosi a un'auto associata a un veicolo del garage, quel veicolo diventa quello scelto
+  _carAutoSelect() {
+    const c = this._carInfo();
+    if (!c?.key || this._carSelKey === c.key || !this._garage) return;
+    this._carSelKey = c.key;
+    const v = this._garage.find((x) => x.car === c.key);
+    if (!v || this._vehicleId() === v.id) return;
+    this._vehSel = v.id;
+    try { localStorage.setItem(`${STORE_KEY}-veh`, v.id); } catch (e) { /* storage non disponibile */ }
+    this._hass.callWS({ type: "navigator/garage_select", vehicle_id: v.id }).catch(() => { /* integrazione vecchia */ });
+    this._renderPlanSel();
+    this._applyVehicle(true);
+    if (this._result) this._renderResults();
+    this._syncSplashes();
+    this._msg(`Veicolo: ${v.name || "dal garage"} (auto collegata)`);
+  }
+
+  // loghi di avvio mandati all'app NaviHA, che li mostra sull'auto prima che il pannello sia pronto
+  _syncSplashes() {
+    if (!window.NaviHAApp?.setSplashes) return;
+    const src = (v) => {
+      if (!v?.type || !v.splash) return "";
+      if (v.splash.startsWith("data:")) return v.splash;
+      let svg = vehicleSvg(v);
+      if (!/xmlns=/.test(svg)) svg = svg.replace("<svg", '<svg xmlns="http://www.w3.org/2000/svg"');
+      if (!/<svg[^>]*\swidth=/.test(svg)) svg = svg.replace("<svg", '<svg width="512" height="512"');
+      return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+    };
+    const cars = {};
+    for (const v of this._garage || []) if (v.car) cars[v.car] = src(v) || "navigator";
+    try { window.NaviHAApp.setSplashes(JSON.stringify({ def: src(this._curVehicle()), cars })); } catch (e) { /* app vecchia */ }
+  }
+
+  // immagine scelta per il logo: ridotta (lato massimo 360 px) e salvata come dati nel garage
+  async _splashImage(file) {
+    if (!/^image\//.test(file.type) || file.size > 15e6) return null;
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await new Promise((ok, ko) => { const i = new Image(); i.onload = () => ok(i); i.onerror = ko; i.src = url; });
+      const k = Math.min(1, 360 / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement("canvas");
+      c.width = Math.max(1, Math.round(img.naturalWidth * k));
+      c.height = Math.max(1, Math.round(img.naturalHeight * k));
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      let data = c.toDataURL("image/png");
+      if (data.length > 280000) data = c.toDataURL("image/jpeg", 0.85);
+      return data.length <= 280000 ? data : null;
+    } catch (e) { return null; } finally { URL.revokeObjectURL(url); }
+  }
+
   async _saveGarage(list) {
     try {
       this._garage = (await this._hass.callWS({ type: "navigator/garage_save", vehicles: list })).vehicles;
     } catch (e) {
       this._msg(`Garage non salvato: ${e.message || e}`);
     }
+    this._syncSplashes();
     this._renderPlanSel();
     if (this._result) this._renderResults();
   }
 
   _garageHtml() {
+    const car = this._carInfo();
     const rows = (this._garage || []).map((v, k) => {
       const icons = vehIconsFor(v.type);
       const ic = icons.includes(v.icon) ? v.icon : VEH_TYPE_ICON[v.type] || "suv";
@@ -6881,12 +6945,27 @@ class NavigatorPanel extends HTMLElement {
             <input class="inp" data-g="plate" data-k="${k}" placeholder="Targa" value="${esc(v.plate)}" style="width:100px;text-transform:uppercase">
             <button class="icon" data-g="del" data-k="${k}" title="Elimina">✕</button>
           </div>
+          <div class="row gextra">
+            <label>Logo all'avvio in auto <select data-g="splash" data-k="${k}">
+              <option value="navigator" ${!v.splash ? "selected" : ""}>Navigator</option>
+              <option value="veicolo" ${v.splash === "veicolo" ? "selected" : ""}>Disegno del veicolo</option>
+              ${v.splash?.startsWith("data:") ? '<option value="custom" selected>Immagine scelta</option>' : ""}
+              <option value="file">Scegli un'immagine…</option></select></label>
+            ${v.splash?.startsWith("data:") ? `<img class="gsplash" src="${v.splash}" alt="">` : ""}
+            <input type="file" accept="image/*" data-g="splashfile" data-k="${k}" hidden>
+          </div>
+          <div class="row gextra">🚗 ${v.car ? `Auto: <b>${esc(v.carName || v.car)}</b>
+            <button class="link" data-g="carunlink" data-k="${k}">Togli</button>` : "Nessuna auto associata"}
+            ${car && car.key !== v.car ? `<button class="link" data-g="carlink" data-k="${k}">Associa all'auto collegata (${esc(car.label || "auto")})</button>` : ""}
+          </div>
         </div></div>`;
     }).join("");
     return `<div class="grp"><h3>Garage</h3>
       <div class="note">Garage <b>condiviso</b> da tutti gli utenti di Home Assistant: chiunque può aggiungere o modificare i veicoli.
         Scegli disegno e colore che vedrai sulla mappa; alla partenza ognuno sceglie il suo nel menu Veicolo (la scelta resta per
-        ogni utente) e il diario dei viaggi lo ricorda. Con "Base" il mezzo si sceglie con i bottoni.</div>
+        ogni utente) e il diario dei viaggi lo ricorda. Con "Base" il mezzo si sceglie con i bottoni.<br>
+        Con l'app <b>NaviHA</b> e Android Auto: associando un veicolo all'auto (riconosciuta dal suo Bluetooth o da marca e modello)
+        quel veicolo si sceglie da solo quando ti colleghi, e sullo schermo dell'auto all'avvio compare il suo logo.</div>
       ${rows}<button data-g="add">＋ Aggiungi veicolo</button></div>`;
   }
 
@@ -6903,6 +6982,40 @@ class NavigatorPanel extends HTMLElement {
         el.addEventListener("click", async () => {
           const l = list();
           l.splice(+el.dataset.k, 1);
+          await this._saveGarage(l);
+          this._openSettings();
+        });
+      } else if (g === "carlink" || g === "carunlink") {
+        el.addEventListener("click", async () => {
+          const k = +el.dataset.k;
+          const l = list();
+          const car = this._carInfo();
+          if (g === "carlink" && car) {
+            for (const x of l) if (x.car === car.key) { delete x.car; delete x.carName; } // un'auto, un veicolo
+            l[k].car = car.key;
+            l[k].carName = car.label || "";
+          } else { delete l[k].car; delete l[k].carName; }
+          await this._saveGarage(l);
+          this._openSettings();
+        });
+      } else if (g === "splashfile") {
+        el.addEventListener("change", async () => {
+          const f = el.files?.[0];
+          if (!f) return;
+          const data = await this._splashImage(f);
+          if (!data) { this._msg("Immagine non valida o troppo grande"); return; }
+          const l = list();
+          l[+el.dataset.k].splash = data;
+          await this._saveGarage(l);
+          this._openSettings();
+        });
+      } else if (g === "splash") {
+        el.addEventListener("change", async () => {
+          const k = +el.dataset.k;
+          if (el.value === "file") { wrap.querySelector(`[data-g="splashfile"][data-k="${k}"]`)?.click(); return; }
+          if (el.value === "custom") return;
+          const l = list();
+          if (el.value === "veicolo") l[k].splash = "veicolo"; else delete l[k].splash;
           await this._saveGarage(l);
           this._openSettings();
         });

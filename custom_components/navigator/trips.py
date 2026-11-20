@@ -288,6 +288,13 @@ class Trips:
                 item["icon"] = str(v["icon"])[:16]
             if re.fullmatch(r"#[0-9a-fA-F]{6}", str(v.get("color") or "")):
                 item["color"] = str(v["color"]).lower()
+            # auto associata (dall'app NaviHA: Bluetooth dell'auto o marca/modello) e logo di avvio in auto
+            if v.get("car"):
+                item["car"] = str(v["car"])[:120]
+                item["carName"] = str(v.get("carName") or "")[:80]
+            sp = str(v.get("splash") or "")
+            if sp == "veicolo" or (re.match(r"^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$", sp) and len(sp) <= 300_000):
+                item["splash"] = sp
             clean.append(item)
         self.garage = clean
         self._save()
