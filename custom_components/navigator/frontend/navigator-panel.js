@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.11.2";
+const PANEL_VERSION = "1.11.3";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1377,6 +1377,10 @@ const STYLE = `
   .spdbox.big .u { font-size: 20px; }
   /* riquadri spostati a mano (guida): posizione salvata */
   .pitchctl.moved, .spdbox.moved { right: auto; }
+  /* durante lo spostamento: solo una sagoma semitrasparente (leggera), il riquadro vero è nascosto */
+  .dragghost { position: absolute; z-index: 1010; pointer-events: none; border-radius: 12px; will-change: transform;
+    background: rgba(255,255,255,.22); border: 2px dashed rgba(255,255,255,.85); box-shadow: 0 6px 20px rgba(0,0,0,.35); }
+  .dragging-src { opacity: 0 !important; }
   .pitchctl.dragging, .spdbox.dragging { opacity: .9; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
   .pitchctl .tl { grid-area: 1 / 1; } .pitchctl .tr { grid-area: 1 / 3; }
   .pitchctl .bl { grid-area: 3 / 1; color: #7ee08a; } .pitchctl .br { grid-area: 3 / 3; color: #7ee08a; }
@@ -5941,11 +5945,28 @@ class NavigatorPanel extends HTMLElement {
     return top && !top.hidden ? `${top.offsetTop + top.offsetHeight + 8}px` : "56px";
   }
 
+  // sagoma al posto del riquadro trascinato: si muove con transform (niente ridisegno del riquadro vero)
+  _ghostStart(el) {
+    const wrap = this.$("mapwrap");
+    const r = el.getBoundingClientRect(), wr = wrap.getBoundingClientRect();
+    const g = document.createElement("div");
+    g.className = "dragghost";
+    Object.assign(g.style, { left: `${r.left - wr.left}px`, top: `${r.top - wr.top}px`, width: `${r.width}px`, height: `${r.height}px` });
+    wrap.appendChild(g);
+    el.classList.add("dragging-src");
+    return { g, x0: r.left - wr.left, y0: r.top - wr.top };
+  }
+
+  _ghostEnd(el, gh) {
+    gh?.g?.remove();
+    el.classList.remove("dragging-src");
+  }
+
   _bindFloatDrag(id) {
     const el = this.$(id);
     const wrap = this.$("mapwrap");
     if (!el || !wrap) return;
-    let timer = null, drag = false, sx = 0, sy = 0, ox = 0, oy = 0;
+    let timer = null, drag = false, sx = 0, sy = 0, ox = 0, oy = 0, gh = null, nx = 0, ny = 0;
     el.addEventListener("pointerdown", (e) => {
       if (e.button > 0 || !(this._isGuida() && this._nav)) return; // si spostano solo in guida
       sx = e.clientX; sy = e.clientY; drag = false;
@@ -5953,26 +5974,30 @@ class NavigatorPanel extends HTMLElement {
       timer = setTimeout(() => {
         timer = null; drag = true;
         try { el.setPointerCapture(e.pointerId); } catch (err) { /* puntatore simulato */ }
-        const r = el.getBoundingClientRect(), wr = wrap.getBoundingClientRect();
-        el.classList.add("moved", "dragging");
-        el.style.left = `${r.left - wr.left}px`; el.style.top = `${r.top - wr.top}px`;
+        const r = el.getBoundingClientRect();
         ox = e.clientX - r.left; oy = e.clientY - r.top;
+        gh = this._ghostStart(el);
+        nx = gh.x0; ny = gh.y0;
         try { window.navigator.vibrate?.(20); } catch (err) { /* niente vibrazione */ }
       }, 450);
     });
     el.addEventListener("pointermove", (e) => {
       if (timer && !drag && Math.hypot(e.clientX - sx, e.clientY - sy) > 8) { clearTimeout(timer); timer = null; }
-      if (!drag) return;
+      if (!drag || !gh) return;
       e.preventDefault();
       const wr = wrap.getBoundingClientRect();
-      el.style.left = `${Math.max(4, Math.min(wrap.clientWidth - el.offsetWidth - 4, e.clientX - wr.left - ox))}px`;
-      el.style.top = `${Math.max(4, Math.min(wrap.clientHeight - el.offsetHeight - 4, e.clientY - wr.top - oy))}px`;
+      nx = Math.max(4, Math.min(wrap.clientWidth - el.offsetWidth - 4, e.clientX - wr.left - ox));
+      ny = Math.max(4, Math.min(wrap.clientHeight - el.offsetHeight - 4, e.clientY - wr.top - oy));
+      gh.g.style.transform = `translate(${nx - gh.x0}px, ${ny - gh.y0}px)`;
     });
     const end = () => {
       clearTimeout(timer); timer = null;
       if (!drag) return;
       drag = false;
-      el.classList.remove("dragging");
+      // il riquadro vero ricompare (una volta sola) dove è stata lasciata la sagoma
+      el.classList.add("moved");
+      el.style.left = `${nx}px`; el.style.top = `${ny}px`;
+      this._ghostEnd(el, gh); gh = null;
       this._longAt = Date.now();
       (this._layout ||= {})[id] = { x: (parseFloat(el.style.left) || 0) / wrap.clientWidth, y: (parseFloat(el.style.top) || 0) / wrap.clientHeight };
       this._saveLayout();
@@ -6025,7 +6050,7 @@ class NavigatorPanel extends HTMLElement {
     const top = this.$("navtop");
     const wrap = this.$("mapwrap");
     if (!top || !wrap) return;
-    let timer = null, drag = false, sy = 0, oy = 0;
+    let timer = null, drag = false, sy = 0, oy = 0, gh = null, ny = 0;
     top.addEventListener("pointerdown", (e) => {
       if (e.button > 0 || top.hidden) return;
       sy = e.clientY; drag = false;
@@ -6033,28 +6058,30 @@ class NavigatorPanel extends HTMLElement {
       timer = setTimeout(() => { // tieni premuto ~0,45 s: inizia lo spostamento (solo verticale)
         timer = null; drag = true;
         try { top.setPointerCapture(e.pointerId); } catch (err) { /* puntatore simulato */ }
-        const r = top.getBoundingClientRect(), wr = wrap.getBoundingClientRect();
-        top.classList.add("moved", "dragging");
-        top.style.setProperty("--nty", `${r.top - wr.top}px`);
+        const r = top.getBoundingClientRect();
         oy = e.clientY - r.top;
+        gh = this._ghostStart(top); // sagoma leggera al posto della barra
+        ny = gh.y0;
         try { window.navigator.vibrate?.(20); } catch (err) { /* niente vibrazione */ }
       }, 450);
     });
     top.addEventListener("pointermove", (e) => {
       if (timer && !drag && Math.abs(e.clientY - sy) > 8) { clearTimeout(timer); timer = null; }
-      if (!drag) return;
+      if (!drag || !gh) return;
       e.preventDefault();
       const wr = wrap.getBoundingClientRect();
-      const y = Math.max(4, Math.min(wrap.clientHeight - top.offsetHeight - 4, e.clientY - wr.top - oy));
-      top.style.setProperty("--nty", `${y}px`);
+      ny = Math.max(4, Math.min(wrap.clientHeight - top.offsetHeight - 4, e.clientY - wr.top - oy));
+      gh.g.style.transform = `translateY(${ny - gh.y0}px)`;
     });
     const end = () => {
       clearTimeout(timer); timer = null;
       if (!drag) return;
       drag = false;
-      top.classList.remove("dragging");
+      top.classList.add("moved");
+      top.style.setProperty("--nty", `${ny}px`);
+      this._ghostEnd(top, gh); gh = null;
       this._longAt = Date.now(); // evita che parta un clic sui bottoni subito dopo
-      const y = parseFloat(top.style.getPropertyValue("--nty")) || 0;
+      const y = ny;
       // rilasciata quasi in cima: torna al posto predefinito
       if (y < 24) {
         try { localStorage.removeItem(this._navTopKey()); } catch (err) { /* storage non disponibile */ }
