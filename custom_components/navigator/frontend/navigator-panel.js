@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.11.8";
+const PANEL_VERSION = "1.11.9";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1385,8 +1385,9 @@ const STYLE = `
     display: flex; align-items: center; justify-content: center; font: 800 14px sans-serif; box-sizing: border-box; margin-right: 4px; }
   .spdbox .lim[hidden] { display: none; }
   .spdbox.big .lim { width: 64px; height: 64px; border-width: 7px; font-size: 26px; }
-  .spdbox.over { background: #c62828; animation: spdblink 1s steps(1) infinite; }
-  @keyframes spdblink { 50% { background: #6d0f0f; } }
+  .spdbox.over { background: #c62828; animation: spdpulse 1.1s ease-in-out infinite; } /* pulsazione morbida */
+  @keyframes spdpulse { 0%, 100% { background: #d32f2f; box-shadow: 0 0 0 0 rgba(211,47,47,.55); }
+    50% { background: #7a1212; box-shadow: 0 0 14px 4px rgba(211,47,47,.45); } }
   .spdbox.big { height: 110px; padding: 6px 14px 8px; border-radius: 18px; }
   .spdbox.big .u { font-size: 20px; }
   /* riquadri spostati a mano (guida): posizione salvata */
