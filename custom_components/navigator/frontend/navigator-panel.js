@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.11.15";
+const PANEL_VERSION = "1.11.16";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -540,7 +540,7 @@ const SETTINGS_KEY = "navigator-panel-settings";
 const DEFAULT_SETTINGS = { voice: false, lang: "it", voiceSel: "f", out: "auto", autoZoom: true, beep: false,
   fuelBrands: [], fuelKind: "", camAlert: true, view3d: false, b3d: true, clouds3d: true, veh3d: true, terrainEx: "1.5", pitch3d: 60, tunnelFx: true, zoom3dOff: 0,
   voiceStyle: "normale", voiceRate: 1, voicePitch: 1, bldStyle: "colorati",
-  poiKinds: ["farmacia", "ospedale", "supermercato"], arrEntities: [], arrHomeOnly: true, nightMode: "auto", wxAlert: true, muteGuide: false, trafficSensor: "", autoDest: true };
+  poiKinds: ["farmacia", "ospedale", "supermercato"], arrEntities: [], arrHomeOnly: true, nightMode: "auto", wxAlert: true, muteGuide: false, trafficSensor: "", autoDest: true, wx3d: true };
 // marche dei distributori (come nell'anagrafica del MIMIT)
 const FUEL_BRANDS = ["Agip Eni", "Api-Ip", "Q8", "Esso", "Tamoil", "Shell", "Retitalia", "Beyfin", "Costantin", "Europam", "Pompe bianche"];
 const BRAND_COLORS = { "agip eni": "#f7c600", "eni": "#f7c600", "api-ip": "#0057a8", "ip": "#0057a8", "q8": "#0a3a7a", "esso": "#d71920",
@@ -4237,7 +4237,7 @@ class NavigatorPanel extends HTMLElement {
     x.clearRect(0, 0, W, H);
     if (!this._3d) return;
     if (!this._clouds?.length) { // senza nuvole 3D: pioggia e nebbia, se nella zona ci sono
-      const tilt = g.getPitch() > 25;
+      const tilt = g.getPitch() > 25 && this._settings.wx3d !== false; // spente dalle impostazioni: niente animazioni
       if ((this._fogHere || 0) > 0 && tilt) this._drawFog(x, W, H, this._fogHere);
       if ((this._rainHere || 0) > 0 && tilt) this._drawRain(x, W, H, this._rainHere);
       else this._rainDrops = null;
@@ -6457,6 +6457,7 @@ class NavigatorPanel extends HTMLElement {
         ${sw("b3d", "Edifici in 3D", "Da vicino, con l'altezza degli edifici dove è nota (OpenFreeMap, dati OpenStreetMap)")}
         ${s.b3d !== false ? `<label class="line"><span>Stile degli edifici</span><select data-s="bldStyle">${
           BLD_STYLES.map(([v, n]) => `<option value="${v}" ${(s.bldStyle || "colorati") === v ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>` : ""}
+        ${sw("wx3d", "Pioggia, neve e nebbia in 3D", "Animazioni sulla vista 3D quando nella zona piove, nevica o c'è nebbia (adesso o prevista sul percorso). Spegnile se la guida rallenta")}
         ${sw("clouds3d", "Nuvole in 3D", "In cielo, a 1–2 km di quota, tante quante la nuvolosità prevista nella zona (Open-Meteo); grigie dove piove")}
       </div>
       <div class="grp"><h3>Velocità</h3>
@@ -6516,6 +6517,7 @@ class NavigatorPanel extends HTMLElement {
       if (el.dataset.s === "veh3d") { this._me3d?.remove(); this._me3d = null; this._drawVeh3d(); this._drawMe3d(); this._schedule3d(); }
       if (el.dataset.s === "autoDest") { this._idleWatchSync(); if (!el.checked) this._autoDestHide(); }
       if (el.dataset.s === "clouds3d") { this._cloudKey = null; this._scheduleClouds(true); }
+      if (el.dataset.s === "wx3d") { this._rainDrops = null; this._snowFlakes = null; this._scheduleCloudDraw?.(); }
       if (el.dataset.s === "b3d") { this._apply3dSettings(); this._openSettings(); } // compare o sparisce lo stile degli edifici
       if (el.dataset.s === "autoZoom3d") { this._g3key = null; this._sync3d(); }
       if (el.dataset.s === "voice" && el.checked) this._unlockAudio();
