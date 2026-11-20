@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.11.13";
+const PANEL_VERSION = "1.11.14";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -4117,20 +4117,26 @@ class NavigatorPanel extends HTMLElement {
       try {
         const r = await this._hass.callWS({ type: "navigator/weather", points: [[+c.lat.toFixed(2), +c.lng.toFixed(2), Date.now() / 1000]] });
         const w = r.points?.[0] || {};
-        const wet = (w.prec || 0) >= 0.3 || ((w.code ?? 0) >= 51 && (w.code ?? 0) < 100);
-        R.v = wet ? Math.min(1, 0.45 + (w.prec || 0) / 4) : 0;
+        const code = w.code ?? 0;
+        const snow = (code >= 71 && code <= 77) || code === 85 || code === 86; // neve (codici WMO)
+        const wet = (w.prec || 0) >= 0.3 || (code >= 51 && code < 100);
+        R.v = wet && !snow ? Math.min(1, 0.45 + (w.prec || 0) / 4) : 0;
+        R.snow = snow ? Math.min(1, 0.5 + (w.prec || 0) / 3) : 0;
         R.fog = w.code === 45 || w.code === 48 ? 0.75 : 0; // nebbia adesso
-      } catch (e) { R.v = 0; R.fog = 0; }
+      } catch (e) { R.v = 0; R.fog = 0; R.snow = 0; }
       R.at = Date.now(); R.lat = c.lat; R.lon = c.lng; R.busy = false;
     }
-    let route = 0, routeFog = 0;
+    let route = 0, routeFog = 0, routeSnow = 0;
     for (const p of this._wx?.done ? this._wx.items : []) {
       if (!p.warn?.length || distM(p.ll, [c.lat, c.lng]) >= 8000) continue;
-      if (p.warn.some((w) => /Pioggia|Temporale|Neve/.test(w.txt))) route = 0.55;
+      if (p.warn.some((w) => /Pioggia|Temporale/.test(w.txt))) route = 0.55;
+      if (p.warn.some((w) => /Neve/.test(w.txt))) routeSnow = 0.6;
       if (p.warn.some((w) => w.kind === "fog")) routeFog = 0.65;
     }
-    const v = Math.max(R.v, route), fog = Math.max(R.fog || 0, routeFog);
-    if (v !== this._rainHere || fog !== this._fogHere) { this._rainHere = v; this._fogHere = fog; this._scheduleCloudDraw?.(); }
+    const v = Math.max(R.v, route), fog = Math.max(R.fog || 0, routeFog), snow = Math.max(R.snow || 0, routeSnow);
+    if (v !== this._rainHere || fog !== this._fogHere || snow !== this._snowHere) {
+      this._rainHere = v; this._fogHere = fog; this._snowHere = snow; this._scheduleCloudDraw?.();
+    }
   }
 
   // nuvole della zona: [{x, y (Mercatore), alt (m), rain, puffs: [{dx, dy, dz, r} in metri]}]
@@ -4234,7 +4240,9 @@ class NavigatorPanel extends HTMLElement {
       if ((this._fogHere || 0) > 0 && tilt) this._drawFog(x, W, H, this._fogHere);
       if ((this._rainHere || 0) > 0 && tilt) this._drawRain(x, W, H, this._rainHere);
       else this._rainDrops = null;
-      if (tilt && ((this._fogHere || 0) > 0 || (this._rainHere || 0) > 0)) g.triggerRepaint(); // animazione viva
+      if ((this._snowHere || 0) > 0 && tilt) this._drawSnow(x, W, H, this._snowHere);
+      else this._snowFlakes = null;
+      if (tilt && ((this._fogHere || 0) > 0 || (this._rainHere || 0) > 0 || (this._snowHere || 0) > 0)) g.triggerRepaint(); // animazione viva
       return;
     }
     let cam;
@@ -4322,6 +4330,33 @@ class NavigatorPanel extends HTMLElement {
       x.fillStyle = gr;
       x.fillRect(cx - r, cy - r, r * 2, r * 2);
     }
+  }
+
+  // neve: fiocchi bianchi che scendono lenti ondeggiando, i più vicini più grandi e veloci; più fitti con nevicata forte
+  _drawSnow(x, W, H, intensity) {
+    const now = performance.now();
+    const dt = Math.min(60, now - (this._snowT || now)) / 1000;
+    this._snowT = now;
+    const n = Math.round(70 + 230 * intensity);
+    let fl = this._snowFlakes;
+    if (!fl || fl.length !== n || fl.W !== W || fl.H !== H) {
+      fl = this._snowFlakes = Array.from({ length: n }, () => {
+        const z = Math.random(); // 0 lontano, 1 vicino
+        return { x: Math.random() * W, y: Math.random() * H, z, ph: Math.random() * 6.28, r: 1 + z * 3.2, v: 25 + z * 70 };
+      });
+      fl.W = W; fl.H = H;
+    }
+    x.fillStyle = "#fff";
+    for (const f of fl) {
+      f.y += f.v * dt;
+      f.ph += dt * (0.8 + f.z);
+      f.x += Math.sin(f.ph) * (8 + f.z * 18) * dt + 6 * dt; // ondeggia e un filo di vento
+      if (f.y > H + 6) { f.y = -6; f.x = Math.random() * W; }
+      if (f.x > W + 6) f.x = -6; else if (f.x < -6) f.x = W + 6;
+      x.globalAlpha = 0.55 + f.z * 0.4;
+      x.beginPath(); x.arc(f.x, f.y, f.r, 0, 6.283); x.fill();
+    }
+    x.globalAlpha = 1;
   }
 
   _drawRain(x, W, H, intensity) {
