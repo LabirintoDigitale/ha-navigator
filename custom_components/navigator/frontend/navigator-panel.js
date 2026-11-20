@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.12.0";
+const PANEL_VERSION = "1.12.1";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -582,6 +582,16 @@ const OFM_POI = { pharmacy: "farmacia", hospital: "ospedale", clinic: "ospedale"
   tobacco: "tabacchi" };
 // pulsanti all'arrivo: domini ammessi e servizio da chiamare
 const ARR_DOMAINS = ["cover", "lock", "switch", "light", "button", "input_button", "script", "scene", "input_boolean", "fan"];
+// icone disegnate dei tasti all'arrivo (i caratteri come ⏻ su molti telefoni mancano e diventano un riquadro)
+const ARR_SVG = {
+  lampadina: ["Lampadina", '<path d="M9 17.5h6M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.3 1.1 2.2v.5h5V16c0-.9.4-1.6 1.1-2.2A6 6 0 0 0 12 3z"/><path d="M10 20.5h4"/>'],
+  cancello: ["Cancello", '<path d="M3 21V4M21 21V4M3 8h18M3 18h18M7.5 8v10M12 8v10M16.5 8v10"/>'],
+  porta: ["Porta", '<path d="M6 21V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v17M3.5 21h17"/><path d="M14.5 12.5h.01" stroke-width="3"/>'],
+  ingranaggio: ["Ingranaggio", '<circle cx="12" cy="12" r="3.2"/><circle cx="12" cy="12" r="7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/>'],
+  garage: ["Garage", '<path d="M3 21V10l9-6 9 6v11M7 21v-8h10v8M7 16.5h10"/>'],
+  accendi: ["Accensione", '<path d="M12 3v8"/><path d="M7.4 6.5a7 7 0 1 0 9.2 0"/>'],
+};
+const arrSvg = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${(ARR_SVG[k] || ARR_SVG.accendi)[1]}</svg>`;
 // nella scelta delle entità per i tasti all'arrivo: solo quelle acceso/spento
 const ARR_PICK = ["switch", "light", "input_boolean", "fan"];
 const ARR_ICONS = { cover: "🚪", lock: "🔒", switch: "⏻", light: "💡", button: "🔘", input_button: "🔘", script: "📜", scene: "🎬", input_boolean: "⏻", fan: "🌀" };
@@ -1397,10 +1407,17 @@ const STYLE = `
   .spdbox.big { height: 110px; padding: 6px 14px 8px; border-radius: 18px; }
   .spdbox.big .u { font-size: 20px; }
   /* tasti all'arrivo: quadrati scuri come il riquadro velocità, icona grande e nome sotto; spostabili */
-  .arrsq { position: absolute; z-index: 1002; width: 78px; height: 78px; padding: 4px; border: none; border-radius: 14px;
+  .arrsq { position: absolute; z-index: 1006; width: 78px; height: 78px; padding: 4px; border: none; border-radius: 14px;
     background: rgba(32,33,36,.88); color: #fff; box-shadow: 0 1px 6px rgba(0,0,0,.4); display: flex; flex-direction: column;
     align-items: center; justify-content: center; gap: 2px; touch-action: none; user-select: none; -webkit-user-select: none; cursor: pointer; }
-  .arrsq .i { font-size: 30px; line-height: 1; }
+  .arrsq .i { font-size: 30px; line-height: 1; display: flex; }
+  .arrsq .i svg { width: 36px; height: 36px; }
+  .arrsq.big .i svg { width: 60px; height: 60px; }
+  .arrrow { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+  .arrrow .arrico { width: 28px; height: 28px; flex: none; color: var(--primary-text-color); }
+  .arrrow .arrico svg { width: 100%; height: 100%; }
+  .arrrow .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .arrrow select { width: auto; }
   .arrsq .n { font: 600 11px sans-serif; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .arrsq.on { box-shadow: 0 0 0 3px #43a047, 0 1px 6px rgba(0,0,0,.4); }
   .arrsq.big { width: 128px; height: 128px; border-radius: 20px; } .arrsq.big .i { font-size: 52px; } .arrsq.big .n { font-size: 17px; }
@@ -6505,8 +6522,10 @@ class NavigatorPanel extends HTMLElement {
         <div class="note">In guida, a meno di 500 m dalla destinazione, tasti quadrati sulla mappa per azionare queste entità
           (solo acceso/spento: cancello, garage, luci…). Si spostano tenendoli premuti; "Visualizza" li mostra subito per provarli
           e metterli dove vuoi.</div>
-        <div class="chips">${(s.arrEntities || []).map((id) => `<span class="chip on" data-arrdel="${esc(id)}">${ARR_ICONS[id.split(".")[0]] || "⏻"} ${
-          esc(this._hass.states[id]?.attributes?.friendly_name || id)} ✕</span>`).join("")}</div>
+        ${(s.arrEntities || []).map((id) => { const ic = this._arrIcon(id); return `<div class="arrrow"><span class="arrico">${arrSvg(ic)}</span>
+          <span class="nm">${esc(this._hass.states[id]?.attributes?.friendly_name || id)}</span>
+          <select data-arricon="${esc(id)}" title="Icona del tasto">${Object.entries(ARR_SVG).map(([k, [n]]) => `<option value="${k}" ${k === ic ? "selected" : ""}>${n}</option>`).join("")}</select>
+          <button class="icon" data-arrdel="${esc(id)}" title="Togli">✕</button></div>`; }).join("")}
         <div class="row" style="margin:6px 0"><select data-arradd style="flex:1"><option value="">＋ Aggiungi un'entità…</option>${
           Object.values(this._hass.states).filter((st) => ARR_PICK.includes(st.entity_id.split(".")[0]) && !(s.arrEntities || []).includes(st.entity_id))
             .sort((a, b) => (a.attributes.friendly_name || a.entity_id).localeCompare(b.attributes.friendly_name || b.entity_id))
@@ -6583,6 +6602,13 @@ class NavigatorPanel extends HTMLElement {
       this._arrivalButtons();
       this._msg("Tieni premuto un tasto per spostarlo, toccalo per provarlo");
     });
+    wrap.querySelectorAll("[data-arricon]").forEach((el) => el.addEventListener("change", () => {
+      s.arrIcons = { ...(s.arrIcons || {}), [el.dataset.arricon]: el.value };
+      this._saveSettings();
+      const bx = this.$("arrbox"); if (bx) bx.dataset.k = ""; // tasti ridisegnati con l'icona nuova
+      this._arrivalButtons();
+      this._openSettings();
+    }));
     wrap.querySelectorAll("[data-arrdel]").forEach((el) => el.addEventListener("click", () => {
       s.arrEntities = (s.arrEntities || []).filter((x) => x !== el.dataset.arrdel);
       this._saveSettings();
@@ -6993,7 +7019,7 @@ class NavigatorPanel extends HTMLElement {
       b.id = `arrsq${i}`;
       b.className = `arrsq${big ? " big" : ""}${st.state === "on" || st.state === "open" ? " on" : ""}`;
       b.title = `${st.attributes.friendly_name || id} (tieni premuto per spostarlo)`;
-      b.innerHTML = `<span class="i">${ARR_ICONS[id.split(".")[0]] || "⏻"}</span><span class="n">${esc(st.attributes.friendly_name || id)}</span>`;
+      b.innerHTML = `<span class="i">${arrSvg(this._arrIcon(id))}</span><span class="n">${esc(st.attributes.friendly_name || id)}</span>`;
       // posto predefinito: in fila in basso a sinistra; poi quello scelto (tenendo premuto e trascinando)
       b.style.left = `${10 + i * (size + gap)}px`;
       b.style.top = `${Math.max(60, baseY)}px`;
@@ -7007,13 +7033,20 @@ class NavigatorPanel extends HTMLElement {
     });
   }
 
+  // icona scelta per il tasto; senza scelta: lampadina per le luci, accensione per il resto
+  _arrIcon(id) {
+    const k = this._settings.arrIcons?.[id];
+    if (ARR_SVG[k]) return k;
+    return id.startsWith("light.") ? "lampadina" : id.startsWith("cover.") ? "garage" : id.startsWith("lock.") ? "porta" : "accendi";
+  }
+
   // prova dei tasti: "Eseguo il test?" Esegui manda il comando, Nascondi toglie i tasti fino al prossimo arrivo, Esci niente
   _arrAsk(id) {
     this.shadowRoot.querySelector(".arrask")?.remove();
     const st = this._hass.states[id];
     const el = document.createElement("div");
     el.className = "arrask";
-    el.innerHTML = `<div><b>${ARR_ICONS[id.split(".")[0]] || "⏻"} ${esc(st?.attributes?.friendly_name || id)}</b></div>
+    el.innerHTML = `<div><b>${esc(st?.attributes?.friendly_name || id)}</b></div>
       <div style="margin-top:6px">Eseguo il test?</div>
       <div class="acts"><button class="go" data-a="run">Esegui</button><button data-a="hide">Nascondi</button><button data-a="out">Esci</button></div>`;
     this.$("mapwrap").appendChild(el);
