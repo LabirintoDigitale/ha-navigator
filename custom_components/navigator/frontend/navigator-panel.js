@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.5";
+const PANEL_VERSION = "1.13.6";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1619,8 +1619,13 @@ const STYLE = `
   /* fuori dalla guida: in alto a sinistra, al posto dello zoom di Leaflet */
   .pitchctl.plan { right: auto; left: 10px; top: 10px; }
   /* galleria: animazione stilizzata di un tunnel che si percorre (archi che vengono incontro, luci, strada) */
+  /* colore di fondo pieno (mai trasparente) e livello unico per la scheda grafica: sul WebView un velo grande e animato
+     a volte non veniva disegnato tutto in tempo e lasciava vedere a tratti la mappa sotto */
   .tunfx { position: absolute; inset: 0; z-index: 960; pointer-events: none; overflow: hidden; opacity: 0; transition: opacity .3s;
-    background: radial-gradient(ellipse at 50% 45%, #4a3f2e 0%, #1d1913 40%, #060606 100%); --tfd: 2.4s; }
+    background: #060606 radial-gradient(ellipse at 50% 45%, #4a3f2e 0%, #1d1913 40%, #060606 100%); --tfd: 2.4s;
+    will-change: opacity; transform: translateZ(0); contain: strict; }
+  /* durante la galleria la mappa sotto non si disegna (meno lavoro per il telefono, niente pezzi di mappa che compaiono) */
+  .mapwrap.tunon #map, .mapwrap.tunon #map3d { visibility: hidden; }
   .tunfx.on { opacity: 1; }
   .tunfx[hidden] { display: none; }
   .tf-ring { position: absolute; left: 50%; top: 45%; width: 80vmin; height: 66vmin; margin-left: -40vmin; margin-top: -40vmin;
@@ -3464,14 +3469,18 @@ class NavigatorPanel extends HTMLElement {
     const el = this.$("tunfx");
     if (!el) return;
     const t = this._nav?.tun;
+    if (this._dbgTun) return; // prova in corso (debug): la guida non la tocca
     const show = !!t && this._isGuida() && this._settings.tunnelFx !== false && (this._nav.snap?.along ?? 0) >= t.start - 10;
     if (!show) {
       el.classList.remove("on");
-      if (!el.hidden) setTimeout(() => { if (!el.classList.contains("on")) el.hidden = true; }, 350);
+      if (!el.hidden) setTimeout(() => { if (!el.classList.contains("on")) { el.hidden = true; this.$("mapwrap")?.classList.remove("tunon"); } }, 350);
       this._tunnelVisitors(false);
       return;
     }
-    if (el.hidden) { el.hidden = false; requestAnimationFrame(() => el.classList.add("on")); }
+    if (el.hidden) {
+      el.hidden = false;
+      requestAnimationFrame(() => { el.classList.add("on"); setTimeout(() => { if (el.classList.contains("on")) this.$("mapwrap")?.classList.add("tunon"); }, 320); });
+    }
     this._tunnelVisitors(true);
     const v = t.speed || 0;
     el.style.setProperty("--tfd", `${Math.max(0.8, Math.min(3.5, 3.5 - v * 0.09)).toFixed(2)}s`);
@@ -3485,13 +3494,17 @@ class NavigatorPanel extends HTMLElement {
     clearTimeout(this._dbgTunT);
     if (!el) return;
     if (!dateStr) {
+      this._dbgTun = false;
+      this.$("mapwrap")?.classList.remove("tunon");
       el.classList.remove("on");
       setTimeout(() => { if (!el.classList.contains("on")) el.hidden = true; }, 350);
       this._tunnelVisitors(false);
       delete window.__naviSeason;
       this._tfFast = false;
+      if (this._dbgTap) { window.removeEventListener("pointerdown", this._dbgTap, true); this._dbgTap = null; }
       return;
     }
+    this._dbgTun = true;
     delete window.__naviSeason;
     const d = new Date(`${dateStr}T12:00:00`);
     window.__naviSeason = tunnelSeason(d) || "nessuna"; // stagione della data scelta (anche "nessuna": pipistrelli)
@@ -3499,11 +3512,15 @@ class NavigatorPanel extends HTMLElement {
     this._tunnelVisitors(false);
     el.style.setProperty("--tfd", "1.6s");
     el.hidden = false;
-    requestAnimationFrame(() => el.classList.add("on"));
+    requestAnimationFrame(() => { el.classList.add("on"); setTimeout(() => { if (this._dbgTun) this.$("mapwrap")?.classList.add("tunon"); }, 320); });
     this._tunnelVisitors(true);
+    // la prova finisce al primo tocco sullo schermo (dopo un attimo, così non la chiude il tocco che l'ha avviata)
+    if (this._dbgTap) window.removeEventListener("pointerdown", this._dbgTap, true);
+    this._dbgTap = () => this._debugTunnel(null);
+    setTimeout(() => { if (this._dbgTun && this._dbgTap) window.addEventListener("pointerdown", this._dbgTap, true); }, 600);
     const lab = { natale: "Natale", halloween: "Halloween", nessuna: "giorno normale" }[window.__naviSeason];
     this.$("tunrem").textContent = `Prova · ${d.toLocaleDateString("it-IT")} · ${lab}`;
-    this._msg("Prova della galleria per 40 secondi (Ferma dalle impostazioni → Debug)");
+    this._msg("Prova della galleria: tocca lo schermo per finire");
     this._dbgTunT = setTimeout(() => this._debugTunnel(null), 40000);
   }
 
