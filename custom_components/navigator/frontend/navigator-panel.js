@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.23";
+const PANEL_VERSION = "1.13.24";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1630,6 +1630,7 @@ const STYLE = `
   .tunfx[hidden] { display: none; }
   /* strada e archi disegnati in un solo canvas: con tanti livelli grandi animati in CSS il WebView di Android
      a tratti non ne disegnava dei pezzi (blocchi di strada e di volta che sparivano e ricomparivano) */
+  .pl3cv { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 3; } /* nomi dei paesi in 3D */
   .tf-cv { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
   .tf-label { position: absolute; left: 50%; top: 64%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center;
     gap: 2px; background: rgba(0, 0, 0, .6); color: #fff; padding: 8px 18px; border-radius: 18px; font: 600 16px sans-serif; white-space: nowrap; }
@@ -5104,22 +5105,35 @@ class NavigatorPanel extends HTMLElement {
     const self = this;
     const layer = {
       id: "places3d", type: "custom", renderingMode: "2d",
-      onAdd(map, gl) {
+      onAdd(map) {
+        // le scritte si disegnano su una tela trasparente SOPRA la mappa e sopra i segnaposto (che sono elementi della
+        // pagina e starebbero sempre davanti a qualsiasi cosa disegnata dentro la mappa 3D)
+        const cv = document.createElement("canvas");
+        cv.className = "pl3cv";
+        map.getContainer().appendChild(cv);
+        self._pl3Canvas = cv;
         self._pl3Cam = new THREE.Camera();
-        self._pl3Renderer = new THREE.WebGLRenderer({ canvas: map.getCanvas(), context: gl, antialias: true });
+        self._pl3Renderer = new THREE.WebGLRenderer({ canvas: cv, alpha: true, antialias: true, premultipliedAlpha: true });
+        self._pl3Renderer.setClearColor(0x000000, 0);
         self._pl3Renderer.autoClear = false;
       },
+      onRemove() { self._pl3Canvas?.remove(); },
       render(gl, args) {
-        if (self._settings.names3d === false || !self._pl3Renderer || !self._pl3.size) return;
+        const r = self._pl3Renderer;
+        if (!r) return;
         const g3 = self._g3, tr = g3.transform, ml = window.maplibregl;
+        { // la tela segue la grandezza della mappa
+          const mcv = g3.getCanvas(), w = mcv.clientWidth, h = mcv.clientHeight, pr = Math.min(2, window.devicePixelRatio || 1);
+          if (self._pl3Size !== `${w}x${h}x${pr}`) { self._pl3Size = `${w}x${h}x${pr}`; r.setPixelRatio(pr); r.setSize(w, h, false); }
+        }
+        r.clear();
+        if (self._settings.names3d === false || !self._pl3.size) return;
         if (g3.getPitch() < 10) return; // proprio dall'alto le scritte in piedi non si leggono: restano le etichette della mappa
         const mtx = Array.isArray(args) ? args : (args?.defaultProjectionData?.mainMatrix || args?.modelViewProjectionMatrix);
         const baseArr = tr.mercatorMatrix ? Array.from(tr.mercatorMatrix) : mtx && Array.from(mtx);
         if (!baseArr) return;
         let cam;
         try { cam = ml.MercatorCoordinate.fromLngLat(tr.getCameraLngLat(), tr.getCameraAltitude()); } catch (e) { return; }
-        const r = self._pl3Renderer;
-        r.resetState();
         const list = [];
         for (const p of self._pl3.values()) {
           const mc = ml.MercatorCoordinate.fromLngLat([p.lon, p.lat], 0);
@@ -5129,7 +5143,7 @@ class NavigatorPanel extends HTMLElement {
           // proprio sopra il paese non si mostra; troppo lontano neanche; ai bordi sfuma
           const far = p.far || 30000;
           const zf = (g3.getZoom() - (p.minz - 0.5)) / 0.5; // compare sfumando man mano che si avvicina lo zoom giusto
-          const a = Math.max(0, Math.min(1, (d - 120) / 120, (far - d) / (far * 0.25), zf));
+          const a = Math.max(0, Math.min(1, (d - 60) / 60, (far - d) / (far * 0.25), zf));
           if (a <= 0.02) continue;
           list.push({ p, d, a, dx, dy });
         }
@@ -5153,7 +5167,7 @@ class NavigatorPanel extends HTMLElement {
           const y0 = ndcY(g0.z), y1 = ndcY(g0.z + 100 * u0);
           const pxPerM = y0 != null && y1 != null ? ((y1 - y0) * chh) / 2 / 100 : 0;
           if (!(pxPerM > 0)) continue;
-          const upPx = Math.max(50, Math.min(90, (90 * 1500) / Math.max(d, 1)));
+          const upPx = Math.max(30, Math.min(60, (60 * 1500) / Math.max(d, 1))); // poco sopra il paese
           const k = (p.px || 40) / pxPerM / p.h; // scala del modello (alto p.h metri) per avere p.px pixel
           const lift = upPx / pxPerM;
           const mc = ml.MercatorCoordinate.fromLngLat([p.lon, p.lat], elev + lift);
@@ -5189,7 +5203,7 @@ class NavigatorPanel extends HTMLElement {
         for (const { p, a, P } of shown) {
           self._pl3Cam.projectionMatrix = P;
           for (const m of p.mats) m.opacity = a * m.userData.op;
-          gl.depthMask(true); gl.clearDepth(1.0); gl.clear(gl.DEPTH_BUFFER_BIT);
+          r.clearDepth();
           r.render(p.scene, self._pl3Cam);
         }
       },
