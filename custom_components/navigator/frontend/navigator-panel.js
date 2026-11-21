@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.7";
+const PANEL_VERSION = "1.13.8";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1628,24 +1628,12 @@ const STYLE = `
   .mapwrap.tunon #map, .mapwrap.tunon #map3d { visibility: hidden; }
   .tunfx.on { opacity: 1; }
   .tunfx[hidden] { display: none; }
-  .tf-ring { position: absolute; left: 50%; top: 45%; width: 80vmin; height: 66vmin; margin-left: -40vmin; margin-top: -40vmin;
-    border: 4px solid rgba(255, 196, 120, .6); border-bottom: none; border-radius: 50% 50% 0 0 / 75% 75% 0 0;
-    transform-origin: 50% 61%; transform: scale(.07); opacity: 0; animation: tf-ring calc(var(--tfd) * 10 / 6) linear infinite;
-    box-shadow: inset 0 6px 22px rgba(255, 170, 80, .25); }
-  .tf-ring::after { content: ""; position: absolute; left: 50%; top: -5px; width: 34px; height: 6px; margin-left: -17px; border-radius: 3px;
-    background: #ffe2b0; box-shadow: 0 0 14px 5px rgba(255, 205, 130, .65); }
-  /* prospettiva vera: l'arco avanza a velocità costante, grandezza = 1/distanza (in fondo fitti e piccoli, vicino si allargano di colpo) */
-  @keyframes tf-ring { 0% { transform: scale(0.070); opacity: 0; } 10% { transform: scale(0.078); opacity: 0.79; } 20% { transform: scale(0.087); opacity: 0.95; } 30% { transform: scale(0.099); opacity: 0.95; } 40% { transform: scale(0.115); opacity: 0.95; } 50% { transform: scale(0.137); opacity: 0.95; } 60% { transform: scale(0.169); opacity: 0.95; } 70% { transform: scale(0.220); opacity: 0.95; } 78% { transform: scale(0.292); opacity: 0.95; } 84% { transform: scale(0.387); opacity: 0.95; } 88% { transform: scale(0.493); opacity: 0.95; } 91% { transform: scale(0.621); opacity: 0.95; } 93% { transform: scale(0.751); opacity: 0.95; } 95% { transform: scale(0.949); opacity: 0.95; } 96.5% { transform: scale(1.184); opacity: 0.95; } 97.5% { transform: scale(1.418); opacity: 0.95; } 98.5% { transform: scale(1.767); opacity: 0.57; } 99.3% { transform: scale(2.200); opacity: 0.27; } 100% { transform: scale(2.800); opacity: 0.0; } }
-  .tf-road { position: absolute; left: 50%; top: 45%; bottom: 0; width: 170vmin; margin-left: -85vmin;
-    background: linear-gradient(#262626, #3a3a3a); clip-path: polygon(49.3% 0, 50.7% 0, 100% 100%, 0 100%); }
-  .tf-road::after { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 3vmin; margin-left: -1.5vmin;
-    background: repeating-linear-gradient(to bottom, #f2f2f2 0 7%, transparent 7% 16%); background-size: 100% 32%;
-    animation: tf-dash var(--tfd) linear infinite; clip-path: polygon(45% 0, 55% 0, 100% 100%, 0 100%); }
-  @keyframes tf-dash { from { background-position: 0 0; } to { background-position: 0 100%; } }
+  /* strada e archi disegnati in un solo canvas: con tanti livelli grandi animati in CSS il WebView di Android
+     a tratti non ne disegnava dei pezzi (blocchi di strada e di volta che sparivano e ricomparivano) */
+  .tf-cv { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
   .tf-label { position: absolute; left: 50%; top: 64%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center;
     gap: 2px; background: rgba(0, 0, 0, .6); color: #fff; padding: 8px 18px; border-radius: 18px; font: 600 16px sans-serif; white-space: nowrap; }
   .tf-label small { font-weight: 400; font-size: 13px; opacity: .85; }
-  @media (prefers-reduced-motion: reduce) { .tf-ring, .tf-road::after { animation-duration: calc(var(--tfd) * 3); } }
   /* "visitatori" della galleria: arrivano dal fondo del tunnel verso di noi (pipistrelli, e a Natale/Halloween sorprese) */
   .tf-vis { position: absolute; inset: 0; }
   .tf-v { position: absolute; left: 50%; top: 45%; width: 12vmin; height: 12vmin; margin: -6vmin 0 0 -6vmin; opacity: 0;
@@ -1883,7 +1871,7 @@ class NavigatorPanel extends HTMLElement {
           <div id="map"></div>
           <div id="map3d" hidden></div>
           <div class="poistat" id="poistat" hidden></div>
-          <div class="tunfx" id="tunfx" hidden><div class="tf-road"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -0 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -1 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -2 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -3 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -4 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -5 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -6 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -7 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -8 / 6)"></div><div class="tf-ring" style="animation-delay:calc(var(--tfd) * -9 / 6)"></div>
+          <div class="tunfx" id="tunfx" hidden><canvas class="tf-cv" id="tfcv"></canvas>
             <div class="tf-vis" id="tfvis"></div>
             <div class="tf-label"><span>🚇 In galleria</span><small id="tunrem"></small></div></div>
           <div id="arrbox"></div>
@@ -3526,7 +3514,95 @@ class NavigatorPanel extends HTMLElement {
 
   // "visitatori" della galleria: dopo un po' ogni tanto uno stormo di pipistrelli che ci vola incontro;
   // a Natale Babbo Natale sulla slitta nella carreggiata opposta, a Halloween zucche e fantasmi
+  /* disegno della galleria: archi che vengono incontro in prospettiva (grandezza = 1/distanza) e strada con la riga
+     tratteggiata. Un solo canvas, ridisegnato a ogni fotogramma solo mentre la galleria è visibile. */
+  _tunnelDraw(on) {
+    if (!on) { cancelAnimationFrame(this._tdRaf); this._tdRaf = 0; return; }
+    if (this._tdRaf) return;
+    const cv = this.$("tfcv");
+    if (!cv) return;
+    const ctx = cv.getContext("2d");
+    const slow = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? 3 : 1;
+    const T = 2.4 * slow;                 // secondi per un tratto di strada (come prima --tfd)
+    const RING_T = T * 10 / 6, NR = 10;   // durata della corsa di un arco, numero di archi
+    const sc = (q) => 0.0716 / (1.0225 - q); // grandezza in funzione dell'avanzamento 0..1
+    let bg = null, W = 0, H = 0, dpr = 1;
+    const t0 = performance.now();
+    const frame = (now) => {
+      this._tdRaf = requestAnimationFrame(frame);
+      const w = cv.clientWidth, h = cv.clientHeight;
+      if (!w || !h) return;
+      const d = Math.min(2, window.devicePixelRatio || 1);
+      if (w !== W || h !== H || d !== dpr) {
+        W = w; H = h; dpr = d;
+        cv.width = Math.round(w * d); cv.height = Math.round(h * d);
+        bg = null;
+      }
+      const vm = Math.min(W, H) / 100;   // 1vmin
+      const cx = W / 2, vy = H * 0.45;   // punto di fuga
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      if (!bg) { // sfondo e strada non cambiano: preparati una volta sola
+        bg = document.createElement("canvas"); bg.width = cv.width; bg.height = cv.height;
+        const b = bg.getContext("2d"); b.setTransform(dpr, 0, 0, dpr, 0, 0);
+        b.fillStyle = "#060606"; b.fillRect(0, 0, W, H);
+        const rr = Math.hypot(W, H) * 0.6;
+        const g = b.createRadialGradient(cx, vy, 0, cx, vy, rr);
+        g.addColorStop(0, "#4a3f2e"); g.addColorStop(0.4, "#1d1913"); g.addColorStop(1, "#060606");
+        b.fillStyle = g; b.fillRect(0, 0, W, H);
+        const half = 85 * vm, top = 1.2 * vm;
+        const rg = b.createLinearGradient(0, vy, 0, H);
+        rg.addColorStop(0, "#262626"); rg.addColorStop(1, "#3a3a3a");
+        b.fillStyle = rg;
+        b.beginPath(); b.moveTo(cx - top, vy); b.lineTo(cx + top, vy); b.lineTo(cx + half, H); b.lineTo(cx - half, H); b.closePath(); b.fill();
+      }
+      ctx.drawImage(bg, 0, 0, W, H);
+      const t = (now - t0) / 1000;
+      // riga tratteggiata: tratti alla stessa distanza fra loro, che scorrono verso di noi
+      const yAt = (q) => vy + (H - vy) * (0.0225 / (1.0225 - q));
+      const halfW = (y) => (0.15 + 1.35 * (y - vy) / (H - vy)) * vm;
+      ctx.fillStyle = "#f2f2f2";
+      const ND = 7, ph = (t / T) % 1;
+      for (let i = 0; i < ND; i++) {
+        const q0 = (i + ph) / ND, q1 = Math.min(1, q0 + 0.45 / ND);
+        const y0 = yAt(q0), y1 = Math.min(H, yAt(q1));
+        if (y1 - y0 < 0.4) continue;
+        const a = halfW(y0), c = halfW(y1);
+        ctx.beginPath(); ctx.moveTo(cx - a, y0); ctx.lineTo(cx + a, y0); ctx.lineTo(cx + c, y1); ctx.lineTo(cx - c, y1); ctx.closePath(); ctx.fill();
+      }
+      // archi: dal più lontano al più vicino
+      const rings = [];
+      for (let i = 0; i < NR; i++) rings.push(((t / RING_T) + i / NR) % 1);
+      rings.sort((a, b) => a - b);
+      ctx.lineCap = "round";
+      for (const q of rings) {
+        let op = q < 0.1 ? q / 0.1 * 0.95 : 0.95;
+        if (q > 0.975) op = 0.95 * (1 - (q - 0.975) / 0.025);
+        if (op <= 0.01) continue;
+        const s = Math.min(3, sc(q));
+        const rx = 40 * vm * s, ryTop = 40.26 * vm * s, yb = vy + 25.74 * vm * s; // forma come prima: volta + pareti dritte
+        const ys = vy - ryTop + 49.5 * vm * s;   // dove finisce la curva e iniziano le pareti
+        const ry = 49.5 * vm * s;
+        ctx.globalAlpha = op;
+        ctx.beginPath();
+        ctx.moveTo(cx - rx, yb); ctx.lineTo(cx - rx, ys);
+        ctx.ellipse(cx, ys, rx, ry, 0, Math.PI, 2 * Math.PI);
+        ctx.lineTo(cx + rx, yb);
+        ctx.strokeStyle = "rgba(255,170,80,.18)"; ctx.lineWidth = Math.max(2, 14 * s); ctx.stroke(); // alone
+        ctx.strokeStyle = "rgba(255,196,120,.6)"; ctx.lineWidth = Math.max(1, 4 * s); ctx.stroke();
+        // lampada in cima
+        const ly = vy - ryTop, lw = 17 * s, lh = 3 * s;
+        const gl = ctx.createRadialGradient(cx, ly, 0, cx, ly, Math.max(4, 30 * s));
+        gl.addColorStop(0, "rgba(255,205,130,.65)"); gl.addColorStop(1, "rgba(255,205,130,0)");
+        ctx.fillStyle = gl; ctx.fillRect(cx - 30 * s - 4, ly - 30 * s - 4, 60 * s + 8, 60 * s + 8);
+        ctx.fillStyle = "#ffe2b0"; ctx.fillRect(cx - lw, ly - lh, lw * 2, lh * 2);
+      }
+      ctx.globalAlpha = 1;
+    };
+    this._tdRaf = requestAnimationFrame(frame);
+  }
+
   _tunnelVisitors(on) {
+    this._tunnelDraw(on);
     if (!on) {
       clearTimeout(this._tunVisT);
       cancelAnimationFrame(this._tfRaf); this._tfRaf = 0; this._tfList = [];
