@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.0";
+const PANEL_VERSION = "1.13.1";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -156,6 +156,27 @@ function cachedTileLayer(url, opts) {
     });
   }
   return new CachedTiles(url, opts);
+}
+
+// indirizzo dei riquadri di OpenFreeMap (cambia a ogni aggiornamento dei dati): dalla rete, ricordato sul telefono per
+// poterli cercare nella memoria anche partendo senza rete
+let ofmTplP = null;
+function ofmTemplate() {
+  if (!ofmTplP) {
+    ofmTplP = (async () => {
+      try {
+        const tj = await (await fetch(OFM_URL)).json();
+        const t = (tj.tiles || [])[0];
+        if (t) { try { localStorage.setItem("navigator-ofm-tpl", t); } catch (e) { /* storage pieno */ } return t; }
+      } catch (e) { /* senza rete */ }
+      ofmTplP = null; // la prossima volta si riprova la rete
+      try { return localStorage.getItem("navigator-ofm-tpl"); } catch (e) { return null; }
+    })();
+  }
+  return ofmTplP;
+}
+function ofmTemplateNow() {
+  try { return localStorage.getItem("navigator-ofm-tpl"); } catch (e) { return null; }
 }
 
 let maplibreLoading = null;
@@ -3185,12 +3206,20 @@ class NavigatorPanel extends HTMLElement {
       // fuori percorso: si aspetta qualche secondo (e almeno due posizioni) prima di ricalcolare
       if (nav.offSince == null) nav.offSince = now;
       nav.offCount += 1;
-      if (!nav.rerouting && now - nav.offSince >= OFF_ROUTE_MS && nav.offCount >= 2 && now - nav.lastReroute > 12000) {
+      const offline = window.navigator.onLine === false || this._netOk === false;
+      if (offline && now - nav.offSince >= OFF_ROUTE_MS && !nav.offlineWarned) {
+        // senza rete il percorso non si può ricalcolare: un avviso solo, poi si continua sul percorso di prima
+        nav.offlineWarned = true;
+        this._navPopup("warn", "📵", "Fuori percorso, senza rete<br><b>Ricalcolo appena torna la connessione</b>", 6000);
+      }
+      if (!offline && !nav.rerouting && now - nav.offSince >= OFF_ROUTE_MS && nav.offCount >= 2 && (now - nav.lastReroute > 12000 || nav.offlineWarned)) {
+        nav.offlineWarned = false; // rete tornata: si ricalcola subito
         this._reroute(fix);
       }
     } else {
       nav.offSince = null;
       nav.offCount = 0;
+      nav.offlineWarned = false; // tornati sul percorso: un'altra uscita senza rete avviserà di nuovo
       nav.idx = snap.idx;
       for (let leg = 1; leg < rt._legStart.length; leg++) if (snap.idx >= rt._legStart[leg]) nav.passed = Math.max(nav.passed, leg);
       if (!nav.rerouting) this._voiceGuide(rt, snap.along);
@@ -4123,7 +4152,14 @@ class NavigatorPanel extends HTMLElement {
     const ex = +this._settings.terrainEx || 1.5;
     if (g.getTerrain()?.exaggeration !== ex) g.setTerrain({ source: "dem", exaggeration: ex });
     const want = this._settings.b3d !== false;
-    if (!g.getSource("ofm")) g.addSource("ofm", { type: "vector", url: OFM_URL, attribution: OFM_ATTR });
+    if (!g.getSource("ofm")) {
+      // con l'indirizzo dei riquadri già noto: dalla memoria del telefono (funziona anche senza rete); altrimenti come prima
+      const tpl = ofmTemplateNow();
+      g.addSource("ofm", tpl && window.maplibregl?.addProtocol
+        ? { type: "vector", tiles: [tpl.replace(/^https:\/\//, "navc://")], minzoom: 0, maxzoom: 14, attribution: OFM_ATTR }
+        : { type: "vector", url: OFM_URL, attribution: OFM_ATTR });
+      ofmTemplate(); // aggiorna l'indirizzo per la prossima volta
+    }
     // strade in galleria (OpenStreetMap): livello invisibile, serve solo a far scaricare i dati per riconoscerle sul percorso
     // frecce del verso di marcia sul percorso scelto, appoggiate sul terreno
     if (!g.hasImage("nav-arrow")) {
@@ -6386,6 +6422,8 @@ class NavigatorPanel extends HTMLElement {
       ? [Math.round(this._g3.getZoom()) + 1, Math.round(this._g3.getZoom())].map((z) => [tpl, Math.min(19, z)])
         .concat([[DEM_URL, Math.min(15, Math.max(10, Math.round(this._g3.getZoom()) - 2))]])
       : [[tpl, Math.min(19, Math.round(this._map.getZoom()))]];
+    const ofm = ofmTemplateNow(); // edifici, nomi, punti di interesse e gallerie (z14, ~1,7 km per riquadro)
+    if (ofm) zs.push([ofm, 14]);
     const g = this._geom(rt);
     const end = Math.min(g._cum[g._cum.length - 1], along + km * 1000);
     this._aheadDone ??= new Set();
@@ -8307,17 +8345,17 @@ class NavigatorPanel extends HTMLElement {
     this._poiStatus("loading");
     try {
       if (!this._ofmTpl) {
-        const tj = await (await fetch(OFM_URL)).json();
-        this._ofmTpl = (tj.tiles || [])[0];
+        this._ofmTpl = await ofmTemplate(); // dalla rete o, senza rete, quello ricordato
         if (!this._ofmTpl) throw new Error("TileJSON senza riquadri");
       }
       for (const k of todo) this._ofmTiles.set(k, null); // in corso
       await Promise.all(todo.map(async (k) => {
         const [tz, x, y] = k.split("/").map(Number);
-        const r = await fetch(this._ofmTpl.replace("{z}", tz).replace("{x}", x).replace("{y}", y));
-        if (!r.ok) throw new Error(`OpenFreeMap: errore ${r.status}`);
+        // dalla memoria del telefono o dalla rete (e si salva)
+        const buf = await tileFetch(this._ofmTpl.replace("{z}", tz).replace("{x}", x).replace("{y}", y));
+        if (!buf) throw new Error("OpenFreeMap non disponibile");
         const items = [];
-        for (const p of mvtPoints(await r.arrayBuffer(), "poi", tz, x, y)) {
+        for (const p of mvtPoints(buf, "poi", tz, x, y)) {
           const kind = OFM_POI[p.props.subclass] || OFM_POI[p.props.class];
           if (kind) items.push({ id: `o${p.id ?? `${p.lon.toFixed(5)},${p.lat.toFixed(5)}`}`, lat: p.lat, lon: p.lon, k: kind, name: p.props.name || "" });
         }
