@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.12.3";
+const PANEL_VERSION = "1.12.4";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -540,7 +540,7 @@ const SETTINGS_KEY = "navigator-panel-settings";
 const DEFAULT_SETTINGS = { voice: false, lang: "it", voiceSel: "f", out: "auto", autoZoom: true, beep: false,
   fuelBrands: [], fuelKind: "", camAlert: true, view3d: false, b3d: true, clouds3d: true, veh3d: true, terrainEx: "1.5", pitch3d: 60, tunnelFx: true, zoom3dOff: 0,
   voiceStyle: "normale", voiceRate: 1, voicePitch: 1, bldStyle: "colorati",
-  poiKinds: ["farmacia", "ospedale", "supermercato"], arrEntities: [], arrHomeOnly: true, nightMode: "auto", wxAlert: true, muteGuide: false, trafficSensor: "", autoDest: true, wx3d: true };
+  poiKinds: ["farmacia", "ospedale", "supermercato"], arrEntities: [], arrHomeOnly: true, nightMode: "auto", wxAlert: true, muteGuide: false, trafficSensor: "", autoDest: true, wx3d: true, arrDist: 500 };
 // marche dei distributori (come nell'anagrafica del MIMIT)
 const FUEL_BRANDS = ["Agip Eni", "Api-Ip", "Q8", "Esso", "Tamoil", "Shell", "Retitalia", "Beyfin", "Costantin", "Europam", "Pompe bianche"];
 const BRAND_COLORS = { "agip eni": "#f7c600", "eni": "#f7c600", "api-ip": "#0057a8", "ip": "#0057a8", "q8": "#0a3a7a", "esso": "#d71920",
@@ -1280,6 +1280,21 @@ const STYLE = `
   .setdlg .hd h2 { margin: 0; font-size: 19px; font-weight: 500; flex: 1; }
   .setdlg .grp { padding: 12px 16px; border-bottom: 1px solid var(--divider-color); }
   .setdlg .grp:last-child { border-bottom: none; }
+  /* a sezioni: elenco a sinistra, opzioni a destra */
+  .setdlg.sect { width: min(780px, 96vw); height: 90vh; height: 90dvh; overflow: hidden; display: flex; flex-direction: column; }
+  .setdlg .setbody { flex: 1; min-height: 0; display: grid; grid-template-columns: 170px 1fr; }
+  .setdlg .setnav { border-right: 1px solid var(--divider-color); overflow-y: auto; padding: 6px 0; }
+  .setdlg .setnav button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 12px 14px; border: none; border-radius: 0;
+    background: transparent; color: inherit; text-align: left; font-size: 14px; border-left: 3px solid transparent; }
+  .setdlg .setnav button .ico { font-size: 20px; }
+  .setdlg .setnav button.on { background: rgba(3,169,244,.12); border-left-color: var(--primary-color); font-weight: 600; }
+  .setdlg .setcontent { overflow-y: auto; min-width: 0; }
+  .setdlg .grp[hidden] { display: none; }
+  @media (max-width: 600px) {
+    .setdlg .setbody { grid-template-columns: 84px 1fr; }
+    .setdlg .setnav button { flex-direction: column; gap: 3px; padding: 10px 4px; text-align: center; font-size: 11px; }
+    .setdlg .setnav button .ico { font-size: 22px; }
+  }
   .setdlg h3 { margin: 0 0 8px; font-size: 13px; font-weight: 500; text-transform: uppercase; letter-spacing: .04em; color: var(--secondary-text-color); }
   .setdlg .line { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
   .setdlg .line > span:first-child { flex: 1; font-size: 14px; }
@@ -1419,7 +1434,12 @@ const STYLE = `
   .arrrow .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .arrrow select { width: auto; }
   .arrsq .n { font: 600 11px sans-serif; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .arrsq.on { box-shadow: 0 0 0 3px #43a047, 0 1px 6px rgba(0,0,0,.4); }
+  /* acceso: come se dietro ci fosse una lampadina accesa sotto un vetro smerigliato (luce calda al centro, grana del vetro) */
+  .arrsq.on { color: #3a2500; box-shadow: 0 0 18px 2px rgba(255,190,80,.55), 0 1px 6px rgba(0,0,0,.4);
+    background:
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .38 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"),
+      radial-gradient(circle at 50% 40%, #fff6d8 0, #ffd77a 22%, #f5a83a 48%, #8a5a1c 78%, #3c2a12 100%); }
+  .arrsq.on .n { color: #2b1b00; text-shadow: 0 1px 0 rgba(255,240,200,.6); }
   .arrsq.big { width: 128px; height: 128px; border-radius: 20px; } .arrsq.big .i { font-size: 52px; } .arrsq.big .n { font-size: 17px; }
   .arrask { position: absolute; z-index: 1020; left: 50%; top: 40%; transform: translate(-50%, -50%); background: var(--card-background-color, #fff);
     color: var(--primary-text-color, #212121); border-radius: 14px; padding: 14px; box-shadow: 0 6px 24px rgba(0,0,0,.45); min-width: 240px; text-align: center; }
@@ -1598,6 +1618,8 @@ class NavigatorPanel extends HTMLElement {
     if (this._nav && this._nav.source !== "gps") this._entityFix();
     const sun = hass.states?.["sun.sun"]?.state;
     if (sun !== this._sunState) { this._sunState = sun; if (this._map) this._applyNight(); }
+    // tasti all'arrivo visibili (prova o dopo il Ferma automatico): mostrano lo stato vero delle entità
+    if (this.$ && this.$("arrbox")?.childElementCount) this._arrivalButtons(); // (prima che il pannello sia pronto this.$ non c'è)
     // punto blu legato a una persona o a un dispositivo: segue le sue posizioni nuove
     const ms = this._me?.src && this._me.src !== "gps" ? hass.states?.[this._me.src] : null;
     if (ms && ms.last_updated !== this._me.upd && ms.attributes.latitude != null && this._markerLayer) {
@@ -6439,6 +6461,45 @@ class NavigatorPanel extends HTMLElement {
     } catch (e) { /* audio non disponibile */ }
   }
 
+  // impostazioni a sezioni: a sinistra icona e nome della sezione, a destra le sue opzioni (i gruppi con quel titolo)
+  _settingsSections(wrap) {
+    const dlg = wrap.querySelector(".setdlg");
+    if (!dlg) return;
+    const SECTIONS = [
+      ["generale", "⚙️", "Generale", ["Mappa", "Velocità", "Traffico"]],
+      ["voce", "🔊", "Voce", ["Indicazioni vocali"]],
+      ["3d", "🏔️", "3D", ["Vista 3D"]],
+      ["garage", "🚗", "Garage", ["Garage"]],
+      ["auto", "🏠", "Automazioni", ["Pulsanti all'arrivo"]],
+      ["poi", "📍", "Punti di interesse", ["Punti di interesse", "Distributori"]],
+    ];
+    const groups = [...dlg.querySelectorAll(":scope > .grp")];
+    const secOf = (g) => {
+      if (g.classList.contains("note")) return "generale";
+      const t = g.querySelector("h3")?.textContent || "";
+      return (SECTIONS.find(([, , , titles]) => titles.some((x) => t.startsWith(x))) || SECTIONS[0])[0];
+    };
+    const used = SECTIONS.filter(([k]) => groups.some((g) => secOf(g) === k));
+    if (!used.some(([k]) => k === this._setSec)) this._setSec = used[0]?.[0];
+    const body = document.createElement("div");
+    body.className = "setbody";
+    const navEl = document.createElement("div");
+    navEl.className = "setnav";
+    navEl.innerHTML = used.map(([k, ico, name]) => `<button data-sec="${k}" class="${k === this._setSec ? "on" : ""}"><span class="ico">${ico}</span><span>${name}</span></button>`).join("");
+    const content = document.createElement("div");
+    content.className = "setcontent";
+    for (const g of groups) { g.dataset.sec = secOf(g); g.hidden = g.dataset.sec !== this._setSec; content.appendChild(g); }
+    body.append(navEl, content);
+    dlg.appendChild(body);
+    dlg.classList.add("sect");
+    navEl.querySelectorAll("[data-sec]").forEach((b) => b.addEventListener("click", () => {
+      this._setSec = b.dataset.sec;
+      navEl.querySelectorAll("[data-sec]").forEach((x) => x.classList.toggle("on", x === b));
+      for (const g of groups) g.hidden = g.dataset.sec !== this._setSec;
+      content.scrollTop = 0;
+    }));
+  }
+
   _openSettings() {
     // garage condiviso: si rilegge, così non si sovrascrivono le modifiche fatte da un altro utente nel frattempo
     if (!this._garageFresh) {
@@ -6525,9 +6586,9 @@ class NavigatorPanel extends HTMLElement {
       </div>
       ${this._garageHtml()}
       <div class="grp"><h3>Pulsanti all'arrivo</h3>
-        <div class="note">In guida, a meno di 500 m dalla destinazione, tasti quadrati sulla mappa per azionare queste entità
+        <div class="note">In guida, vicino alla destinazione (distanza qui sotto), tasti quadrati sulla mappa per azionare queste entità
           (solo acceso/spento: cancello, garage, luci…). Si spostano tenendoli premuti; "Visualizza" li mostra subito per provarli
-          e metterli dove vuoi.</div>
+          e metterli dove vuoi. Accesi, si illuminano come una lampadina dietro un vetro smerigliato.</div>
         ${(s.arrEntities || []).map((id) => { const ic = this._arrIcon(id); return `<div class="arrrow"><span class="arrico">${arrSvg(ic)}</span>
           <span class="nm">${esc(this._hass.states[id]?.attributes?.friendly_name || id)}</span>
           <select data-arricon="${esc(id)}" title="Icona del tasto">${Object.entries(ARR_SVG).map(([k, [n]]) => `<option value="${k}" ${k === ic ? "selected" : ""}>${n}</option>`).join("")}</select>
@@ -6537,6 +6598,8 @@ class NavigatorPanel extends HTMLElement {
             .sort((a, b) => (a.attributes.friendly_name || a.entity_id).localeCompare(b.attributes.friendly_name || b.entity_id))
             .map((st) => `<option value="${esc(st.entity_id)}">${ARR_ICONS[st.entity_id.split(".")[0]] || ""} ${esc(st.attributes.friendly_name || st.entity_id)}</option>`).join("")}</select></div>
         ${sw("arrHomeOnly", "Solo arrivando a Casa", "Spento: i tasti compaiono arrivando a qualsiasi destinazione")}
+        <label class="line"><span>Compaiono a</span><select data-s="arrDist">${[200, 300, 500, 1000, 2000].map((m) =>
+          `<option value="${m}" ${(+s.arrDist || 500) === m ? "selected" : ""}>${m < 1000 ? `${m} m` : `${m / 1000} km`} dall'arrivo</option>`).join("")}</select></label>
         ${(s.arrEntities || []).length ? '<button data-arrtest>👁 Visualizza i tasti sulla mappa</button>' : ""}
       </div>
       <div class="grp"><h3>Punti di interesse sulla mappa</h3>
@@ -6557,6 +6620,7 @@ class NavigatorPanel extends HTMLElement {
       <div class="grp note">Le impostazioni valgono per questo dispositivo.</div>
     </div>`;
     wrap.hidden = false;
+    this._settingsSections(wrap);
     wrap.onclick = (e) => { if (e.target === wrap) wrap.hidden = true; };
     wrap.querySelector('[data-s="close"]').addEventListener("click", () => { wrap.hidden = true; });
     wrap.querySelectorAll("input[data-s]").forEach((el) => el.addEventListener("change", () => {
@@ -7003,7 +7067,7 @@ class NavigatorPanel extends HTMLElement {
     const keep = !nav && this._arrKeep && Date.now() < this._arrKeep.until ? this._arrKeep : null; // dopo il Ferma automatico
     const dest = keep ? keep.dest : this._points[this._points.length - 1];
     const ids = (s.arrEntities || []).filter((id) => this._hass.states[id]);
-    let near = !!(ids.length && dest) && (keep ? true : !!nav?.fix && distM([nav.fix.lat, nav.fix.lon], [dest.lat, dest.lon]) < 500);
+    let near = !!(ids.length && dest) && (keep ? true : !!nav?.fix && distM([nav.fix.lat, nav.fix.lon], [dest.lat, dest.lon]) < (+s.arrDist || 500));
     if (near && s.arrHomeOnly) {
       const h = this._homePoint();
       near = distM([dest.lat, dest.lon], [h.lat, h.lon]) < 250;
