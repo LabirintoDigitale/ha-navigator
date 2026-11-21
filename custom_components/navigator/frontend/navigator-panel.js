@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.3";
+const PANEL_VERSION = "1.13.4";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -879,6 +879,26 @@ function fmtAge(ms) {
 const STALE_MS = 10 * 60000; // posizione di una persona più vecchia di così: si avvisa prima di partire
 
 // periodo dell'anno per le sorprese in galleria: Natale (20 giorni prima, 10 dopo) e Halloween (idem)
+// modalità debug: solo sui server di Home Assistant di un certo dominio. Nel codice (pubblico) c'è solo un'impronta del
+// dominio, non il nome: si confronta l'impronta degli ultimi due pezzi dei nomi del server (pagina, URL interno ed esterno)
+const DEBUG_DOMAIN_HASH = 2741537965;
+function domainHash(d) {
+  let h = 5381;
+  for (const c of d) h = (Math.imul(h, 33) ^ c.charCodeAt(0)) >>> 0;
+  return h;
+}
+function isDebugServer(hass) {
+  const hosts = [window.location.hostname];
+  for (const u of [hass?.config?.external_url, hass?.config?.internal_url, hass?.auth?.data?.hassUrl]) {
+    try { if (u) hosts.push(new URL(u).hostname); } catch (e) { /* indirizzo non valido */ }
+  }
+  return hosts.some((h) => {
+    const parts = String(h || "").toLowerCase().split(".");
+    for (let i = 0; i + 1 < parts.length; i++) if (domainHash(parts.slice(i).join(".")) === DEBUG_DOMAIN_HASH) return true;
+    return false;
+  });
+}
+
 function tunnelSeason(d = new Date()) {
   if (window.__naviSeason) return window.__naviSeason; // solo per le prove
   const y = d.getFullYear(), t = d.getTime();
@@ -3467,6 +3487,34 @@ class NavigatorPanel extends HTMLElement {
     this.$("tunrem").textContent = v > 0.5 ? `uscita tra circa ${fmtDist(left)}` : `galleria di ${fmtDist(t.end - t.start)}`;
   }
 
+  // debug: animazione della galleria per una data scelta (stagione dei visitatori), 40 s o fino a "Ferma"
+  _debugTunnel(dateStr) {
+    const el = this.$("tunfx");
+    clearTimeout(this._dbgTunT);
+    if (!el) return;
+    if (!dateStr) {
+      el.classList.remove("on");
+      setTimeout(() => { if (!el.classList.contains("on")) el.hidden = true; }, 350);
+      this._tunnelVisitors(false);
+      delete window.__naviSeason;
+      this._tfFast = false;
+      return;
+    }
+    delete window.__naviSeason;
+    const d = new Date(`${dateStr}T12:00:00`);
+    window.__naviSeason = tunnelSeason(d) || "nessuna"; // stagione della data scelta (anche "nessuna": pipistrelli)
+    this._tfFast = true;
+    this._tunnelVisitors(false);
+    el.style.setProperty("--tfd", "1.6s");
+    el.hidden = false;
+    requestAnimationFrame(() => el.classList.add("on"));
+    this._tunnelVisitors(true);
+    const lab = { natale: "Natale", halloween: "Halloween", nessuna: "giorno normale" }[window.__naviSeason];
+    this.$("tunrem").textContent = `Prova · ${d.toLocaleDateString("it-IT")} · ${lab}`;
+    this._msg("Prova della galleria per 40 secondi (Ferma dalle impostazioni → Debug)");
+    this._dbgTunT = setTimeout(() => this._debugTunnel(null), 40000);
+  }
+
   // "visitatori" della galleria: dopo un po' ogni tanto uno stormo di pipistrelli che ci vola incontro;
   // a Natale Babbo Natale sulla slitta nella carreggiata opposta, a Halloween zucche e fantasmi
   _tunnelVisitors(on) {
@@ -3488,9 +3536,9 @@ class NavigatorPanel extends HTMLElement {
       if (season === "natale" && r < 0.45) this._tfSanta();
       else if (season === "halloween" && r < 0.5) { if (Math.random() < 0.55) this._tfPumpkin(); else this._tfGhost(); }
       else this._tfBats();
-      this._tunVisT = setTimeout(spawn, 8000 + Math.random() * 12000);
+      this._tunVisT = setTimeout(spawn, this._tfFast ? 2500 + Math.random() * 2000 : 8000 + Math.random() * 12000);
     };
-    this._tunVisT = setTimeout(spawn, 5000 + Math.random() * 4000); // "dopo un po'"
+    this._tunVisT = setTimeout(spawn, this._tfFast ? 1200 : 5000 + Math.random() * 4000); // "dopo un po'" (in prova subito)
   }
 
   // un visitatore si avvicina a velocità costante; sullo schermo, come in prospettiva vera, dimensione e distanza dal
@@ -6724,6 +6772,7 @@ class NavigatorPanel extends HTMLElement {
       ["garage", "🚗", "Garage", ["Garage"]],
       ["auto", "🏠", "Automazioni", ["Pulsanti all'arrivo"]],
       ["poi", "📍", "Punti di interesse", ["Punti di interesse", "Distributori"]],
+      ["debug", "🐞", "Debug", ["Debug"]],
     ];
     const groups = [...dlg.querySelectorAll(":scope > .grp")];
     const secOf = (g) => {
@@ -6876,6 +6925,12 @@ class NavigatorPanel extends HTMLElement {
         <div class="chips"><span class="chip ${s.fuelKind ? "" : "on"}" data-fkind="">Tutti</span>
           ${FUEL_KINDS.map(([k, n]) => `<span class="chip ${s.fuelKind === k ? "on" : ""}" data-fkind="${k}">${esc(n)}</span>`).join("")}</div>
       </div>
+      ${isDebugServer(this._hass) ? `<div class="grp"><h3>Debug</h3>
+        <div class="note">Prove per verificare i vari casi senza aspettare che succedano davvero.</div>
+        <label class="line"><span>Prova animazione galleria<div class="note">I visitatori dipendono dalla data: Natale (5 dic → 4 gen),
+          Halloween (11 ott → 10 nov), altrimenti pipistrelli</div></span><input type="date" data-dbgdate value="${new Date().toISOString().slice(0, 10)}"></label>
+        <div class="row" style="gap:8px"><button data-dbg="tunnel">▶ Avvia prova galleria</button><button data-dbg="tunnelstop">■ Ferma</button></div>
+      </div>` : ""}
       <div class="grp note">Le impostazioni valgono per questo dispositivo.</div>
     </div>`;
     wrap.hidden = false;
@@ -6925,6 +6980,12 @@ class NavigatorPanel extends HTMLElement {
       this._saveSettings();
       this._openSettings();
     });
+    wrap.querySelector('[data-dbg="tunnel"]')?.addEventListener("click", () => {
+      const d = wrap.querySelector("[data-dbgdate]")?.value;
+      wrap.hidden = true; // si chiudono le impostazioni: la prova si vede sulla mappa
+      this._debugTunnel(d);
+    });
+    wrap.querySelector('[data-dbg="tunnelstop"]')?.addEventListener("click", () => this._debugTunnel(null));
     wrap.querySelector("[data-tileclear]")?.addEventListener("click", async () => {
       await tileClear();
       this._aheadDone = new Set();
