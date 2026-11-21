@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.12.6";
+const PANEL_VERSION = "1.13.0";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -56,6 +56,108 @@ const OFM_ATTR = 'Edifici <a href="https://openfreemap.org" target="_blank" rel=
 const BLD_STYLES = [["colorati", "Colorati (secondo l'altezza)"], ["finestre", "Con finestre"], ["semplici", "Semplici"]];
 const TERRAIN_EX = [["1", "Reale"], ["1.5", "Accentuato"], ["2", "Molto accentuato"]];
 
+// ----------------------------------------------------------------- memoria delle mappe sul telefono
+// Ogni riquadro di mappa caricato (sfondo 2D/3D e rilievo) si salva nel database del browser (IndexedDB: funziona anche
+// con Home Assistant in http). Quando serve di nuovo si usa quello salvato: senza rete (gallerie, valli, montagna) la
+// mappa del percorso resta visibile. Massimo TILE_MAX riquadri: oltre si tolgono i più vecchi.
+const TILE_MAX = 12000;
+const TILE_AGE = 30 * 86400000; // dopo 30 giorni, con la rete, si riscarica
+let tileDbP = null;
+function tileDb() {
+  if (!tileDbP) {
+    tileDbP = new Promise((ok, ko) => {
+      try {
+        const r = indexedDB.open("navigator-tiles", 1);
+        r.onupgradeneeded = () => { const st = r.result.createObjectStore("t"); st.createIndex("at", "at"); };
+        r.onsuccess = () => ok(r.result);
+        r.onerror = () => ko(r.error);
+      } catch (e) { ko(e); }
+    }).catch(() => null);
+  }
+  return tileDbP;
+}
+const tileKey = (url) => url.replace(/\/\/[abc]\.tile\./, "//tile."); // stesso riquadro da sottodomini diversi
+async function tileGet(url) {
+  const db = await tileDb();
+  if (!db) return null;
+  return new Promise((ok) => {
+    try {
+      const q = db.transaction("t").objectStore("t").get(tileKey(url));
+      q.onsuccess = () => ok(q.result || null);
+      q.onerror = () => ok(null);
+    } catch (e) { ok(null); }
+  });
+}
+let tilePuts = 0;
+async function tilePut(url, buf) {
+  const db = await tileDb();
+  if (!db) return;
+  try { db.transaction("t", "readwrite").objectStore("t").put({ b: buf, at: Date.now() }, tileKey(url)); } catch (e) { return; }
+  if (++tilePuts % 200 === 0) tilePrune();
+}
+async function tilePrune() {
+  const db = await tileDb();
+  if (!db) return;
+  try {
+    const st = db.transaction("t", "readwrite").objectStore("t");
+    const cq = st.count();
+    cq.onsuccess = () => {
+      let extra = cq.result - TILE_MAX;
+      if (extra <= 0) return;
+      st.index("at").openCursor().onsuccess = (e) => { const c = e.target.result; if (c && extra-- > 0) { c.delete(); c.continue(); } };
+    };
+  } catch (e) { /* database occupato: alla prossima */ }
+}
+async function tileClear() {
+  const db = await tileDb();
+  if (!db) return;
+  try { db.transaction("t", "readwrite").objectStore("t").clear(); } catch (e) { /* niente */ }
+}
+// riquadro: prima quello salvato (se recente o se manca la rete), altrimenti dalla rete e si salva
+async function tileFetch(url, signal) {
+  const hit = await tileGet(url);
+  const online = window.navigator.onLine !== false;
+  if (hit && (!online || Date.now() - hit.at < TILE_AGE)) return hit.b;
+  try {
+    const r = await fetch(url, { signal, mode: "cors" });
+    if (!r.ok) return hit?.b || null;
+    const buf = await r.arrayBuffer();
+    tilePut(url, buf);
+    return buf;
+  } catch (e) {
+    return hit?.b || null; // rete assente: quello salvato, anche se vecchio
+  }
+}
+// numero di riquadro (Web Mercatore) di un punto
+function tileXY(lat, lon, z) {
+  const n = 2 ** z;
+  return [Math.floor(((lon + 180) / 360) * n), Math.floor(((1 - Math.asinh(Math.tan((lat * Math.PI) / 180)) / Math.PI) / 2) * n)];
+}
+const tileUrl = (tpl, z, x, y) => tpl.replace("{s}", "abc"[(x + y) % 3]).replace("{z}", z).replace("{x}", x).replace("{y}", y);
+
+// Leaflet: riquadri dalla memoria del telefono (o dalla rete, salvandoli)
+let CachedTiles = null;
+function cachedTileLayer(url, opts) {
+  if (!CachedTiles) {
+    CachedTiles = L.TileLayer.extend({
+      createTile(coords, done) {
+        const img = document.createElement("img");
+        img.alt = "";
+        img.setAttribute("role", "presentation");
+        tileFetch(this.getTileUrl(coords)).then((buf) => {
+          if (!buf) { done(new Error("riquadro non disponibile"), img); return; }
+          const u = URL.createObjectURL(new Blob([buf]));
+          img.onload = () => { URL.revokeObjectURL(u); done(null, img); };
+          img.onerror = () => { URL.revokeObjectURL(u); done(new Error("riquadro non valido"), img); };
+          img.src = u;
+        });
+        return img;
+      },
+    });
+  }
+  return new CachedTiles(url, opts);
+}
+
 let maplibreLoading = null;
 function loadMaplibre() {
   if (window.maplibregl) return Promise.resolve(window.maplibregl);
@@ -63,7 +165,18 @@ function loadMaplibre() {
     maplibreLoading = new Promise((ok, ko) => {
       const sc = document.createElement("script");
       sc.src = MAPLIBRE_JS;
-      sc.onload = () => (window.maplibregl ? ok(window.maplibregl) : ko(new Error("libreria 3D non caricata")));
+      sc.onload = () => {
+        if (!window.maplibregl) { ko(new Error("libreria 3D non caricata")); return; }
+        // 3D: i riquadri "navc://…" passano dalla memoria delle mappe del telefono
+        try {
+          window.maplibregl.addProtocol("navc", async (params, abort) => {
+            const buf = await tileFetch(params.url.replace(/^navc:\/\//, "https://"), abort?.signal);
+            if (!buf) throw new Error("riquadro non disponibile");
+            return { data: buf };
+          });
+        } catch (e) { /* versione senza protocolli: si usa la rete come prima */ }
+        ok(window.maplibregl);
+      };
       sc.onerror = () => { maplibreLoading = null; ko(new Error("libreria 3D non caricata")); };
       document.head.appendChild(sc);
     });
@@ -540,7 +653,7 @@ const SETTINGS_KEY = "navigator-panel-settings";
 const DEFAULT_SETTINGS = { voice: false, lang: "it", voiceSel: "f", out: "auto", autoZoom: true, beep: false,
   fuelBrands: [], fuelKind: "", camAlert: true, view3d: false, b3d: true, clouds3d: true, veh3d: true, terrainEx: "1.5", pitch3d: 60, tunnelFx: true, zoom3dOff: 0,
   voiceStyle: "normale", voiceRate: 1, voicePitch: 1, bldStyle: "colorati",
-  poiKinds: ["farmacia", "ospedale", "supermercato"], arrEntities: [], arrHomeOnly: true, nightMode: "auto", wxAlert: true, muteGuide: false, trafficSensor: "", autoDest: true, wx3d: true, arrDist: 500 };
+  poiKinds: ["farmacia", "ospedale", "supermercato"], arrEntities: [], arrHomeOnly: true, nightMode: "auto", wxAlert: true, muteGuide: false, trafficSensor: "", autoDest: true, wx3d: true, arrDist: 500, tileAhead: 100 };
 // marche dei distributori (come nell'anagrafica del MIMIT)
 const FUEL_BRANDS = ["Agip Eni", "Api-Ip", "Q8", "Esso", "Tamoil", "Shell", "Retitalia", "Beyfin", "Costantin", "Europam", "Pompe bianche"];
 const BRAND_COLORS = { "agip eni": "#f7c600", "eni": "#f7c600", "api-ip": "#0057a8", "ip": "#0057a8", "q8": "#0a3a7a", "esso": "#d71920",
@@ -1947,7 +2060,7 @@ class NavigatorPanel extends HTMLElement {
   _setLayer(key) {
     const [, url, maxZoom, attribution] = LAYERS[this._effLayer(key)];
     if (this._tiles) this._map.removeLayer(this._tiles);
-    this._tiles = L.tileLayer(url, { maxZoom, attribution, subdomains: "abc" });
+    this._tiles = cachedTileLayer(url, { maxZoom, attribution, subdomains: "abc" }); // con la memoria delle mappe
     if (!this._3d) this._tiles.addTo(this._map); // in 3D le mappe le scarica solo MapLibre
     this._layer = key;
     this.$("map")?.classList.toggle("desert", key === "deserto");
@@ -3044,6 +3157,7 @@ class NavigatorPanel extends HTMLElement {
       nav.disp = { lat: fix.lat, lon: fix.lon };
     }
     this._carGlide(prev, nav.disp, nav.dir ?? nav.heading ?? 0, now); // mezzo 3D fluido, sempre rivolto nel verso di marcia
+    this._tileAhead(rt, snap.along);
     this._drawMe();
     this._applyRotation();
     if (nav.follow) this._followView();
@@ -3857,7 +3971,8 @@ class NavigatorPanel extends HTMLElement {
 
   _baseSource() {
     const [, url, maxZoom, attribution] = LAYERS[this._effLayer(this._layer)] || LAYERS.strade;
-    const tiles = url.includes("{s}") ? ["a", "b", "c"].map((x) => url.replace("{s}", x)) : [url];
+    const tiles = (url.includes("{s}") ? ["a", "b", "c"].map((x) => url.replace("{s}", x)) : [url])
+      .map((u) => (window.maplibregl?.addProtocol ? u.replace(/^https:\/\//, "navc://") : u)); // memoria delle mappe
     return { type: "raster", tiles, tileSize: 256, maxzoom: maxZoom, attribution };
   }
 
@@ -3874,7 +3989,7 @@ class NavigatorPanel extends HTMLElement {
     const el = this.$("map3d");
     el.hidden = false; // MapLibre misura il contenitore alla creazione
     const c = this._map.getCenter();
-    const dem = { type: "raster-dem", tiles: [DEM_URL], tileSize: 256, maxzoom: 15, encoding: "terrarium" };
+    const dem = { type: "raster-dem", tiles: [ml.addProtocol ? DEM_URL.replace(/^https:\/\//, "navc://") : DEM_URL], tileSize: 256, maxzoom: 15, encoding: "terrarium" };
     const g = new ml.Map({
       container: el, center: [c.lng, c.lat], zoom: this._map.getZoom() + Z3D, pitch: this._pitch3d(), maxPitch: 80,
       attributionControl: { compact: true },
@@ -6258,6 +6373,51 @@ class NavigatorPanel extends HTMLElement {
   }
 
   // velocità attuale (cifre LCD, "km/h" piccolo dopo): rossa e lampeggiante sopra il limite (come il beep); solo in guida
+  // buffer della mappa: in guida carica (e salva sul telefono) i riquadri del percorso dei prossimi km, allo zoom in uso
+  // (2D: zoom della mappa; 3D: sfondo allo zoom della vista e uno sotto, più il rilievo). Al più 3 alla volta, con calma.
+  _tileAhead(rt, along) {
+    const km = +(this._settings.tileAhead ?? 100);
+    if (!km || window.navigator.onLine === false || this._aheadBusy) return;
+    const now = Date.now();
+    if (this._aheadAt && now - this._aheadAt < 20000 && Math.abs(along - (this._aheadAlong || 0)) < 1500) return;
+    this._aheadAt = now; this._aheadAlong = along;
+    const tpl = (LAYERS[this._effLayer(this._layer)] || LAYERS.strade)[1];
+    const zs = this._3d && this._g3
+      ? [Math.round(this._g3.getZoom()) + 1, Math.round(this._g3.getZoom())].map((z) => [tpl, Math.min(19, z)])
+        .concat([[DEM_URL, Math.min(15, Math.max(10, Math.round(this._g3.getZoom()) - 2))]])
+      : [[tpl, Math.min(19, Math.round(this._map.getZoom()))]];
+    const g = this._geom(rt);
+    const end = Math.min(g._cum[g._cum.length - 1], along + km * 1000);
+    this._aheadDone ??= new Set();
+    const urls = [];
+    for (const [t, z] of zs) {
+      const stepM = 40075000 * Math.cos((g.shape[0][0] * Math.PI) / 180) / 2 ** z / 2; // mezzo riquadro
+      const near = z >= 15 ? 1 : 0; // da vicino anche i riquadri a fianco (la vista è più larga della strada)
+      for (let a = along; a <= end; a += stepM) {
+        const p = this._pointAt(g, a).ll;
+        const [x, y] = tileXY(p[0], p[1], z);
+        for (let dx = -near; dx <= near; dx++) for (let dy = -near; dy <= near; dy++) {
+          const u = tileUrl(t, z, x + dx, y + dy);
+          if (!this._aheadDone.has(u)) { this._aheadDone.add(u); urls.push(u); }
+        }
+      }
+    }
+    if (!urls.length) return;
+    this._aheadBusy = true;
+    let i = 0;
+    const worker = async () => {
+      while (i < urls.length && this._nav && window.navigator.onLine !== false) {
+        const u = urls[i++];
+        const hit = await tileGet(u);
+        if (!hit) { await tileFetch(u); await new Promise((r) => setTimeout(r, 120)); } // con calma
+      }
+    };
+    Promise.all([worker(), worker(), worker()]).finally(() => {
+      this._aheadBusy = false;
+      console.debug("[Navigator mappe] buffer:", urls.length, "riquadri del percorso");
+    });
+  }
+
   // connessione dati e collegamento con Home Assistant: icona verde/rossa nel riquadro della velocità
   _netWatch() {
     if (this._netT) return;
@@ -6494,7 +6654,7 @@ class NavigatorPanel extends HTMLElement {
     const dlg = wrap.querySelector(".setdlg");
     if (!dlg) return;
     const SECTIONS = [
-      ["generale", "⚙️", "Generale", ["Mappa", "Velocità", "Traffico"]],
+      ["generale", "⚙️", "Generale", ["Mappa", "Velocità", "Traffico"]], // ("Mappa senza rete" inizia con "Mappa")
       ["voce", "🔊", "Voce", ["Indicazioni vocali"]],
       ["3d", "🏔️", "3D", ["Vista 3D"]],
       ["garage", "🚗", "Garage", ["Garage"]],
@@ -6592,6 +6752,13 @@ class NavigatorPanel extends HTMLElement {
           BLD_STYLES.map(([v, n]) => `<option value="${v}" ${(s.bldStyle || "colorati") === v ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>` : ""}
         ${sw("wx3d", "Pioggia, neve e nebbia in 3D", "Animazioni sulla vista 3D quando nella zona piove, nevica o c'è nebbia (adesso o prevista sul percorso). Spegnile se la guida rallenta")}
         ${sw("clouds3d", "Nuvole in 3D", "In cielo, a 1–2 km di quota, tante quante la nuvolosità prevista nella zona (Open-Meteo); grigie dove piove")}
+      </div>
+      <div class="grp"><h3>Mappa senza rete</h3>
+        <div class="note">Le mappe caricate si tengono sul telefono: senza rete (gallerie, valli, montagna) restano visibili. In guida si
+          caricano in anticipo quelle del percorso che stai per fare, allo zoom che stai usando (come il buffer di un video).</div>
+        <label class="line"><span>Mappa in anticipo durante la guida</span><select data-s="tileAhead">${[0, 25, 50, 100, 200].map((k) =>
+          `<option value="${k}" ${(+(s.tileAhead ?? 100)) === k ? "selected" : ""}>${k ? `${k} km` : "No"}</option>`).join("")}</select></label>
+        <button data-tileclear>🗑 Svuota la memoria delle mappe</button>
       </div>
       <div class="grp"><h3>Velocità</h3>
         ${sw("camAlert", "Avviso autovelox fissi", "Cartello nella barra della guida e, con le indicazioni vocali o il beep attivi, avviso a 600 metri (da 1 km in autostrada)")}
@@ -6693,6 +6860,11 @@ class NavigatorPanel extends HTMLElement {
       s.arrEntities = [...(s.arrEntities || []), e.target.value];
       this._saveSettings();
       this._openSettings();
+    });
+    wrap.querySelector("[data-tileclear]")?.addEventListener("click", async () => {
+      await tileClear();
+      this._aheadDone = new Set();
+      this._msg("Memoria delle mappe svuotata");
     });
     wrap.querySelector("[data-arrtest]")?.addEventListener("click", () => {
       this._arrTest = true; // prova: tasti visibili subito, da provare e spostare
