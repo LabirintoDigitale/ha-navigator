@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.18";
+const PANEL_VERSION = "1.13.19";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -5145,7 +5145,8 @@ class NavigatorPanel extends HTMLElement {
             if (q != null && Number.isFinite(q) && Number.isFinite(tr.elevation)) elev = q - tr.elevation;
           } catch (e) { elev = 0; }
           // in alto sopra il paese: i segnaposto dei punti di interesse stanno sempre sopra la mappa 3D e la coprirebbero.
-          // La quota si sceglie sullo schermo: la base della scritta ~120 px sopra il paese (più dei segnaposto)
+          // La quota si sceglie sullo schermo: la base della scritta ~260 px sopra il centro del paese, oltre i segnaposto
+          // che coprono tutto il centro abitato
           const g0 = ml.MercatorCoordinate.fromLngLat([p.lon, p.lat], elev);
           const ndcY = (z) => {
             const m = baseArr, x = g0.x, y = g0.y;
@@ -5155,7 +5156,7 @@ class NavigatorPanel extends HTMLElement {
           const u0 = g0.meterInMercatorCoordinateUnits();
           const y0 = ndcY(g0.z), y1 = ndcY(g0.z + 100 * u0);
           const pxPerM = y0 != null && y1 != null ? ((y1 - y0) * (g3.getCanvas().clientHeight || 600)) / 2 / 100 : 0;
-          const lift = pxPerM > 0 ? Math.min(4000, Math.max(p.h * 0.5, 120 / pxPerM)) : p.h * k * 1.5;
+          const lift = pxPerM > 0 ? Math.min(4000, Math.max(p.h * 0.5, 260 / pxPerM)) : p.h * k * 1.5;
           const mc = ml.MercatorCoordinate.fromLngLat([p.lon, p.lat], elev + lift);
           const s = mc.meterInMercatorCoordinateUnits() * k;
           // verso la telecamera: direzione (gradi da nord) dal paese a te
