@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.8";
+const PANEL_VERSION = "1.13.9";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -3661,22 +3661,24 @@ class NavigatorPanel extends HTMLElement {
     const n = 3 + Math.floor(Math.random() * 3);
     for (let i = 0; i < n; i++) {
       const side = Math.random() < 0.5 ? -1 : 1;
-      this._tfSpawn(TF_BAT, "tf-bat", { dx: side * rnd(30, 85), dy: rnd(-65, -22), s1: rnd(2, 2.8), dur: rnd(2.2, 3.1), z0: 26 },
-        i * rnd(120, 380));
+      // dentro la volta (pareti a ±40, soffitto a -40 alla stessa scala degli archi): verso il centro, sopra le corsie
+      this._tfSpawn(TF_BAT, "tf-bat", { dx: side * rnd(3, 15), dy: rnd(-26, -10), s1: rnd(2, 2.6), dur: rnd(3.8, 5), z0: 26 },
+        i * rnd(250, 650));
     }
   }
 
-  _tfSanta() { // nella carreggiata opposta (a sinistra), viene verso di noi e ci passa di fianco
-    this._tfSpawn(TF_SANTA, "tf-santa", { dx: -85, dy: 38, s1: 3.3, dur: 4.6, z0: 32 });
+  // le sorprese passano sopra la corsia opposta (a sinistra, centro a -20): dentro la galleria, non nel muro
+  _tfSanta() { // la slitta vola a mezz'altezza
+    this._tfSpawn(TF_SANTA, "tf-santa", { dx: -20, dy: 0, s1: 2.3, dur: 4.6, z0: 32 });
   }
 
   _tfPumpkin() {
-    this._tfSpawn(TF_PUMPKIN, "tf-pump", { dx: -72, dy: 44, s1: 2.7, dur: 4, z0: 30 });
+    this._tfSpawn(TF_PUMPKIN, "tf-pump", { dx: -20, dy: 12, s1: 2.4, dur: 4, z0: 30 });
   }
 
   _tfGhost() {
     const rnd = (a, b) => a + Math.random() * (b - a);
-    this._tfSpawn(TF_GHOST, "tf-ghost", { dx: rnd(-34, 34), dy: -58, s1: 2.9, dur: 4.2, z0: 30 });
+    this._tfSpawn(TF_GHOST, "tf-ghost", { dx: -20 + rnd(-6, 6), dy: -12, s1: 2.4, dur: 4.2, z0: 30 });
   }
 
   // indicazioni vocali: un avviso in anticipo ("Tra 300 metri, …") e uno al momento della manovra
