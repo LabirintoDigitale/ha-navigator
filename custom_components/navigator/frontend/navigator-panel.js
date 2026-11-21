@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.26";
+const PANEL_VERSION = "1.13.27";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -5191,7 +5191,8 @@ class NavigatorPanel extends HTMLElement {
             .makeTranslation(mc.x, mc.y, mc.z)
             .scale(new THREE.Vector3(sc, -sc, sc))
             .multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2))
-            .multiply(new THREE.Matrix4().makeRotationY(Math.PI - toCam))
+            // girata un po' di sbieco (~17°): come nelle riprese, si vede lo spessore sul fianco delle lettere
+            .multiply(new THREE.Matrix4().makeRotationY(Math.PI - toCam + 0.3))
             .multiply(new THREE.Matrix4().makeRotationX(-tilt));
           it.P = new THREE.Matrix4().fromArray(baseArr).multiply(l);
           // rettangolo sullo schermo, per non sovrapporre i nomi
@@ -5287,26 +5288,28 @@ class NavigatorPanel extends HTMLElement {
     }
     const c = document.createElement("canvas");
     const x = c.getContext("2d");
-    const font = `900 ${px}px "Helvetica Neue", "Arial Black", Helvetica, Arial, sans-serif`;
+    const font = `700 ${px}px "Helvetica Neue", Helvetica, Arial, sans-serif`; // bastoni in grassetto, non troppo pesante
     x.font = font;
+    try { x.letterSpacing = `${Math.round(px * 0.03)}px`; } catch (e) { /* non supportato */ }
     const tw = Math.ceil(Math.max(...lines.map((l) => x.measureText(l).width))) + pad * 2;
     c.width = Math.min(4096, tw); c.height = Math.round(lh * lines.length + pad * 2);
-    x.font = font; x.textAlign = "center"; x.textBaseline = "middle"; x.lineJoin = "round";
+    x.font = font; try { x.letterSpacing = `${Math.round(px * 0.03)}px`; } catch (e) { /* non supportato */ }
+    x.textAlign = "center"; x.textBaseline = "middle"; x.lineJoin = "round";
     const maxW = c.width - pad * 2;
     lines.forEach((l, i) => {
       const y = pad + lh * (i + 0.5) + px * 0.04, cx = c.width / 2;
       const top = y - px * 0.42, bot = y + px * 0.42;
       // grigio cemento/metallo opaco: chiaro in alto, più scuro in basso
-      x.lineWidth = px * 0.07; x.strokeStyle = "#454b51"; // contorno scuro
+      x.lineWidth = px * 0.035; x.strokeStyle = "#5a6066"; // contorno sottile
       x.strokeText(l, cx, y, maxW);
       const gr = x.createLinearGradient(0, top, 0, bot);
-      gr.addColorStop(0, "#c4c9cd"); gr.addColorStop(0.5, "#a3aab0"); gr.addColorStop(1, "#6f777e");
+      gr.addColorStop(0, "#e3e6e9"); gr.addColorStop(0.55, "#c5cacf"); gr.addColorStop(1, "#959ca3");
       x.fillStyle = gr; x.fillText(l, cx, y, maxW);
       // smussatura: ombra morbida lungo i bordi in basso e luce lungo quelli in alto, solo dentro le lettere
       x.save();
       x.globalCompositeOperation = "source-atop";
-      x.filter = `blur(${Math.round(px * 0.035)}px)`;
-      x.lineWidth = px * 0.1;
+      x.filter = `blur(${Math.round(px * 0.025)}px)`;
+      x.lineWidth = px * 0.07;
       x.strokeStyle = "rgba(35,40,46,.55)"; x.strokeText(l, cx, y + px * 0.035, maxW);
       x.strokeStyle = "rgba(255,255,255,.45)"; x.strokeText(l, cx, y - px * 0.04, maxW);
       x.restore();
