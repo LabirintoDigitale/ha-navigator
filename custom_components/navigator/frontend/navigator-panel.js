@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.14";
+const PANEL_VERSION = "1.13.15";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -5202,26 +5202,46 @@ class NavigatorPanel extends HTMLElement {
 
   _buildPlace3d(k) {
     const THREE = this._THREE;
-    // scritta su tela: carattere bastoni pulito e un po' largo, come le grandi scritte dei titoli
-    const px = 160, pad = 24;
+    // scritta su tela: maiuscolo, carattere bastoni molto pesante e largo, faccia color metallo (chiara in alto, più
+    // scura in basso) con bordo smussato scuro e riflesso in alto; i nomi lunghi vanno su due righe
+    const px = 150, pad = 26, lh = px * 0.98;
+    const txt = k.name.toLocaleUpperCase("it-IT");
+    let lines = [txt];
+    if (txt.length > 11 && txt.includes(" ")) { // a capo allo spazio più vicino al centro
+      const mid = txt.length / 2;
+      let best = -1;
+      for (let i = 0; i < txt.length; i++) if (txt[i] === " " && (best < 0 || Math.abs(i - mid) < Math.abs(best - mid))) best = i;
+      lines = [txt.slice(0, best), txt.slice(best + 1)];
+    }
     const c = document.createElement("canvas");
     const x = c.getContext("2d");
-    const font = `600 ${px}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+    const font = `900 ${px}px "Helvetica Neue", "Arial Black", Helvetica, Arial, sans-serif`;
     x.font = font;
-    const tw = Math.ceil(x.measureText(k.name).width) + pad * 2;
-    c.width = Math.min(4096, tw); c.height = px + pad * 2;
-    x.font = font; x.textAlign = "center"; x.textBaseline = "middle"; x.fillStyle = "#fff";
-    x.fillText(k.name, c.width / 2, c.height / 2 + px * 0.04, c.width - pad * 2);
+    const tw = Math.ceil(Math.max(...lines.map((l) => x.measureText(l).width))) + pad * 2;
+    c.width = Math.min(4096, tw); c.height = Math.round(lh * lines.length + pad * 2);
+    x.font = font; x.textAlign = "center"; x.textBaseline = "middle"; x.lineJoin = "round";
+    const maxW = c.width - pad * 2;
+    lines.forEach((l, i) => {
+      const y = pad + lh * (i + 0.5) + px * 0.04;
+      const top = y - px * 0.42, bot = y + px * 0.42;
+      x.lineWidth = px * 0.09; x.strokeStyle = "#4a5056"; // bordo smussato
+      x.strokeText(l, c.width / 2, y, maxW);
+      const gr = x.createLinearGradient(0, top, 0, bot); // metallo
+      gr.addColorStop(0, "#fbfcfd"); gr.addColorStop(0.45, "#d9dee3"); gr.addColorStop(0.55, "#b7bec5"); gr.addColorStop(1, "#8d959d");
+      x.fillStyle = gr; x.fillText(l, c.width / 2, y, maxW);
+      x.lineWidth = px * 0.025; x.strokeStyle = "rgba(255,255,255,.55)"; // filo di luce sul bordo
+      x.strokeText(l, c.width / 2, y - px * 0.015, maxW);
+    });
     const tex = new THREE.CanvasTexture(c);
     tex.anisotropy = 4; tex.needsUpdate = true;
-    const hM = k.h, wM = hM * (c.width / c.height);
+    const hM = k.h * lines.length * 0.9, wM = hM * (c.width / c.height);
     const geo = new THREE.PlaneGeometry(wM, hM);
     const scene = new THREE.Scene();
     const mats = [];
-    const N = 12, depth = hM * 0.24; // spessore delle lettere
+    const N = 14, depth = hM * 0.3; // spessore delle lettere
     for (let i = N; i >= 0; i--) { // dal fondo (scuro) al davanti (bianco)
       const t = i / N;
-      const col = i === 0 ? 0xffffff : new THREE.Color().setScalar(0.58 - 0.33 * t).getHex(); // fianchi in ombra
+      const col = i === 0 ? 0xffffff : new THREE.Color().setScalar(0.62 - 0.3 * t).getHex(); // fianchi in ombra
       const m = new THREE.MeshBasicMaterial({ map: tex, color: col, transparent: true, alphaTest: 0.35, side: THREE.DoubleSide, depthWrite: true });
       m.userData.op = 1;
       const mesh = new THREE.Mesh(geo, m);
