@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.22";
+const PANEL_VERSION = "1.13.23";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -5120,55 +5120,74 @@ class NavigatorPanel extends HTMLElement {
         try { cam = ml.MercatorCoordinate.fromLngLat(tr.getCameraLngLat(), tr.getCameraAltitude()); } catch (e) { return; }
         const r = self._pl3Renderer;
         r.resetState();
-        const base = new THREE.Matrix4();
-        // dal più lontano al più vicino, così le scritte vicine coprono quelle dietro
         const list = [];
         for (const p of self._pl3.values()) {
           const mc = ml.MercatorCoordinate.fromLngLat([p.lon, p.lat], 0);
           const u = mc.meterInMercatorCoordinateUnits();
           const dx = (mc.x - cam.x) / u, dy = (mc.y - cam.y) / u;
           const d = Math.hypot(dx, dy);
-          // troppo vicino (ci sei dentro) o troppo lontano: non si mostra; ai bordi sfuma
-          const near = p.h * 2, far = p.far || 30000; // vicinissimo (ci sei dentro) non si mostra
+          // proprio sopra il paese non si mostra; troppo lontano neanche; ai bordi sfuma
+          const far = p.far || 30000;
           const zf = (g3.getZoom() - (p.minz - 0.5)) / 0.5; // compare sfumando man mano che si avvicina lo zoom giusto
-          const a = Math.max(0, Math.min(1, (d - near) / near, (far - d) / (far * 0.25), zf));
+          const a = Math.max(0, Math.min(1, (d - 120) / 120, (far - d) / (far * 0.25), zf));
           if (a <= 0.02) continue;
           list.push({ p, d, a, dx, dy });
         }
-        list.sort((x, y) => y.d - x.d);
-        for (const { p, a, dx, dy, d } of list) {
-          // da lontano si ingrandiscono (almeno ~8% della distanza), così restano leggibili come grandi insegne
-          const k = Math.max(1, (d * 0.08) / p.h);
+        const cw = g3.getCanvas().clientWidth || 400, chh = g3.getCanvas().clientHeight || 600;
+        // grandezza e quota scelte SULLO SCHERMO: lettere alte qualche decina di pixel (più grandi per i luoghi importanti)
+        // e base della scritta poco sopra il paese (~90 px da vicino, ~50 da lontano), sopra i suoi segnaposto
+        for (const it of list) {
+          const { p, d, dx, dy } = it;
           let elev = 0;
           try {
             const q = g3.terrain ? g3.queryTerrainElevation([p.lon, p.lat]) : null;
             if (q != null && Number.isFinite(q) && Number.isFinite(tr.elevation)) elev = q - tr.elevation;
           } catch (e) { elev = 0; }
-          // in alto sopra il paese: i segnaposto dei punti di interesse stanno sempre sopra la mappa 3D e la coprirebbero.
-          // La quota si sceglie sullo schermo: da vicino la base della scritta ~260 px sopra il centro del paese, oltre
-          // i segnaposto che coprono tutto il centro abitato; da lontano il paese sullo schermo è piccolo e basta meno
-          // (cala con la distanza, fino a ~70 px)
-          const upPx = Math.max(70, Math.min(260, (260 * 800) / Math.max(d, 1)));
           const g0 = ml.MercatorCoordinate.fromLngLat([p.lon, p.lat], elev);
           const ndcY = (z) => {
             const m = baseArr, x = g0.x, y = g0.y;
-            const cy = m[1] * x + m[5] * y + m[9] * z + m[13], cw = m[3] * x + m[7] * y + m[11] * z + m[15];
-            return cw > 0 ? cy / cw : null;
+            const cy = m[1] * x + m[5] * y + m[9] * z + m[13], cw2 = m[3] * x + m[7] * y + m[11] * z + m[15];
+            return cw2 > 0 ? cy / cw2 : null;
           };
           const u0 = g0.meterInMercatorCoordinateUnits();
           const y0 = ndcY(g0.z), y1 = ndcY(g0.z + 100 * u0);
-          const pxPerM = y0 != null && y1 != null ? ((y1 - y0) * (g3.getCanvas().clientHeight || 600)) / 2 / 100 : 0;
-          const lift = pxPerM > 0 ? Math.min(4000, Math.max(p.h * 0.5, upPx / pxPerM)) : p.h * k * 1.5;
+          const pxPerM = y0 != null && y1 != null ? ((y1 - y0) * chh) / 2 / 100 : 0;
+          if (!(pxPerM > 0)) continue;
+          const upPx = Math.max(50, Math.min(90, (90 * 1500) / Math.max(d, 1)));
+          const k = (p.px || 40) / pxPerM / p.h; // scala del modello (alto p.h metri) per avere p.px pixel
+          const lift = upPx / pxPerM;
           const mc = ml.MercatorCoordinate.fromLngLat([p.lon, p.lat], elev + lift);
-          const s = mc.meterInMercatorCoordinateUnits() * k;
-          // verso la telecamera: direzione (gradi da nord) dal paese a te
-          const toCam = Math.atan2(-dx, dy); // dx verso est, dy verso sud (Mercatore)
+          const sc = mc.meterInMercatorCoordinateUnits() * k;
+          const toCam = Math.atan2(-dx, dy); // verso la telecamera (dx verso est, dy verso sud nel Mercatore)
           const l = new THREE.Matrix4()
             .makeTranslation(mc.x, mc.y, mc.z)
-            .scale(new THREE.Vector3(s, -s, s))
+            .scale(new THREE.Vector3(sc, -sc, sc))
             .multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2))
             .multiply(new THREE.Matrix4().makeRotationY(Math.PI - toCam));
-          self._pl3Cam.projectionMatrix = base.fromArray(baseArr).multiply(l);
+          it.P = new THREE.Matrix4().fromArray(baseArr).multiply(l);
+          // rettangolo sullo schermo, per non sovrapporre i nomi
+          const e = it.P.elements;
+          let x0 = Infinity, x1 = -Infinity, ya = Infinity, yb = -Infinity;
+          for (const [lx, ly] of [[-p.wM / 2, 0], [p.wM / 2, 0], [-p.wM / 2, p.hM], [p.wM / 2, p.hM]]) {
+            const w = e[3] * lx + e[7] * ly + e[15];
+            if (w <= 0) { it.P = null; break; }
+            const sx = ((e[0] * lx + e[4] * ly + e[12]) / w + 1) / 2 * cw, sy = (1 - (e[1] * lx + e[5] * ly + e[13]) / w) / 2 * chh;
+            x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); ya = Math.min(ya, sy); yb = Math.max(yb, sy);
+          }
+          it.rect = [x0, ya, x1, yb];
+        }
+        // nomi che si sovrappongono: resta il più importante (capoluogo, poi luogo più grande, poi più vicino)
+        const pick = list.filter((it) => it.P).sort((x, y) => (y.p.cap ? 1 : 0) - (x.p.cap ? 1 : 0) || y.p.h - x.p.h || x.d - y.d);
+        const shown = [];
+        for (const it of pick) {
+          const [x0, ya, x1, yb] = it.rect;
+          if (x1 < 0 || x0 > cw || yb < 0 || ya > chh) continue; // fuori dallo schermo
+          if (shown.some(({ rect: [a0, b0, a1, b1] }) => x0 < a1 + 8 && x1 > a0 - 8 && ya < b1 + 4 && yb > b0 - 4)) continue;
+          shown.push(it);
+        }
+        shown.sort((x, y) => y.d - x.d); // dal più lontano al più vicino
+        for (const { p, a, P } of shown) {
+          self._pl3Cam.projectionMatrix = P;
           for (const m of p.mats) m.opacity = a * m.userData.op;
           gl.depthMask(true); gl.clearDepth(1.0); gl.clear(gl.DEPTH_BUFFER_BIT);
           r.render(p.scene, self._pl3Cam);
@@ -5214,9 +5233,10 @@ class NavigatorPanel extends HTMLElement {
       const d = distM([c.lat, c.lng], [lat, lon]);
       if (d > (cap ? 150000 : 45000)) continue; // i capoluoghi si vedono da molto lontano
       const h = cap ? 340 : SIZE[cls];
-      seen.set(name, { name, lon, lat, h, d, minz, far: cap ? 150000 : 45000, w: (cap ? 4 : 1) * h / Math.max(d, 500) });
+      const px = cap ? 64 : { city: 56, town: 48, village: 40, suburb: 34, hamlet: 32 }[cls];
+      seen.set(name, { name, lon, lat, h, d, minz, cap, px, far: cap ? 150000 : 45000, w: (cap ? 4 : 1) * h / Math.max(d, 500) });
     }
-    const keep = [...seen.values()].sort((a, b) => b.w - a.w).slice(0, 14);
+    const keep = [...seen.values()].sort((a, b) => b.w - a.w).slice(0, 20);
     const want = new Set(keep.map((k) => k.name));
     for (const [n, p] of this._pl3) if (!want.has(n)) { p.dispose(); this._pl3.delete(n); }
     for (const k of keep) if (!this._pl3.has(k.name)) this._pl3.set(k.name, this._buildPlace3d(k));
@@ -5272,7 +5292,7 @@ class NavigatorPanel extends HTMLElement {
       scene.add(mesh);
       mats.push(m);
     }
-    return { ...k, scene, mats, dispose() { geo.dispose(); tex.dispose(); mats.forEach((m) => m.dispose()); } };
+    return { ...k, wM, hM, scene, mats, dispose() { geo.dispose(); tex.dispose(); mats.forEach((m) => m.dispose()); } };
   }
 
   // texture della targa (placca bianca + banda UE blu + numero) disegnata su tela
