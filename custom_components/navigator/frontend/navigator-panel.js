@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.6";
+const PANEL_VERSION = "1.13.7";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1621,7 +1621,7 @@ const STYLE = `
   /* galleria: animazione stilizzata di un tunnel che si percorre (archi che vengono incontro, luci, strada) */
   /* colore di fondo pieno (mai trasparente) e livello unico per la scheda grafica: sul WebView un velo grande e animato
      a volte non veniva disegnato tutto in tempo e lasciava vedere a tratti la mappa sotto */
-  .tunfx { position: absolute; inset: 0; z-index: 960; pointer-events: none; overflow: hidden; opacity: 0; transition: opacity .3s;
+  .tunfx { position: absolute; inset: 0; z-index: 1500; pointer-events: none; overflow: hidden; opacity: 0; transition: opacity .3s;
     background: #060606 radial-gradient(ellipse at 50% 45%, #4a3f2e 0%, #1d1913 40%, #060606 100%); --tfd: 2.4s;
     will-change: opacity; transform: translateZ(0); contain: strict; }
   /* durante la galleria la mappa sotto non si disegna (meno lavoro per il telefono, niente pezzi di mappa che compaiono) */
