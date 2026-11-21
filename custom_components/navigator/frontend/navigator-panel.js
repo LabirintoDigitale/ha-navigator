@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.12.5";
+const PANEL_VERSION = "1.12.6";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1411,6 +1411,13 @@ const STYLE = `
   .spdbox .v { height: 100%; }
   .spdbox .v svg { height: 100%; width: auto; display: block; }
   .spdbox .u { font: 700 12px sans-serif; opacity: .85; margin-bottom: 2px; }
+  /* connessione: verde se ci sono i dati e Home Assistant risponde, rossa (lampeggiante) se manca */
+  .spdbox .net { align-self: flex-start; width: 18px; height: 18px; color: #43d17a; margin-left: 2px; }
+  .spdbox .net svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }
+  .spdbox .net svg circle { fill: currentColor; stroke: none; }
+  .spdbox .net.off { color: #ff5252; animation: netblink 1s ease-in-out infinite; }
+  @keyframes netblink { 50% { opacity: .35; } }
+  .spdbox.big .net { width: 30px; height: 30px; }
   /* senza percorso: cartello col limite della strada attuale */
   .spdbox .lim { align-self: center; width: 34px; height: 34px; border-radius: 50%; border: 4px solid #d32f2f; background: #fff; color: #111;
     display: flex; align-items: center; justify-content: center; font: 800 14px sans-serif; box-sizing: border-box; margin-right: 4px; }
@@ -1733,7 +1740,7 @@ class NavigatorPanel extends HTMLElement {
             <div class="tf-vis" id="tfvis"></div>
             <div class="tf-label"><span>🚇 In galleria</span><small id="tunrem"></small></div></div>
           <div id="arrbox"></div>
-          <div class="spdbox" id="spdbox" hidden title="Velocità (tieni premuto per spostarlo)"><span class="lim" id="spdlim" hidden></span><div class="v" id="spdv"></div><span class="u">km/h</span></div>
+          <div class="spdbox" id="spdbox" hidden title="Velocità (tieni premuto per spostarlo)"><span class="lim" id="spdlim" hidden></span><div class="v" id="spdv"></div><span class="u">km/h</span><span class="net" id="spdnet" title="Connessione dati e Home Assistant"><svg viewBox="0 0 24 24"><path d="M2 9a15 15 0 0 1 20 0M5.5 12.5a10 10 0 0 1 13 0M9 16a5 5 0 0 1 6 0"/><circle cx="12" cy="19.5" r="1.6"/></svg></span></div>
           <div class="pitchctl" id="pitchctl" hidden>
             <button class="up" data-p="-15" title="Più dall'alto"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></button>
             <button class="left" data-z="-1" title="Riduci">−</button>
@@ -1854,6 +1861,7 @@ class NavigatorPanel extends HTMLElement {
     $("pitchctl").querySelectorAll("[data-z]").forEach((b) => b.addEventListener("click", () => { if (tapOk()) this._zoomStep(+b.dataset.z); }));
     this._bindFloatDrag("pitchctl");
     this._bindFloatDrag("spdbox");
+    this._netWatch();
     this._loadLayout();
     this._map.on("moveend zoomend", () => this._sync3d());
     if (this._settings.view3d) setTimeout(() => this._toggle3d(true), 0);
@@ -6179,6 +6187,9 @@ class NavigatorPanel extends HTMLElement {
 
   // posto predefinito del riquadro velocità: a sinistra, sotto la barra verde
   _floatDefTop() {
+    // fuori dalla guida la croce sta in alto a sinistra (se non spostata): il riquadro va sotto, non sopra
+    const pc = this.$("pitchctl");
+    if (pc && !pc.hidden && !pc.classList.contains("moved") && pc.offsetLeft < 120) return `${pc.offsetTop + pc.offsetHeight + 8}px`;
     const top = this.$("navtop");
     return top && !top.hidden ? `${top.offsetTop + top.offsetHeight + 8}px` : "56px";
   }
@@ -6247,6 +6258,23 @@ class NavigatorPanel extends HTMLElement {
   }
 
   // velocità attuale (cifre LCD, "km/h" piccolo dopo): rossa e lampeggiante sopra il limite (come il beep); solo in guida
+  // connessione dati e collegamento con Home Assistant: icona verde/rossa nel riquadro della velocità
+  _netWatch() {
+    if (this._netT) return;
+    const upd = () => {
+      const conn = this._hass?.connection;
+      const ok = window.navigator.onLine !== false && conn?.connected !== false;
+      if (ok === this._netOk) return;
+      this._netOk = ok;
+      const el = this.$("spdnet");
+      if (el) { el.classList.toggle("off", !ok); el.title = ok ? "Connesso: dati e Home Assistant" : "Senza connessione dati o Home Assistant non raggiungibile"; }
+    };
+    window.addEventListener("online", upd);
+    window.addEventListener("offline", upd);
+    this._netT = setInterval(upd, 3000);
+    upd();
+  }
+
   _spdBox(kmh, over, lim = null) {
     const el = this.$("spdbox");
     if (!el || this._dragging) return;
