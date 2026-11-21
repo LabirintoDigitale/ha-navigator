@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.12";
+const PANEL_VERSION = "1.13.13";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -674,7 +674,7 @@ const SETTINGS_KEY = "navigator-panel-settings";
 const DEFAULT_SETTINGS = { voice: false, lang: "it", voiceSel: "f", out: "auto", autoZoom: true, beep: false,
   fuelBrands: [], fuelKind: "", camAlert: true, view3d: false, b3d: true, clouds3d: true, veh3d: true, terrainEx: "1.5", pitch3d: 60, tunnelFx: true, zoom3dOff: 0,
   voiceStyle: "normale", voiceRate: 1, voicePitch: 1, bldStyle: "colorati",
-  poiKinds: ["farmacia", "ospedale", "supermercato"], arrEntities: [], arrHomeOnly: true, nightMode: "auto", wxAlert: true, muteGuide: false, trafficSensor: "", autoDest: true, wx3d: true, arrDist: 500, tileAhead: 100 };
+  poiKinds: ["farmacia", "ospedale", "supermercato"], arrEntities: [], arrHomeOnly: true, nightMode: "auto", wxAlert: true, muteGuide: false, trafficSensor: "", autoDest: true, wx3d: true, arrDist: 500, tileAhead: 100, clickSnd: true };
 // marche dei distributori (come nell'anagrafica del MIMIT)
 const FUEL_BRANDS = ["Agip Eni", "Api-Ip", "Q8", "Esso", "Tamoil", "Shell", "Retitalia", "Beyfin", "Costantin", "Europam", "Pompe bianche"];
 const BRAND_COLORS = { "agip eni": "#f7c600", "eni": "#f7c600", "api-ip": "#0057a8", "ip": "#0057a8", "q8": "#0a3a7a", "esso": "#d71920",
@@ -1907,6 +1907,12 @@ class NavigatorPanel extends HTMLElement {
       </div>`;
     const $ = (id) => root.getElementById(id);
     this.$ = $;
+    // "tic" dolce alla pressione dei pulsanti (anche sullo schermo dell'auto); la mappa e i campi di testo no
+    root.addEventListener("click", (e) => {
+      if (this._settings.clickSnd === false) return;
+      const t = e.target.closest?.('button, [role="button"], select, a, input[type="checkbox"], input[type="radio"], .arrsq');
+      if (t && !t.disabled) this._tick();
+    }, true);
     this._menuBtn = root.querySelector("ha-menu-button");
     this._menuBtn.hass = this._hass;
     this._menuBtn.narrow = this._narrow;
@@ -6831,6 +6837,27 @@ class NavigatorPanel extends HTMLElement {
     } catch (e) { /* audio non disponibile */ }
   }
 
+  // suono breve e morbido per i tocchi: sinusoide che scende appena di tono, attacco e coda dolci, volume basso
+  _tick() {
+    try {
+      this._unlockAudio();
+      const ac = this._ac;
+      if (!ac) return;
+      const t = ac.currentTime;
+      const o = ac.createOscillator();
+      const g = ac.createGain();
+      o.type = "sine";
+      o.frequency.setValueAtTime(1050, t);
+      o.frequency.exponentialRampToValueAtTime(820, t + 0.08);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.13, t + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.11);
+      o.connect(g).connect(ac.destination);
+      o.start(t);
+      o.stop(t + 0.13);
+    } catch (e) { /* audio non disponibile */ }
+  }
+
   _beep() {
     try {
       this._unlockAudio();
@@ -6939,6 +6966,7 @@ class NavigatorPanel extends HTMLElement {
         <div class="row" style="margin-top:6px"><button data-s="testvoice">▶ Prova la voce</button></div>
       </div>
       <div class="grp"><h3>Mappa</h3>
+        ${sw("clickSnd", "Suono alla pressione dei pulsanti", "Un \"tic\" leggero a ogni tasto premuto, anche sullo schermo dell'auto")}
         ${sw("autoZoom", "Zoom automatico in base alla velocità (mappa 2D)", "In guida: più vicino in città, più largo in autostrada. Dopo + o − resta il tuo zoom per 20 secondi")}
         ${sw("autoZoom3d", "Zoom automatico in base alla velocità (vista 3D)", "In guida la distanza dalla macchina cambia con la velocità, partendo da quella che hai scelto. Spento: la distanza resta sempre quella scelta")}
         <label class="line"><span>Modalità notte</span><select data-s="nightMode">${NIGHT_MODES.map(([v, n]) => `<option value="${v}" ${(s.nightMode || "auto") === v ? "selected" : ""}>${n}</option>`).join("")}</select></label>
