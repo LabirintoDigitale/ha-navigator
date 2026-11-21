@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.1";
+const PANEL_VERSION = "1.13.2";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1546,7 +1546,15 @@ const STYLE = `
   .spdbox .v svg { height: 100%; width: auto; display: block; }
   .spdbox .u { font: 700 12px sans-serif; opacity: .85; margin-bottom: 2px; }
   /* connessione: verde se ci sono i dati e Home Assistant risponde, rossa (lampeggiante) se manca */
-  .spdbox .net { align-self: flex-start; width: 18px; height: 18px; color: #43d17a; margin-left: 2px; }
+  .spdbox .spdside { align-self: stretch; display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; margin-left: 4px; }
+  .spdbox .net { width: 18px; height: 18px; color: #43d17a; }
+  /* fonti del GPS: verdi se mandano posizioni, rosse se no (auto solo con Android Auto collegato) */
+  .spdbox .gps { font-size: 9px; line-height: 1; display: flex; align-items: center; gap: 1px; color: #43d17a; white-space: nowrap; }
+  .spdbox .gps b { font: 800 8px sans-serif; }
+  .spdbox .gps.off { color: #ff5252; }
+  .spdbox .gps.off { filter: none; }
+  .spdbox .gps[hidden] { display: none; }
+  .spdbox.big .gps { font-size: 15px; } .spdbox.big .gps b { font-size: 12px; }
   .spdbox .net svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }
   .spdbox .net svg circle { fill: currentColor; stroke: none; }
   .spdbox .net.off { color: #ff5252; animation: netblink 1s ease-in-out infinite; }
@@ -1874,7 +1882,8 @@ class NavigatorPanel extends HTMLElement {
             <div class="tf-vis" id="tfvis"></div>
             <div class="tf-label"><span>🚇 In galleria</span><small id="tunrem"></small></div></div>
           <div id="arrbox"></div>
-          <div class="spdbox" id="spdbox" hidden title="Velocità (tieni premuto per spostarlo)"><span class="lim" id="spdlim" hidden></span><div class="v" id="spdv"></div><span class="u">km/h</span><span class="net" id="spdnet" title="Connessione dati e Home Assistant"><svg viewBox="0 0 24 24"><path d="M2 9a15 15 0 0 1 20 0M5.5 12.5a10 10 0 0 1 13 0M9 16a5 5 0 0 1 6 0"/><circle cx="12" cy="19.5" r="1.6"/></svg></span></div>
+          <div class="spdbox" id="spdbox" hidden title="Velocità (tieni premuto per spostarlo)"><span class="lim" id="spdlim" hidden></span><div class="v" id="spdv"></div><span class="u">km/h</span><span class="spdside"><span class="net" id="spdnet" title="Connessione dati e Home Assistant"><svg viewBox="0 0 24 24"><path d="M2 9a15 15 0 0 1 20 0M5.5 12.5a10 10 0 0 1 13 0M9 16a5 5 0 0 1 6 0"/><circle cx="12" cy="19.5" r="1.6"/></svg></span>
+            <span class="gps" id="gpscar" hidden title="GPS dell'auto (Android Auto)">🚗<b>GPS</b></span><span class="gps" id="gpsphone" title="GPS del telefono">📱<b>GPS</b></span></span></div>
           <div class="pitchctl" id="pitchctl" hidden>
             <button class="up" data-p="-15" title="Più dall'alto"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></button>
             <button class="left" data-z="-1" title="Riduci">−</button>
@@ -2292,6 +2301,7 @@ class NavigatorPanel extends HTMLElement {
         this._drawMarkers();
         this._autoDestCheck(this._me);
         this._idleSpeed(lat, lon, pos.coords.speed, pos.coords.heading);
+        this._fixAt = Date.now();
       }, () => { /* GPS non disponibile: niente proposte */ }, { enableHighAccuracy: true, maximumAge: 10000, timeout: 60000 });
     } else if (!want && this._idleWatch != null) {
       window.navigator.geolocation.clearWatch(this._idleWatch);
@@ -3019,8 +3029,8 @@ class NavigatorPanel extends HTMLElement {
     if (source !== "gps") this._phoneGuida(true);
     if (source === "gps") {
       this._nav.watch = window.navigator.geolocation.watchPosition(
-        (pos) => this._onFix({ lat: pos.coords.latitude, lon: pos.coords.longitude, acc: pos.coords.accuracy || 0,
-          heading: pos.coords.heading, speed: pos.coords.speed }),
+        (pos) => (this._fixAt = Date.now(), this._onFix({ lat: pos.coords.latitude, lon: pos.coords.longitude, acc: pos.coords.accuracy || 0,
+          heading: pos.coords.heading, speed: pos.coords.speed })),
         (err) => {
           if (err.code === 1) { this._stopNav(); this._gpsHelp(); return; } // permesso negato
           this._navPopup("warn", "📡", `GPS non disponibile: ${esc(err.message)}`, 4000);
@@ -6469,8 +6479,19 @@ class NavigatorPanel extends HTMLElement {
     };
     window.addEventListener("online", upd);
     window.addEventListener("offline", upd);
-    this._netT = setInterval(upd, 3000);
-    upd();
+    // fonti del GPS: dall'app NaviHA (auto e telefono) o, nel browser, dalle posizioni ricevute
+    const gps = () => {
+      const now = Date.now();
+      const nh = window.__navihaGps;
+      const phoneAt = nh ? nh.phone : this._fixAt || 0;
+      let carOn = false;
+      try { carOn = !!(window.NaviHAApp?.isCar?.() || window.NaviHAApp?.carConnected?.()); } catch (e) { carOn = false; }
+      const c = this.$("gpscar"), ph = this.$("gpsphone");
+      if (c) { c.hidden = !carOn; c.classList.toggle("off", !(nh && now - nh.car < 5000)); }
+      if (ph) ph.classList.toggle("off", !(now - phoneAt < 5000));
+    };
+    this._netT = setInterval(() => { upd(); gps(); }, 1500);
+    upd(); gps();
   }
 
   _spdBox(kmh, over, lim = null) {
