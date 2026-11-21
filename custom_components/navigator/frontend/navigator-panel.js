@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.13";
+const PANEL_VERSION = "1.13.14";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -674,7 +674,7 @@ const SETTINGS_KEY = "navigator-panel-settings";
 const DEFAULT_SETTINGS = { voice: false, lang: "it", voiceSel: "f", out: "auto", autoZoom: true, beep: false,
   fuelBrands: [], fuelKind: "", camAlert: true, view3d: false, b3d: true, clouds3d: true, veh3d: true, terrainEx: "1.5", pitch3d: 60, tunnelFx: true, zoom3dOff: 0,
   voiceStyle: "normale", voiceRate: 1, voicePitch: 1, bldStyle: "colorati",
-  poiKinds: ["farmacia", "ospedale", "supermercato"], arrEntities: [], arrHomeOnly: true, nightMode: "auto", wxAlert: true, muteGuide: false, trafficSensor: "", autoDest: true, wx3d: true, arrDist: 500, tileAhead: 100, clickSnd: true };
+  poiKinds: ["farmacia", "ospedale", "supermercato"], arrEntities: [], arrHomeOnly: true, nightMode: "auto", wxAlert: true, muteGuide: false, trafficSensor: "", autoDest: true, wx3d: true, arrDist: 500, tileAhead: 100, clickSnd: true, names3d: true };
 // marche dei distributori (come nell'anagrafica del MIMIT)
 const FUEL_BRANDS = ["Agip Eni", "Api-Ip", "Q8", "Esso", "Tamoil", "Shell", "Retitalia", "Beyfin", "Costantin", "Europam", "Pompe bianche"];
 const BRAND_COLORS = { "agip eni": "#f7c600", "eni": "#f7c600", "api-ip": "#0057a8", "ip": "#0057a8", "q8": "#0a3a7a", "esso": "#d71920",
@@ -4348,6 +4348,10 @@ class NavigatorPanel extends HTMLElement {
     if (!g.getLayer("poi-src")) { // invisibile: fa scaricare il livello dei punti di interesse insieme agli edifici
       g.addLayer({ id: "poi-src", type: "circle", source: "ofm", "source-layer": "poi", minzoom: 13, paint: { "circle-opacity": 0, "circle-radius": 1 } });
     }
+    if (!g.getLayer("place-src")) { // invisibile: fa scaricare i nomi dei paesi (per le scritte in 3D)
+      g.addLayer({ id: "place-src", type: "circle", source: "ofm", "source-layer": "place", paint: { "circle-opacity": 0, "circle-radius": 1 } });
+    }
+    if (this._settings.names3d !== false) this._initPlaces3d();
     if (!g.getLayer("tun")) {
       g.addLayer({ id: "tun", type: "line", source: "ofm", "source-layer": "transportation", minzoom: 12,
         filter: ["==", ["get", "brunnel"], "tunnel"], paint: { "line-opacity": 0 } });
@@ -5083,6 +5087,149 @@ class NavigatorPanel extends HTMLElement {
       this._car3dMeshKey = null;
       this._drawVeh3d();
     } catch (e) { this._car3dInit = false; }
+  }
+
+  // ---------------------------------------------------------------- nomi dei paesi in 3D
+  // Sopra ogni città, paese o frazione visibile il nome a grandi lettere bianche in rilievo, piantate nel paesaggio
+  // e girate sempre verso di te. Il rilievo sono tante copie della scritta una dietro l'altra, sempre più scure
+  // (niente caratteri 3D da scaricare). Grandezza fissa in metri secondo l'importanza del luogo.
+  async _initPlaces3d() {
+    if (this._pl3Ready || this._pl3Init) return;
+    this._pl3Init = true;
+    let THREE;
+    try { THREE = await loadThree(); } catch (e) { this._pl3Init = false; return; }
+    const g = this._g3;
+    if (!g || !this._g3ok) { this._pl3Init = false; return; }
+    this._pl3 = new Map(); // nome → { mesh, scene, lon, lat, h }
+    const self = this;
+    const layer = {
+      id: "places3d", type: "custom", renderingMode: "2d",
+      onAdd(map, gl) {
+        self._pl3Cam = new THREE.Camera();
+        self._pl3Renderer = new THREE.WebGLRenderer({ canvas: map.getCanvas(), context: gl, antialias: true });
+        self._pl3Renderer.autoClear = false;
+      },
+      render(gl, args) {
+        if (self._settings.names3d === false || !self._pl3Renderer || !self._pl3.size) return;
+        const g3 = self._g3, tr = g3.transform, ml = window.maplibregl;
+        if (g3.getPitch() < 20) return; // dall'alto le scritte in piedi non si leggono: restano le etichette della mappa
+        const mtx = Array.isArray(args) ? args : (args?.defaultProjectionData?.mainMatrix || args?.modelViewProjectionMatrix);
+        const baseArr = tr.mercatorMatrix ? Array.from(tr.mercatorMatrix) : mtx && Array.from(mtx);
+        if (!baseArr) return;
+        let cam;
+        try { cam = ml.MercatorCoordinate.fromLngLat(tr.getCameraLngLat(), tr.getCameraAltitude()); } catch (e) { return; }
+        const r = self._pl3Renderer;
+        r.resetState();
+        const base = new THREE.Matrix4();
+        // dal più lontano al più vicino, così le scritte vicine coprono quelle dietro
+        const list = [];
+        for (const p of self._pl3.values()) {
+          const mc = ml.MercatorCoordinate.fromLngLat([p.lon, p.lat], 0);
+          const u = mc.meterInMercatorCoordinateUnits();
+          const dx = (mc.x - cam.x) / u, dy = (mc.y - cam.y) / u;
+          const d = Math.hypot(dx, dy);
+          // troppo vicino (ci sei dentro) o troppo lontano: non si mostra; ai bordi sfuma
+          const near = p.h * 3.5, far = 30000;
+          const a = Math.max(0, Math.min(1, (d - near) / near, (far - d) / (far * 0.25)));
+          if (a <= 0.02) continue;
+          list.push({ p, d, a, dx, dy });
+        }
+        list.sort((x, y) => y.d - x.d);
+        for (const { p, a, dx, dy, d } of list) {
+          // da lontano si ingrandiscono (almeno ~8% della distanza), così restano leggibili come grandi insegne
+          const k = Math.max(1, (d * 0.08) / p.h);
+          let elev = 0;
+          try {
+            const q = g3.terrain ? g3.queryTerrainElevation([p.lon, p.lat]) : null;
+            if (q != null && Number.isFinite(q) && Number.isFinite(tr.elevation)) elev = q - tr.elevation;
+          } catch (e) { elev = 0; }
+          const mc = ml.MercatorCoordinate.fromLngLat([p.lon, p.lat], elev + p.h * k * 0.35); // un po' sollevate sul paese
+          const s = mc.meterInMercatorCoordinateUnits() * k;
+          // verso la telecamera: direzione (gradi da nord) dal paese a te
+          const toCam = Math.atan2(-dx, dy); // dx verso est, dy verso sud (Mercatore)
+          const l = new THREE.Matrix4()
+            .makeTranslation(mc.x, mc.y, mc.z)
+            .scale(new THREE.Vector3(s, -s, s))
+            .multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2))
+            .multiply(new THREE.Matrix4().makeRotationY(Math.PI - toCam));
+          self._pl3Cam.projectionMatrix = base.fromArray(baseArr).multiply(l);
+          for (const m of p.mats) m.opacity = a * m.userData.op;
+          gl.depthMask(true); gl.clearDepth(1.0); gl.clear(gl.DEPTH_BUFFER_BIT);
+          r.render(p.scene, self._pl3Cam);
+        }
+      },
+    };
+    try {
+      g.addLayer(layer, g.getLayer("car3d") ? "car3d" : undefined); // sotto al mezzo
+      this._pl3Ready = true;
+      this._THREE = this._THREE || THREE;
+      g.on("moveend", () => this._schedulePlaces3d());
+      g.on("idle", () => this._schedulePlaces3d());
+      this._schedulePlaces3d();
+    } catch (e) { this._pl3Init = false; }
+  }
+
+  _schedulePlaces3d() {
+    if (this._pl3T) return;
+    this._pl3T = setTimeout(() => { this._pl3T = null; this._scanPlaces3d(); }, 400);
+  }
+
+  // i luoghi con nome nelle zone caricate della mappa: si tengono i più importanti e vicini (al massimo 14)
+  _scanPlaces3d() {
+    const g = this._g3, THREE = this._THREE;
+    if (!g || !THREE || !this._pl3) return;
+    let feats = [];
+    try { feats = g.querySourceFeatures("ofm", { sourceLayer: "place" }); } catch (e) { return; }
+    const SIZE = { city: 260, town: 170, village: 110, hamlet: 70, suburb: 80 };
+    const c = g.getCenter();
+    const seen = new Map();
+    for (const f of feats) {
+      const cls = f.properties?.class;
+      if (!SIZE[cls] || f.geometry?.type !== "Point") continue;
+      const name = f.properties["name:it"] || f.properties.name || f.properties["name:latin"];
+      if (!name || seen.has(name)) continue;
+      const [lon, lat] = f.geometry.coordinates;
+      const d = distM([c.lat, c.lng], [lat, lon]);
+      if (d > 30000) continue;
+      seen.set(name, { name, lon, lat, h: SIZE[cls], d, w: SIZE[cls] / Math.max(d, 500) });
+    }
+    const keep = [...seen.values()].sort((a, b) => b.w - a.w).slice(0, 14);
+    const want = new Set(keep.map((k) => k.name));
+    for (const [n, p] of this._pl3) if (!want.has(n)) { p.dispose(); this._pl3.delete(n); }
+    for (const k of keep) if (!this._pl3.has(k.name)) this._pl3.set(k.name, this._buildPlace3d(k));
+    g.triggerRepaint();
+  }
+
+  _buildPlace3d(k) {
+    const THREE = this._THREE;
+    // scritta su tela: carattere bastoni pulito e un po' largo, come le grandi scritte dei titoli
+    const px = 160, pad = 24;
+    const c = document.createElement("canvas");
+    const x = c.getContext("2d");
+    const font = `600 ${px}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+    x.font = font;
+    const tw = Math.ceil(x.measureText(k.name).width) + pad * 2;
+    c.width = Math.min(4096, tw); c.height = px + pad * 2;
+    x.font = font; x.textAlign = "center"; x.textBaseline = "middle"; x.fillStyle = "#fff";
+    x.fillText(k.name, c.width / 2, c.height / 2 + px * 0.04, c.width - pad * 2);
+    const tex = new THREE.CanvasTexture(c);
+    tex.anisotropy = 4; tex.needsUpdate = true;
+    const hM = k.h, wM = hM * (c.width / c.height);
+    const geo = new THREE.PlaneGeometry(wM, hM);
+    const scene = new THREE.Scene();
+    const mats = [];
+    const N = 12, depth = hM * 0.24; // spessore delle lettere
+    for (let i = N; i >= 0; i--) { // dal fondo (scuro) al davanti (bianco)
+      const t = i / N;
+      const col = i === 0 ? 0xffffff : new THREE.Color().setScalar(0.58 - 0.33 * t).getHex(); // fianchi in ombra
+      const m = new THREE.MeshBasicMaterial({ map: tex, color: col, transparent: true, alphaTest: 0.35, side: THREE.DoubleSide, depthWrite: true });
+      m.userData.op = 1;
+      const mesh = new THREE.Mesh(geo, m);
+      mesh.position.set(0, hM / 2, -depth * t);
+      scene.add(mesh);
+      mats.push(m);
+    }
+    return { ...k, scene, mats, dispose() { geo.dispose(); tex.dispose(); mats.forEach((m) => m.dispose()); } };
   }
 
   // texture della targa (placca bianca + banda UE blu + numero) disegnata su tela
@@ -6983,6 +7130,7 @@ class NavigatorPanel extends HTMLElement {
         ${s.b3d !== false ? `<label class="line"><span>Stile degli edifici</span><select data-s="bldStyle">${
           BLD_STYLES.map(([v, n]) => `<option value="${v}" ${(s.bldStyle || "colorati") === v ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>` : ""}
         ${sw("wx3d", "Pioggia, neve e nebbia in 3D", "Animazioni sulla vista 3D quando nella zona piove, nevica o c'è nebbia (adesso o prevista sul percorso). Spegnile se la guida rallenta")}
+        ${sw("names3d", "Nomi dei paesi in 3D", "Il nome di città, paesi e frazioni a grandi lettere bianche in rilievo, sopra il paese e sempre girate verso di te")}
         ${sw("clouds3d", "Nuvole in 3D", "In cielo, a 1–2 km di quota, tante quante la nuvolosità prevista nella zona (Open-Meteo); grigie dove piove")}
       </div>
       <div class="grp"><h3>Mappa senza rete</h3>
@@ -7063,6 +7211,7 @@ class NavigatorPanel extends HTMLElement {
       if (el.dataset.s === "autoDest") { this._idleWatchSync(); if (!el.checked) this._autoDestHide(); }
       if (el.dataset.s === "clouds3d") { this._cloudKey = null; this._scheduleClouds(true); }
       if (el.dataset.s === "wx3d") { this._rainDrops = null; this._snowFlakes = null; this._scheduleCloudDraw?.(); }
+      if (el.dataset.s === "names3d") { this._apply3dSettings(); this._g3?.triggerRepaint(); }
       if (el.dataset.s === "b3d") { this._apply3dSettings(); this._openSettings(); } // compare o sparisce lo stile degli edifici
       if (el.dataset.s === "autoZoom3d") { this._g3key = null; this._sync3d(); }
       if (el.dataset.s === "voice" && el.checked) this._unlockAudio();
