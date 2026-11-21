@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.17";
+const PANEL_VERSION = "1.13.18";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -5129,7 +5129,7 @@ class NavigatorPanel extends HTMLElement {
           const dx = (mc.x - cam.x) / u, dy = (mc.y - cam.y) / u;
           const d = Math.hypot(dx, dy);
           // troppo vicino (ci sei dentro) o troppo lontano: non si mostra; ai bordi sfuma
-          const near = p.h * 3.5, far = p.far || 30000;
+          const near = p.h * 2, far = p.far || 30000; // vicinissimo (ci sei dentro) non si mostra
           const zf = (g3.getZoom() - (p.minz - 0.5)) / 0.5; // compare sfumando man mano che si avvicina lo zoom giusto
           const a = Math.max(0, Math.min(1, (d - near) / near, (far - d) / (far * 0.25), zf));
           if (a <= 0.02) continue;
@@ -5144,7 +5144,19 @@ class NavigatorPanel extends HTMLElement {
             const q = g3.terrain ? g3.queryTerrainElevation([p.lon, p.lat]) : null;
             if (q != null && Number.isFinite(q) && Number.isFinite(tr.elevation)) elev = q - tr.elevation;
           } catch (e) { elev = 0; }
-          const mc = ml.MercatorCoordinate.fromLngLat([p.lon, p.lat], elev + p.h * k * 1.5); // sollevate sopra il paese (sopra i segnaposto dei punti di interesse)
+          // in alto sopra il paese: i segnaposto dei punti di interesse stanno sempre sopra la mappa 3D e la coprirebbero.
+          // La quota si sceglie sullo schermo: la base della scritta ~120 px sopra il paese (più dei segnaposto)
+          const g0 = ml.MercatorCoordinate.fromLngLat([p.lon, p.lat], elev);
+          const ndcY = (z) => {
+            const m = baseArr, x = g0.x, y = g0.y;
+            const cy = m[1] * x + m[5] * y + m[9] * z + m[13], cw = m[3] * x + m[7] * y + m[11] * z + m[15];
+            return cw > 0 ? cy / cw : null;
+          };
+          const u0 = g0.meterInMercatorCoordinateUnits();
+          const y0 = ndcY(g0.z), y1 = ndcY(g0.z + 100 * u0);
+          const pxPerM = y0 != null && y1 != null ? ((y1 - y0) * (g3.getCanvas().clientHeight || 600)) / 2 / 100 : 0;
+          const lift = pxPerM > 0 ? Math.min(4000, Math.max(p.h * 0.5, 120 / pxPerM)) : p.h * k * 1.5;
+          const mc = ml.MercatorCoordinate.fromLngLat([p.lon, p.lat], elev + lift);
           const s = mc.meterInMercatorCoordinateUnits() * k;
           // verso la telecamera: direzione (gradi da nord) dal paese a te
           const toCam = Math.atan2(-dx, dy); // dx verso est, dy verso sud (Mercatore)
