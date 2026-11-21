@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.12.4";
+const PANEL_VERSION = "1.12.5";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -7965,19 +7965,22 @@ class NavigatorPanel extends HTMLElement {
     const m = this._map;
     if (!m || !this._poiTiles) return;
     if (!this._poiKindsOn().size) { this._poiStatus(""); this._renderPois(); return; }
-    if (this._poiKindsOn().has("autovelox") && m.getZoom() >= POI_MIN_ZOOM) this._loadCamPois();
+    if (this._poiKindsOn().has("autovelox") && this._poiZoom() >= POI_MIN_ZOOM) this._loadCamPois();
     // in 2D: i riquadri z14 di OpenFreeMap (gli stessi del 3D) letti dal browser; Overpass solo se OpenFreeMap non risponde
     if (!this._3d && !this._ofmDown) {
       if (await this._loadOfmPois()) return;
     }
-    // in 3D i punti arrivano con le mappe di OpenFreeMap (subito, dal browser): niente Overpass
+    // in 3D i punti arrivano con le mappe di OpenFreeMap (subito, dal browser): niente Overpass. Da lontano le mappe del 3D
+    // sono meno dettagliate (pochi punti): si leggono anche i riquadri dettagliati (z14) della zona vicina, come in 2D
     if (this._3d && this._g3ok && this._g3?.getSource("ofm")) {
-      this._poiStatus("");
+      const near = this._poiZoom() >= POI_MIN_ZOOM;
+      if (near && !this._ofmDown) { try { await this._loadOfmPois(); } catch (e) { /* restano quelli delle mappe 3D */ } }
+      this._poiStatus(near ? "" : "far");
       this._renderPois();
       console.debug("[Navigator POI] 3D: punti dalle mappe di OpenFreeMap", this._poiShown?.length || 0);
       return;
     }
-    if (m.getZoom() < POI_MIN_ZOOM) {
+    if (this._poiZoom() < POI_MIN_ZOOM) {
       this._poiStatus("far");
       this._renderPois();
       return;
@@ -8070,14 +8073,26 @@ class NavigatorPanel extends HTMLElement {
   }
 
   // 2D: riquadri z14 di OpenFreeMap della zona visibile (al massimo 12), letti e tenuti in memoria. false = OpenFreeMap non va
+  // zoom "alla Leaflet" della vista attuale: in 3D quello della vista 3D (riquadri da 512 px: +1), non della 2D nascosta
+  _poiZoom() {
+    return this._3d && this._g3 && this._g3ok ? this._g3.getZoom() + 1 : this._map.getZoom();
+  }
+
   async _loadOfmPois() {
     const m = this._map;
     const z = 14;
     const n = 2 ** z;
-    const b = m.getBounds();
+    // in 3D i limiti della vista 3D (la 2D è nascosta); solo la parte vicina (fino a ~metà altezza), non l'orizzonte
+    const g3v = this._3d && this._g3 && this._g3ok;
+    const b = g3v ? (() => {
+      const cv = this._g3.getCanvas(), w = cv.clientWidth, h = cv.clientHeight;
+      const pts = [[0, h * 0.45], [w, h * 0.45], [0, h], [w, h]].map(([x, y]) => this._g3.unproject([x, y]));
+      const lo = pts.map((p) => p.lng), la = pts.map((p) => p.lat);
+      return { getWest: () => Math.min(...lo), getEast: () => Math.max(...lo), getNorth: () => Math.max(...la), getSouth: () => Math.min(...la) };
+    })() : m.getBounds();
     const tx = (lon) => Math.floor(((lon + 180) / 360) * n);
     const ty = (lat) => Math.floor(((1 - Math.asinh(Math.tan((lat * Math.PI) / 180)) / Math.PI) / 2) * n);
-    const c = m.getCenter();
+    const c = g3v ? this._g3.getCenter() : m.getCenter();
     const cx = tx(c.lng);
     const cy = ty(c.lat);
     const tiles = [];
@@ -8126,7 +8141,7 @@ class NavigatorPanel extends HTMLElement {
   // punti da mostrare: categorie scelte, riquadri visibili, al massimo 150 (i più vicini al centro)
   _poiItems() {
     const kinds = this._poiKindsOn();
-    if (!kinds.size || this._map.getZoom() < POI_MIN_ZOOM) return [];
+    if (!kinds.size || this._poiZoom() < POI_MIN_ZOOM) return [];
     const c = this._map.getCenter();
     const out = [];
     const seen = new Set(); // un edificio a cavallo di due riquadri arriva da tutti e due
@@ -8146,11 +8161,12 @@ class NavigatorPanel extends HTMLElement {
         out.push({ id, lat, lon, k, name: p.name || p["name:it"] || p.name_int || "" });
       }
     }
-    if (!this._3d && this._ofmView) {
-      const b = this._map.getBounds().pad(0.1);
+    if (this._ofmView) { // riquadri dettagliati (z14) letti dal browser: in 2D e, da lontano, anche in 3D
+      const g3v = this._3d && this._g3 && this._g3ok;
+      const b = g3v ? this._g3.getBounds() : this._map.getBounds().pad(0.1);
       for (const k of this._ofmView) {
         for (const it of this._ofmTiles?.get(k) || []) {
-          if (kinds.has(it.k) && !seen.has(it.id) && b.contains([it.lat, it.lon])) { seen.add(it.id); out.push(it); }
+          if (kinds.has(it.k) && !seen.has(it.id) && b.contains(g3v ? [it.lon, it.lat] : [it.lat, it.lon])) { seen.add(it.id); out.push(it); }
         }
       }
     }
