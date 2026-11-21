@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.4";
+const PANEL_VERSION = "1.13.5";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -879,26 +879,6 @@ function fmtAge(ms) {
 const STALE_MS = 10 * 60000; // posizione di una persona più vecchia di così: si avvisa prima di partire
 
 // periodo dell'anno per le sorprese in galleria: Natale (20 giorni prima, 10 dopo) e Halloween (idem)
-// modalità debug: solo sui server di Home Assistant di un certo dominio. Nel codice (pubblico) c'è solo un'impronta del
-// dominio, non il nome: si confronta l'impronta degli ultimi due pezzi dei nomi del server (pagina, URL interno ed esterno)
-const DEBUG_DOMAIN_HASH = 2741537965;
-function domainHash(d) {
-  let h = 5381;
-  for (const c of d) h = (Math.imul(h, 33) ^ c.charCodeAt(0)) >>> 0;
-  return h;
-}
-function isDebugServer(hass) {
-  const hosts = [window.location.hostname];
-  for (const u of [hass?.config?.external_url, hass?.config?.internal_url, hass?.auth?.data?.hassUrl]) {
-    try { if (u) hosts.push(new URL(u).hostname); } catch (e) { /* indirizzo non valido */ }
-  }
-  return hosts.some((h) => {
-    const parts = String(h || "").toLowerCase().split(".");
-    for (let i = 0; i + 1 < parts.length; i++) if (domainHash(parts.slice(i).join(".")) === DEBUG_DOMAIN_HASH) return true;
-    return false;
-  });
-}
-
 function tunnelSeason(d = new Date()) {
   if (window.__naviSeason) return window.__naviSeason; // solo per le prove
   const y = d.getFullYear(), t = d.getTime();
@@ -1136,7 +1116,7 @@ const STYLE = `
     background: var(--app-header-background-color, var(--primary-color)); color: var(--app-header-text-color, #fff);
     border-bottom: var(--app-header-border-bottom, none); }
   .toolbar .title { font-size: 20px; margin-left: 8px; display: flex; align-items: baseline; gap: 10px; flex: 1; min-width: 0; }
-  .toolbar .ver { font-size: 12px; opacity: .7; }
+  .toolbar .ver { font-size: 12px; opacity: .7; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
   .toolbar .brand { display: inline-flex; align-items: center; gap: 8px; }
   .toolbar .brand img { width: 30px; height: 30px; align-self: center; background: #fff; border-radius: 50%; padding: 1px; }
   /* altezza presa dalla finestra: dentro Home Assistant il 100% del pannello può risultare nullo e la mappa sparire */
@@ -1851,7 +1831,7 @@ class NavigatorPanel extends HTMLElement {
       <link rel="stylesheet" href="${LEAFLET_CSS}">
       <style>${STYLE}</style>
       <div class="toolbar"><ha-menu-button></ha-menu-button>
-        <div class="title"><span class="brand" id="brand"><img src="${ICON}" alt=""> Navigator</span><span class="ver">versione ${PANEL_VERSION}</span></div>
+        <div class="title"><span class="brand" id="brand"><img src="${ICON}" alt=""> Navigator</span><span class="ver" id="verlbl">versione ${PANEL_VERSION}</span></div>
         <button class="tbtn" id="settingsbtn" title="Impostazioni">⚙</button></div>
       <div class="setwrap" id="setwrap" hidden></div>
       <div class="setwrap" id="nearwrap" hidden></div>
@@ -2015,6 +1995,18 @@ class NavigatorPanel extends HTMLElement {
     // schermo intero e schermo sempre acceso
     $("fullbtn").addEventListener("click", () => this._toggleFull());
     $("layerbox").addEventListener("click", () => this._cycleLayer());
+    // debug: 20 tocchi di fila sulla versione (meno di 3 s tra uno e l'altro); vale fino alla prossima apertura del pannello
+    let verTaps = 0, verAt = 0;
+    $("verlbl").addEventListener("click", () => {
+      const now = Date.now();
+      verTaps = now - verAt < 3000 ? verTaps + 1 : 1;
+      verAt = now;
+      if (this._debug) return;
+      if (verTaps >= 20) {
+        this._debug = true;
+        this._msg("🐞 Debug attivo fino al riavvio: Impostazioni → Debug");
+      } else if (verTaps >= 15) this._msg(`Ancora ${20 - verTaps} tocchi per il debug`);
+    });
     $("layerbox").title = `Mappa: ${LAYERS[this._layer]?.[0] || ""} (tocca per cambiare)`;
     $("sidebtn").addEventListener("click", () => this._carSide(!this.classList.contains("sideopen")));
     $("b3dbtn").addEventListener("click", () => this._toggle3d());
@@ -6925,7 +6917,7 @@ class NavigatorPanel extends HTMLElement {
         <div class="chips"><span class="chip ${s.fuelKind ? "" : "on"}" data-fkind="">Tutti</span>
           ${FUEL_KINDS.map(([k, n]) => `<span class="chip ${s.fuelKind === k ? "on" : ""}" data-fkind="${k}">${esc(n)}</span>`).join("")}</div>
       </div>
-      ${isDebugServer(this._hass) ? `<div class="grp"><h3>Debug</h3>
+      ${this._debug ? `<div class="grp"><h3>Debug</h3>
         <div class="note">Prove per verificare i vari casi senza aspettare che succedano davvero.</div>
         <label class="line"><span>Prova animazione galleria<div class="note">I visitatori dipendono dalla data: Natale (5 dic → 4 gen),
           Halloween (11 ott → 10 nov), altrimenti pipistrelli</div></span><input type="date" data-dbgdate value="${new Date().toISOString().slice(0, 10)}"></label>
