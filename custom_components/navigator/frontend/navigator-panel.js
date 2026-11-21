@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.15";
+const PANEL_VERSION = "1.13.16";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -5129,8 +5129,9 @@ class NavigatorPanel extends HTMLElement {
           const dx = (mc.x - cam.x) / u, dy = (mc.y - cam.y) / u;
           const d = Math.hypot(dx, dy);
           // troppo vicino (ci sei dentro) o troppo lontano: non si mostra; ai bordi sfuma
-          const near = p.h * 3.5, far = 30000;
-          const a = Math.max(0, Math.min(1, (d - near) / near, (far - d) / (far * 0.25)));
+          const near = p.h * 3.5, far = p.far || 30000;
+          const zf = (g3.getZoom() - (p.minz - 0.5)) / 0.5; // compare sfumando man mano che si avvicina lo zoom giusto
+          const a = Math.max(0, Math.min(1, (d - near) / near, (far - d) / (far * 0.25), zf));
           if (a <= 0.02) continue;
           list.push({ p, d, a, dx, dy });
         }
@@ -5181,17 +5182,24 @@ class NavigatorPanel extends HTMLElement {
     let feats = [];
     try { feats = g.querySourceFeatures("ofm", { sourceLayer: "place" }); } catch (e) { return; }
     const SIZE = { city: 260, town: 170, village: 110, hamlet: 70, suburb: 80 };
+    // da che zoom compaiono (sfumando nel mezzo zoom prima): capoluoghi sempre, città presto, frazioni solo da vicino
+    const MINZ = { capital: 0, city: 10, town: 12, village: 13.5, suburb: 15, hamlet: 15.5 };
+    const zoom = g.getZoom();
     const c = g.getCenter();
     const seen = new Map();
     for (const f of feats) {
       const cls = f.properties?.class;
       if (!SIZE[cls] || f.geometry?.type !== "Point") continue;
+      const cap = f.properties.capital != null && +f.properties.capital <= 6; // capitale, capoluogo di regione o provincia
+      const minz = cap ? MINZ.capital : MINZ[cls];
+      if (zoom < minz - 0.5) continue;
       const name = f.properties["name:it"] || f.properties.name || f.properties["name:latin"];
       if (!name || seen.has(name)) continue;
       const [lon, lat] = f.geometry.coordinates;
       const d = distM([c.lat, c.lng], [lat, lon]);
-      if (d > 30000) continue;
-      seen.set(name, { name, lon, lat, h: SIZE[cls], d, w: SIZE[cls] / Math.max(d, 500) });
+      if (d > (cap ? 60000 : 30000)) continue; // i capoluoghi si vedono da più lontano
+      const h = cap ? 340 : SIZE[cls];
+      seen.set(name, { name, lon, lat, h, d, minz, far: cap ? 60000 : 30000, w: (cap ? 4 : 1) * h / Math.max(d, 500) });
     }
     const keep = [...seen.values()].sort((a, b) => b.w - a.w).slice(0, 14);
     const want = new Set(keep.map((k) => k.name));
