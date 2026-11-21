@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.2";
+const PANEL_VERSION = "1.13.3";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1552,7 +1552,7 @@ const STYLE = `
   .spdbox .gps { font-size: 9px; line-height: 1; display: flex; align-items: center; gap: 1px; color: #43d17a; white-space: nowrap; }
   .spdbox .gps b { font: 800 8px sans-serif; }
   .spdbox .gps.off { color: #ff5252; }
-  .spdbox .gps.off { filter: none; }
+  .spdbox .gps.idle { color: #9aa0a6; }
   .spdbox .gps[hidden] { display: none; }
   .spdbox.big .gps { font-size: 15px; } .spdbox.big .gps b { font-size: 12px; }
   .spdbox .net svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }
@@ -6488,7 +6488,12 @@ class NavigatorPanel extends HTMLElement {
       try { carOn = !!(window.NaviHAApp?.isCar?.() || window.NaviHAApp?.carConnected?.()); } catch (e) { carOn = false; }
       const c = this.$("gpscar"), ph = this.$("gpsphone");
       if (c) { c.hidden = !carOn; c.classList.toggle("off", !(nh && now - nh.car < 5000)); }
-      if (ph) ph.classList.toggle("off", !(now - phoneAt < 5000));
+      if (ph) {
+        const idle = !!nh?.phoneOff; // spento dall'app perché arriva il GPS dell'auto: grigio, non è un guasto
+        ph.classList.toggle("idle", idle);
+        ph.classList.toggle("off", !idle && !(now - phoneAt < 5000));
+        ph.title = idle ? "GPS del telefono in pausa: si usa quello dell'auto" : "GPS del telefono";
+      }
     };
     this._netT = setInterval(() => { upd(); gps(); }, 1500);
     upd(); gps();
