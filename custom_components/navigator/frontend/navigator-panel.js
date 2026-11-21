@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.25";
+const PANEL_VERSION = "1.13.26";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -5294,15 +5294,22 @@ class NavigatorPanel extends HTMLElement {
     x.font = font; x.textAlign = "center"; x.textBaseline = "middle"; x.lineJoin = "round";
     const maxW = c.width - pad * 2;
     lines.forEach((l, i) => {
-      const y = pad + lh * (i + 0.5) + px * 0.04;
+      const y = pad + lh * (i + 0.5) + px * 0.04, cx = c.width / 2;
       const top = y - px * 0.42, bot = y + px * 0.42;
-      x.lineWidth = px * 0.09; x.strokeStyle = "#4a5056"; // bordo smussato
-      x.strokeText(l, c.width / 2, y, maxW);
-      const gr = x.createLinearGradient(0, top, 0, bot); // metallo
-      gr.addColorStop(0, "#fbfcfd"); gr.addColorStop(0.45, "#d9dee3"); gr.addColorStop(0.55, "#b7bec5"); gr.addColorStop(1, "#8d959d");
-      x.fillStyle = gr; x.fillText(l, c.width / 2, y, maxW);
-      x.lineWidth = px * 0.025; x.strokeStyle = "rgba(255,255,255,.55)"; // filo di luce sul bordo
-      x.strokeText(l, c.width / 2, y - px * 0.015, maxW);
+      // grigio cemento/metallo opaco: chiaro in alto, più scuro in basso
+      x.lineWidth = px * 0.07; x.strokeStyle = "#454b51"; // contorno scuro
+      x.strokeText(l, cx, y, maxW);
+      const gr = x.createLinearGradient(0, top, 0, bot);
+      gr.addColorStop(0, "#c4c9cd"); gr.addColorStop(0.5, "#a3aab0"); gr.addColorStop(1, "#6f777e");
+      x.fillStyle = gr; x.fillText(l, cx, y, maxW);
+      // smussatura: ombra morbida lungo i bordi in basso e luce lungo quelli in alto, solo dentro le lettere
+      x.save();
+      x.globalCompositeOperation = "source-atop";
+      x.filter = `blur(${Math.round(px * 0.035)}px)`;
+      x.lineWidth = px * 0.1;
+      x.strokeStyle = "rgba(35,40,46,.55)"; x.strokeText(l, cx, y + px * 0.035, maxW);
+      x.strokeStyle = "rgba(255,255,255,.45)"; x.strokeText(l, cx, y - px * 0.04, maxW);
+      x.restore();
     });
     const tex = new THREE.CanvasTexture(c);
     tex.anisotropy = 4; tex.needsUpdate = true;
@@ -5313,9 +5320,9 @@ class NavigatorPanel extends HTMLElement {
     const N = 14, depth = hM * 0.3; // spessore delle lettere
     for (let i = N; i >= 0; i--) { // dal fondo (scuro) al davanti (bianco)
       const t = i / N;
-      const col = i === 0 ? 0xffffff : new THREE.Color().setScalar(0.62 - 0.3 * t).getHex(); // fianchi in ombra
+      const col = i === 0 ? 0xffffff : new THREE.Color().setScalar(0.55 - 0.3 * t).getHex(); // fianchi in ombra
       const m = new THREE.MeshBasicMaterial({ map: tex, color: col, transparent: true, alphaTest: 0.35, side: THREE.DoubleSide, depthWrite: true });
-      m.userData.op = 1;
+      m.userData.op = i === 0 ? 0.88 : 1; // davanti un filo trasparente: si intravede il paesaggio, come nelle riprese
       const mesh = new THREE.Mesh(geo, m);
       mesh.position.set(0, hM / 2, -depth * t);
       scene.add(mesh);
