@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.21";
+const PANEL_VERSION = "1.13.22";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -5112,7 +5112,7 @@ class NavigatorPanel extends HTMLElement {
       render(gl, args) {
         if (self._settings.names3d === false || !self._pl3Renderer || !self._pl3.size) return;
         const g3 = self._g3, tr = g3.transform, ml = window.maplibregl;
-        if (g3.getPitch() < 20) return; // dall'alto le scritte in piedi non si leggono: restano le etichette della mappa
+        if (g3.getPitch() < 10) return; // proprio dall'alto le scritte in piedi non si leggono: restano le etichette della mappa
         const mtx = Array.isArray(args) ? args : (args?.defaultProjectionData?.mainMatrix || args?.modelViewProjectionMatrix);
         const baseArr = tr.mercatorMatrix ? Array.from(tr.mercatorMatrix) : mtx && Array.from(mtx);
         if (!baseArr) return;
@@ -5198,7 +5198,7 @@ class NavigatorPanel extends HTMLElement {
     try { feats = g.querySourceFeatures("ofm", { sourceLayer: "place" }); } catch (e) { return; }
     const SIZE = { city: 260, town: 170, village: 110, hamlet: 70, suburb: 80 };
     // da che zoom compaiono (sfumando nel mezzo zoom prima): capoluoghi sempre, città presto, frazioni solo da vicino
-    const MINZ = { capital: 0, city: 8.5, town: 10.5, village: 12, suburb: 13.5, hamlet: 14 };
+    const MINZ = { capital: 0, city: 7, town: 9, village: 11, suburb: 13, hamlet: 13.5 };
     const zoom = g.getZoom();
     const c = g.getCenter();
     const seen = new Map();
