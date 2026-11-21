@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.16";
+const PANEL_VERSION = "1.13.17";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -5144,7 +5144,7 @@ class NavigatorPanel extends HTMLElement {
             const q = g3.terrain ? g3.queryTerrainElevation([p.lon, p.lat]) : null;
             if (q != null && Number.isFinite(q) && Number.isFinite(tr.elevation)) elev = q - tr.elevation;
           } catch (e) { elev = 0; }
-          const mc = ml.MercatorCoordinate.fromLngLat([p.lon, p.lat], elev + p.h * k * 0.35); // un po' sollevate sul paese
+          const mc = ml.MercatorCoordinate.fromLngLat([p.lon, p.lat], elev + p.h * k * 1.5); // sollevate sopra il paese (sopra i segnaposto dei punti di interesse)
           const s = mc.meterInMercatorCoordinateUnits() * k;
           // verso la telecamera: direzione (gradi da nord) dal paese a te
           const toCam = Math.atan2(-dx, dy); // dx verso est, dy verso sud (Mercatore)
