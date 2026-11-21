@@ -21,6 +21,8 @@ POINT = vol.Schema(
         vol.Required("lon"): vol.All(vol.Coerce(float), vol.Range(min=-180, max=180)),
         vol.Optional("name", default=""): str,
         vol.Optional("address", default=""): str,
+        # direzione di marcia (gradi) della partenza, nel ricalcolo in guida
+        vol.Optional("heading"): vol.All(vol.Coerce(float), vol.Range(min=0, max=360)),
     },
     extra=vol.REMOVE_EXTRA,
 )

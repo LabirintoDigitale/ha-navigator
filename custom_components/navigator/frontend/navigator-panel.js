@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.11";
+const PANEL_VERSION = "1.13.12";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -3740,7 +3740,11 @@ class NavigatorPanel extends HTMLElement {
     if (!this._settings.muteGuide) this._speak(PHRASES[this._settings.lang].reroute, true);
     this._renderNav();
     const before = this._points;
-    this._points = [{ name: "📍 Posizione attuale", address: "", lat: fix.lat, lon: fix.lon }, ...this._points.slice(1 + nav.passed)];
+    // direzione di marcia: quella del GPS se ci si muove, altrimenti l'ultima nota (serve a Valhalla per partire
+    // dalla strada che stai percorrendo, nel tuo verso)
+    const hd = fix.heading != null && !Number.isNaN(fix.heading) && (fix.speed || 0) > 2 ? fix.heading : nav.heading;
+    this._points = [{ name: "📍 Posizione attuale", address: "", lat: fix.lat, lon: fix.lon,
+      ...(Number.isFinite(hd) ? { heading: hd } : {}) }, ...this._points.slice(1 + nav.passed)];
     try {
       await this._compute(false, true);
       if (!this._nav) return;
@@ -7267,7 +7271,8 @@ class NavigatorPanel extends HTMLElement {
     try {
       const r = await this._hass.callWS({
         type: "navigator/route",
-        points: this._points.map((p) => ({ lat: p.lat, lon: p.lon, name: p.name, address: p.address || "" })),
+        points: this._points.map((p, i) => ({ lat: p.lat, lon: p.lon, name: p.name, address: p.address || "",
+          ...(reroute && i === 0 && Number.isFinite(p.heading) ? { heading: ((p.heading % 360) + 360) % 360 } : {}) })),
         mode: this._mode,
         avoid_tolls: this._avoid.tolls,
         avoid_highways: this._avoid.highways,

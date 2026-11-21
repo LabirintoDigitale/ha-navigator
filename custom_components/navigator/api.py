@@ -615,8 +615,16 @@ class MapServices:
             # disegnati a parte; dove ci sono solo le strade il percorso resta quello di prima
             options["walkway_factor"] = 0.6
             options["sidewalk_factor"] = 0.6
+        def loc(p: dict) -> dict:
+            out = {"lat": p["lat"], "lon": p["lon"], "type": "break"}
+            if p.get("heading") is not None:
+                # in marcia: la partenza si aggancia alla strada percorsa e nel verso giusto, non a una stradina
+                # vicina o alla corsia opposta (da lì il ricalcolo faceva svoltare e rientrare)
+                out.update(heading=round(p["heading"]) % 360, heading_tolerance=45)
+            return out
+
         body: dict[str, Any] = {
-            "locations": [{"lat": p["lat"], "lon": p["lon"], "type": "break"} for p in points],
+            "locations": [loc(p) for p in points],
             "costing": costing,
             "costing_options": {costing: options},
             "directions_options": {"units": "kilometers", "language": language},
