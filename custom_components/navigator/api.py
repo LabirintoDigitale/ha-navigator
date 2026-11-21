@@ -603,11 +603,11 @@ class MapServices:
         if costing in ("auto", "motorcycle"):
             options["use_tolls"] = 0.0 if avoid_tolls else 0.5
             options["use_highways"] = 0.0 if avoid_highways else 1.0
-            # ogni svolta "costa" 15 s (Valhalla ne usa 5): niente uscite e rientri dalla statale per pochi secondi.
-            # Non di più: Valhalla conta la penalità anche quando la strada cambia solo nome in OpenStreetMap e una
-            # statale ne cambia tanti (Via Roma, Via Feltre, Viale Dolomiti…); con 45 s restare sulla statale
-            # "costava" più che uscire, e il percorso faceva giri inutili (es. Santa Giustina, Ponte nelle Alpi)
-            options["maneuver_penalty"] = 15
+            # nessuna penalità per il cambio di nome della strada (in Valhalla "maneuver_penalty" è solo questo, di
+            # base 5 s; le svolte vere le fa già costare a parte, secondo l'angolo e l'incrocio). Una statale dritta
+            # cambia nome a ogni paese (Via Roma, Via Feltre, Viale Dolomiti…) e con la penalità risultava più "cara"
+            # di una stradina parallela: il percorso usciva e rientrava senza motivo (Santa Giustina, Ponte nelle Alpi)
+            options["maneuver_penalty"] = 0
             options["use_living_streets"] = 0.0
             options["service_penalty"] = 60
         if costing == "pedestrian":
