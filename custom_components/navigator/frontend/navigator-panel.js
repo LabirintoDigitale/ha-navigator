@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.24";
+const PANEL_VERSION = "1.13.25";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -5165,10 +5165,24 @@ class NavigatorPanel extends HTMLElement {
           };
           const u0 = g0.meterInMercatorCoordinateUnits();
           const y0 = ndcY(g0.z), y1 = ndcY(g0.z + 100 * u0);
-          const pxPerM = y0 != null && y1 != null ? ((y1 - y0) * chh) / 2 / 100 : 0;
+          const pxPerM = y0 != null && y1 != null ? ((y1 - y0) * chh) / 2 / 100 : 0; // pixel per metro in verticale
           if (!(pxPerM > 0)) continue;
+          // la scritta si inclina all'indietro verso la telecamera: con la mappa dritta (inclinazione 90°) resta in
+          // piedi, vista dall'alto (0°) si sdraia; così è sempre di fronte a chi guarda e non si schiaccia
+          const tilt = ((90 - Math.min(85, g3.getPitch())) * Math.PI) / 180;
+          // pixel per metro lungo la scritta inclinata: si proietta un tratto di 100 m nella sua direzione "su"
+          const ndc = (x, y, z) => {
+            const m = baseArr;
+            const w = m[3] * x + m[7] * y + m[11] * z + m[15];
+            return w > 0 ? [(m[0] * x + m[4] * y + m[8] * z + m[12]) / w, (m[1] * x + m[5] * y + m[9] * z + m[13]) / w] : null;
+          };
+          const hx = d > 0 ? dx / d : 0, hy = d > 0 ? dy / d : 0; // orizzontale, dalla telecamera verso il paese
+          const q0 = ndc(g0.x, g0.y, g0.z);
+          const q1 = ndc(g0.x + hx * Math.sin(tilt) * 100 * u0, g0.y + hy * Math.sin(tilt) * 100 * u0, g0.z + Math.cos(tilt) * 100 * u0);
+          const pxAlong = q0 && q1 ? Math.hypot((q1[0] - q0[0]) * cw, (q1[1] - q0[1]) * chh) / 2 / 100 : pxPerM;
+          if (!(pxAlong > 0)) continue;
           const upPx = Math.max(30, Math.min(60, (60 * 1500) / Math.max(d, 1))); // poco sopra il paese
-          const k = (p.px || 40) / pxPerM / p.h; // scala del modello (alto p.h metri) per avere p.px pixel
+          const k = (p.px || 40) / pxAlong / p.h; // scala del modello (alto p.h metri) per avere p.px pixel sullo schermo
           const lift = upPx / pxPerM;
           const mc = ml.MercatorCoordinate.fromLngLat([p.lon, p.lat], elev + lift);
           const sc = mc.meterInMercatorCoordinateUnits() * k;
@@ -5177,7 +5191,8 @@ class NavigatorPanel extends HTMLElement {
             .makeTranslation(mc.x, mc.y, mc.z)
             .scale(new THREE.Vector3(sc, -sc, sc))
             .multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2))
-            .multiply(new THREE.Matrix4().makeRotationY(Math.PI - toCam));
+            .multiply(new THREE.Matrix4().makeRotationY(Math.PI - toCam))
+            .multiply(new THREE.Matrix4().makeRotationX(-tilt));
           it.P = new THREE.Matrix4().fromArray(baseArr).multiply(l);
           // rettangolo sullo schermo, per non sovrapporre i nomi
           const e = it.P.elements;
