@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.44";
+const PANEL_VERSION = "1.13.45";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1667,6 +1667,7 @@ const STYLE = `
   /* blocco della guida: barra verde in alto, sotto gli add-on (scorrono) con la croce a fianco */
   .navtop.docked { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
   .navbot.docked { border-top-left-radius: 0; }
+  .navbot.docked .info { justify-content: center; text-align: center; } /* con gli add-on attaccati sopra a sinistra: dati al centro */
   .addock { position: absolute; z-index: 1001; display: flex; gap: 8px; align-items: flex-start; padding: 8px;
     background: rgba(24,24,24,.92); border-radius: 0 0 14px 14px; box-sizing: border-box; box-shadow: 0 4px 12px rgba(0,0,0,.35); }
   /* in orizzontale: attaccato sopra la barra in basso, a sinistra */
