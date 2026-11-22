@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.62";
+const PANEL_VERSION = "1.13.63";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -9033,7 +9033,14 @@ class NavigatorPanel extends HTMLElement {
 
   // dati per i segnaposto: posizione e percorso più le impostazioni scelte per l'add-on (es. {player})
   _addonVarsA(a) {
-    return { ...this._addonVars(a.window), ...(a.values || {}) };
+    const v = { ...this._addonVars(a.window), ...(a.values || {}) };
+    // pagina di Music Assistant dentro Home Assistant (stesso indirizzo di Navigator): trovata da sola fra i pannelli
+    // della barra laterale; {ma_url} lasciato vuoto nelle impostazioni dell'add-on vale questa
+    const pans = this._hass?.panels || {};
+    const ma = Object.values(pans).find((p) => /music_assistant|music-assistant/i.test(`${p.url_path || ""} ${p.config?.ingress || ""}`));
+    v.ma_panel = ma ? `/${ma.url_path}` : "";
+    if (!v.ma_url) v.ma_url = v.ma_panel;
+    return v;
   }
 
   // integrazione di ogni entità (registro delle entità, versione "per la visualizzazione": basta un utente normale)
