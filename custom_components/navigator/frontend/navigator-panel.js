@@ -895,6 +895,35 @@ const TF_PUMPKIN = `<svg viewBox="0 0 60 56"><path d="M30 10c-2-5-1-8 3-9" strok
 const TF_GHOST = `<svg viewBox="0 0 50 60"><path d="M25 3C12 3 5 13 5 26v30l6-5 6 5 8-5 8 5 6-5 6 5V26C45 13 38 3 25 3z" fill="#f4f6f8" fill-opacity=".92" stroke="#c9d1d8" stroke-width="1"/><ellipse cx="18" cy="25" rx="3.6" ry="5" fill="#222"/><ellipse cx="32" cy="25" rx="3.6" ry="5" fill="#222"/><ellipse cx="25" cy="38" rx="4" ry="5.5" fill="#222"/></svg>`;
 
 // icone meteo DISEGNATE (SVG): sempre uguali su ogni dispositivo, al posto delle emoji (che a volte diventano un quadrato)
+// ---------------------------------------------------------------- lettura di un file .zip (per gli add-on)
+// Legge l'indice in fondo al file e scompatta ogni voce (salvata così com'è o compressa "deflate", come fanno tutti i
+// programmi di compressione) con il DecompressionStream del browser: niente librerie. Restituisce {nome: Uint8Array}.
+async function readZip(buf) {
+  const dv = new DataView(buf), u8 = new Uint8Array(buf);
+  let eocd = -1;
+  for (let i = u8.length - 22; i >= Math.max(0, u8.length - 65557); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) throw new Error("non è un file .zip valido");
+  const count = dv.getUint16(eocd + 10, true);
+  let p = dv.getUint32(eocd + 16, true);
+  const out = {}, dec = new TextDecoder();
+  for (let n = 0; n < count && n < 200; n++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) throw new Error("file .zip rovinato");
+    const method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true);
+    const nlen = dv.getUint16(p + 28, true), xlen = dv.getUint16(p + 30, true), clen = dv.getUint16(p + 32, true);
+    const loc = dv.getUint32(p + 42, true);
+    const name = dec.decode(u8.subarray(p + 46, p + 46 + nlen));
+    p += 46 + nlen + xlen + clen;
+    if (name.endsWith("/") || name.startsWith("__MACOSX/")) continue;
+    if (csize > 4_000_000) throw new Error(`"${name}" è troppo grande`);
+    const start = loc + 30 + dv.getUint16(loc + 26, true) + dv.getUint16(loc + 28, true);
+    const data = u8.slice(start, start + csize);
+    if (method === 0) out[name] = data;
+    else if (method === 8) out[name] = new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer());
+    else throw new Error(`"${name}" è compresso in un modo non supportato`);
+  }
+  return out;
+}
+
 function wxIcon(kind) {
   const cloud = '<path d="M7.3 17.3a3.5 3.5 0 0 1-.3-7 5 5 0 0 1 9.6-1.2 3.3 3.3 0 0 1-.3 6.6z" fill="#e6ebf0" stroke="#95a2af" stroke-width="1"/>';
   const wrap = (inner) => `<svg class="wxs" viewBox="0 0 24 24">${inner}</svg>`;
@@ -1631,6 +1660,18 @@ const STYLE = `
   /* strada e archi disegnati in un solo canvas: con tanti livelli grandi animati in CSS il WebView di Android
      a tratti non ne disegnava dei pezzi (blocchi di strada e di volta che sparivano e ricomparivano) */
   .pl3cv { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 3; } /* nomi dei paesi in 3D */
+  /* finestre degli add-on sulla mappa (spostabili tenendo premuto, come gli altri riquadri) */
+  .addwin { position: absolute; z-index: 1002; right: 70px; top: 120px; background: rgba(24,24,24,.88); border-radius: 12px;
+    padding: 4px; box-shadow: 0 2px 10px rgba(0,0,0,.45); touch-action: none; user-select: none; -webkit-user-select: none; cursor: pointer; }
+  .addwin .at { color: #fff; font: 600 12px sans-serif; padding: 2px 6px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .addwin img { display: block; border-radius: 8px; object-fit: cover; background: #333; pointer-events: none; }
+  .addwin .aerr { display: flex; align-items: center; justify-content: center; color: #bbb; font: 12px sans-serif; text-align: center; }
+  .addrow { display: flex; align-items: flex-start; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--divider-color, #333); }
+  .addrow .ai { flex: 1; min-width: 0; }
+  .addrow button { padding: 4px 10px; }
+  .addfile { display: inline-flex; align-items: center; padding: 6px 12px; border: 1px solid var(--divider-color, #ccc); border-radius: 8px;
+    cursor: pointer; position: relative; margin-top: 8px; }
+  .addfile input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
   .tf-cv { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
   .tf-label { position: absolute; left: 50%; top: 64%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center;
     gap: 2px; background: rgba(0, 0, 0, .6); color: #fff; padding: 8px 18px; border-radius: 18px; font: 600 16px sans-serif; white-space: nowrap; }
@@ -1945,6 +1986,7 @@ class NavigatorPanel extends HTMLElement {
     this._applyNight();
     this._loadTrips();
     this._loadGarage();
+    this._loadAddons();
     this._renderPlanSel();
     // nell'app NaviHA restano solo Viaggio: Live e Archivio sono nascosti
     if (this._isNaviHA()) {
@@ -3988,6 +4030,7 @@ class NavigatorPanel extends HTMLElement {
     }
     this._settings.view3d = this._3d;
     this._saveSettings();
+    this._renderAddons();
   }
 
   // errore nella vista 3D mentre la si usa: la si ricrea da zero, così non resta rotta
@@ -6723,7 +6766,7 @@ class NavigatorPanel extends HTMLElement {
       try { lay = JSON.parse(localStorage.getItem(`${STORE_KEY}-layout`) || "null"); } catch (e) { /* storage non disponibile */ }
     }
     this._layout = lay && typeof lay === "object" ? lay : {};
-    this._applyNavTopPos(); this._placePitchCtl(); this._applyFloat("spdbox");
+    this._applyNavTopPos(); this._placePitchCtl(); this._applyFloat("spdbox"); this._placeAddons();
   }
 
   _saveLayout() {
@@ -7150,6 +7193,7 @@ class NavigatorPanel extends HTMLElement {
       ["garage", "🚗", "Garage", ["Garage"]],
       ["auto", "🏠", "Automazioni", ["Pulsanti all'arrivo"]],
       ["poi", "📍", "Punti di interesse", ["Punti di interesse", "Distributori"]],
+      ["addon", "🧩", "Add-on", ["Add-on"]],
       ["debug", "🐞", "Debug", ["Debug"]],
     ];
     const groups = [...dlg.querySelectorAll(":scope > .grp")];
@@ -7305,6 +7349,7 @@ class NavigatorPanel extends HTMLElement {
         <div class="chips"><span class="chip ${s.fuelKind ? "" : "on"}" data-fkind="">Tutti</span>
           ${FUEL_KINDS.map(([k, n]) => `<span class="chip ${s.fuelKind === k ? "on" : ""}" data-fkind="${k}">${esc(n)}</span>`).join("")}</div>
       </div>
+      ${this._addonsHtml()}
       ${this._debug ? `<div class="grp"><h3>Debug</h3>
         <div class="note">Prove per verificare i vari casi senza aspettare che succedano davvero.</div>
         <label class="line"><span>Prova animazione galleria<div class="note">I visitatori dipendono dalla data: Natale (5 dic → 4 gen),
@@ -7367,6 +7412,7 @@ class NavigatorPanel extends HTMLElement {
       this._debugTunnel(d);
     });
     wrap.querySelector('[data-dbg="tunnelstop"]')?.addEventListener("click", () => this._debugTunnel(null));
+    this._bindAddonSettings(wrap);
     wrap.querySelector("[data-tileclear]")?.addEventListener("click", async () => {
       await tileClear();
       this._aheadDone = new Set();
@@ -8275,6 +8321,163 @@ class NavigatorPanel extends HTMLElement {
       if (tr?.length > 1) L.polyline(tr, { color: col, weight: 5, opacity: 0.9, interactive: false }).addTo(this._tripLayer);
     }
     this._schedule3d();
+  }
+
+  // ----------------------------------------------------------------- add-on
+  // Un add-on è un file .zip con dentro addon.json (e, se servono, immagini): descrive una finestra da mettere sulla
+  // mappa (2D, 3D o entrambe) con un'immagine da internet (aggiornata ogni tanto) o dello zip, e cosa fa al tocco.
+  // Nessun codice viene eseguito. Salvati in Home Assistant: valgono per tutti i dispositivi, auto compresa.
+
+  async _loadAddons() {
+    try { this._addons = (await this._hass.callWS({ type: "navigator/addons" })).addons || []; }
+    catch (e) { this._addons = []; } // integrazione vecchia
+    this._renderAddons();
+  }
+
+  async _addonCall(msg) {
+    const r = await this._hass.callWS({ type: "navigator/addons", ...msg });
+    this._addons = r.addons || [];
+    this._renderAddons();
+  }
+
+  _addonsHtml() {
+    const list = this._addons || [];
+    return `<div class="grp"><h3>Add-on</h3>
+      <div class="note">Aggiungono finestre alla mappa (per esempio un'immagine del meteo dal satellite). Si caricano da un file
+        .zip con dentro <b>addon.json</b>; valgono per tutti i dispositivi. Tieni premuta una finestra per spostarla.</div>
+      ${list.length ? list.map((a) => `<div class="addrow">
+        <div class="ai"><b>${esc(a.name)}</b>${a.version ? ` <span class="note">v${esc(a.version)}</span>` : ""}
+          ${a.description ? `<div class="note">${esc(a.description)}</div>` : ""}
+          <div class="note">Mappa ${a.window.views.map((v) => v.toUpperCase()).join(" e ")}${a.author ? ` · di ${esc(a.author)}` : ""}</div>
+          ${this._addonClosed?.has(a.id) && a.enabled ? `<button data-addon-show="${esc(a.id)}" style="margin-top:4px">Mostra di nuovo</button>` : ""}</div>
+        <span class="sw" title="Attivo"><input type="checkbox" data-addon-on="${esc(a.id)}" ${a.enabled ? "checked" : ""}><i></i></span>
+        <button data-addon-del="${esc(a.id)}" title="Togli">🗑</button></div>`).join("") : `<div class="note" style="margin-top:6px">Nessun add-on installato.</div>`}
+      <label class="addfile">➕ Aggiungi add-on (.zip)<input type="file" accept=".zip,application/zip" data-addon-file></label>
+    </div>`;
+  }
+
+  _bindAddonSettings(wrap) {
+    wrap.querySelector("[data-addon-file]")?.addEventListener("change", async (e) => {
+      const f = e.target.files?.[0];
+      e.target.value = "";
+      if (!f) return;
+      try {
+        const a = await this._addonFromZip(f);
+        await this._addonCall({ add: a });
+        this._addonClosed?.delete(a.id);
+        this._renderAddons();
+        this._msg(`Add-on «${a.name}» installato`);
+      } catch (err) {
+        this._msg(`Add-on non installato: ${err.message || err}`);
+      }
+      this._openSettings();
+    });
+    wrap.querySelectorAll("[data-addon-on]").forEach((el) => el.addEventListener("change", async () => {
+      try { await this._addonCall({ enable: el.dataset.addonOn, on: el.checked }); } catch (err) { this._msg(err.message || String(err)); }
+      this._openSettings();
+    }));
+    wrap.querySelectorAll("[data-addon-del]").forEach((el) => el.addEventListener("click", async () => {
+      const a = (this._addons || []).find((x) => x.id === el.dataset.addonDel);
+      if (!a || !confirm(`Togliere l'add-on «${a.name}»?`)) return;
+      try { await this._addonCall({ remove: a.id }); } catch (err) { this._msg(err.message || String(err)); }
+      this._openSettings();
+    }));
+    wrap.querySelectorAll("[data-addon-show]").forEach((el) => el.addEventListener("click", () => {
+      this._addonClosed?.delete(el.dataset.addonShow);
+      this._renderAddons();
+      this._openSettings();
+    }));
+  }
+
+  // dal file .zip: addon.json (anche dentro una cartella) e le immagini che usa, come data URL
+  async _addonFromZip(file) {
+    if (file.size > 6_000_000) throw new Error("il file è troppo grande");
+    const files = await readZip(await file.arrayBuffer());
+    const key = Object.keys(files).find((n) => n === "addon.json" || n.endsWith("/addon.json"));
+    if (!key) throw new Error("nello zip manca addon.json");
+    const base = key.slice(0, -"addon.json".length);
+    let a;
+    try { a = JSON.parse(new TextDecoder().decode(files[key])); } catch (e) { throw new Error(`addon.json non è valido (${e.message})`); }
+    const MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml" };
+    const imgs = {};
+    for (const [n, data] of Object.entries(files)) {
+      if (!n.startsWith(base)) continue;
+      const rel = n.slice(base.length), mime = MIME[rel.split(".").pop().toLowerCase()];
+      if (!mime) continue;
+      let bin = "";
+      for (let i = 0; i < data.length; i += 0x8000) bin += String.fromCharCode(...data.subarray(i, i + 0x8000));
+      imgs[rel] = `data:${mime};base64,${btoa(bin)}`;
+    }
+    const img = a.window?.image;
+    if (img && !/^https?:/.test(img) && !imgs[img]) throw new Error(`l'immagine "${img}" non è nello zip`);
+    a.files = img && imgs[img] ? { [img]: imgs[img] } : {};
+    return a;
+  }
+
+  // finestre sulla mappa: quelle degli add-on attivi, per la vista in uso (2D o 3D), non chiuse col tocco
+  _renderAddons() {
+    const wrap = this.$?.("mapwrap");
+    if (!wrap) return;
+    this._addonClosed ||= new Set();
+    const view = this._3d ? "3d" : "2d";
+    const want = (this._addons || []).filter((a) => a.enabled && a.window.views.includes(view) && !this._addonClosed.has(a.id));
+    const ids = new Set(want.map((a) => `addon-${a.id}`));
+    wrap.querySelectorAll(".addwin").forEach((el) => {
+      if (!ids.has(el.id)) { clearInterval(el._timer); el.remove(); }
+    });
+    want.forEach((a, i) => {
+      const id = `addon-${a.id}`, w = a.window;
+      const sig = JSON.stringify(w) + (a.files?.[w.image] ? "f" : "");
+      let el = this.$(id);
+      if (el && el._sig === sig) return;
+      if (el) { clearInterval(el._timer); el.remove(); }
+      el = document.createElement("div");
+      el.className = "addwin"; el.id = id; el._sig = sig;
+      el.title = `${a.name} (tieni premuto per spostarla)`;
+      el.style.top = `${120 + i * 30}px`;
+      el.innerHTML = `${w.title ? `<div class="at">${esc(w.title)}</div>` : ""}<img alt="" style="width:${w.width}px;height:${w.height}px">`;
+      const img = el.querySelector("img");
+      const load = () => {
+        const local = a.files?.[w.image];
+        img.src = local || (w.refresh ? `${w.image}${w.image.includes("?") ? "&" : "?"}_t=${Math.floor(Date.now() / (w.refresh * 1000))}` : w.image);
+      };
+      img.onerror = () => {
+        if (el.querySelector(".aerr")) return;
+        img.insertAdjacentHTML("afterend", `<div class="aerr" style="width:${w.width}px;height:${w.height}px">Immagine non disponibile</div>`);
+        img.style.display = "none";
+      };
+      img.onload = () => { el.querySelector(".aerr")?.remove(); img.style.display = ""; };
+      load();
+      if (w.refresh && !a.files?.[w.image]) el._timer = setInterval(load, w.refresh * 1000);
+      el.addEventListener("click", () => {
+        if (Date.now() - (this._longAt || 0) < 500) return; // fine di uno spostamento: non è un tocco
+        this._addonClick(a, el, load);
+      });
+      wrap.appendChild(el);
+      this._bindFloatDrag(id, `addon:${a.id}`);
+      this._applyFloat(id, `addon:${a.id}`);
+    });
+  }
+
+  _placeAddons() {
+    for (const a of this._addons || []) if (this.$(`addon-${a.id}`)) this._applyFloat(`addon-${a.id}`, `addon:${a.id}`);
+  }
+
+  async _addonClick(a, el, reload) {
+    const c = a.window.click;
+    if (c === "none") return;
+    if (c === "refresh") { reload(); return; }
+    if (c?.open) { window.open(c.open, "_blank", "noopener"); return; }
+    if (c?.service) {
+      const [dom, svc] = c.service.split(".");
+      try { await this._hass.callService(dom, svc, c.data || {}); this._msg(`${a.name}: fatto`); }
+      catch (err) { this._msg(`${a.name}: ${err.message || err}`); }
+      return;
+    }
+    // "close": si chiude fino al prossimo avvio (o a "Mostra di nuovo" nelle impostazioni)
+    this._addonClosed.add(a.id);
+    clearInterval(el._timer);
+    el.remove();
   }
 
   // ----------------------------------------------------------------- garage

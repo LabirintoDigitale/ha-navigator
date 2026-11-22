@@ -1,0 +1,16 @@
+{
+  "id": "meteo-satellite",
+  "name": "Meteo dal satellite",
+  "version": "1.0",
+  "author": "Navigator",
+  "description": "Immagine del satellite Meteosat (EUMETSAT) sull'Europa centrale, aggiornata ogni 15 minuti. Tocca per chiuderla.",
+  "window": {
+    "title": "🛰️ Satellite",
+    "image": "https://eumetview.eumetsat.int/static-images/latestImages/EUMETSAT_MSG_RGBNatColourEnhncd_CentralEurope.jpg",
+    "refresh": 900,
+    "width": 240,
+    "height": 170,
+    "views": ["2d", "3d"],
+    "click": "close"
+  }
+}

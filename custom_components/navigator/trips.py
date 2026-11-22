@@ -224,6 +224,80 @@ class TripDb:
             self._con.execute("DELETE FROM trips WHERE id = ? AND user_id = ?", (trip_id, user_id))
 
 
+# ---------------------------------------------------------------- add-on
+# Un add-on è una descrizione (niente codice da eseguire): una finestra sulla mappa che mostra un'immagine (da internet,
+# aggiornata ogni tanto, o contenuta nello zip) e cosa fa al tocco. Si carica come file .zip dalle impostazioni del
+# pannello; qui si controlla ogni campo e si salva in un archivio a parte (le immagini possono pesare).
+ADDON_MAX = 20
+ADDON_FILE_MAX = 1_500_000  # caratteri del data URL di un'immagine (~1,1 MB)
+ADDON_TOTAL_MAX = 3_000_000
+_ADDON_ID = re.compile(r"[^a-z0-9_-]+")
+_DATA_IMG = re.compile(r"^data:image/(png|jpeg|gif|webp|svg\+xml);base64,[A-Za-z0-9+/=]+$")
+_URL = re.compile(r"^https?://[^\s\"'<>]+$")
+_SERVICE = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
+
+
+def _addon_click(c: Any) -> Any:
+    """Cosa fa il tocco sulla finestra: "close" (si chiude), "refresh" (ricarica l'immagine), {"open": url} (apre un
+    indirizzo), {"service": "dominio.servizio", "data": {...}} (servizio di Home Assistant, es. accendere una luce)."""
+    if c in ("close", "refresh", "none"):
+        return c
+    if isinstance(c, dict):
+        if isinstance(c.get("open"), str) and _URL.match(c["open"]) and len(c["open"]) <= 500:
+            return {"open": c["open"]}
+        if isinstance(c.get("service"), str) and _SERVICE.match(c["service"]):
+            data = c.get("data") if isinstance(c.get("data"), dict) else {}
+            if len(json.dumps(data)) <= 2000:
+                return {"service": c["service"], "data": data}
+    return "close"
+
+
+def clean_addon(a: dict) -> dict:
+    if not isinstance(a, dict):
+        raise ValueError("add-on non valido")
+    aid = _ADDON_ID.sub("-", str(a.get("id") or a.get("name") or "").lower()).strip("-")[:40]
+    if not aid:
+        raise ValueError("all'add-on manca il nome (campo \"id\" o \"name\" in addon.json)")
+    files = {}
+    total = 0
+    for name, data in list((a.get("files") or {}).items())[:20]:
+        if isinstance(data, str) and len(data) <= ADDON_FILE_MAX and _DATA_IMG.match(data):
+            files[str(name)[:80]] = data
+            total += len(data)
+    if total > ADDON_TOTAL_MAX:
+        raise ValueError("le immagini dell'add-on sono troppo grandi (al massimo ~2 MB in tutto)")
+    w = a.get("window") if isinstance(a.get("window"), dict) else {}
+    img = str(w.get("image") or "")[:500]
+    if not (_URL.match(img) or img in files):
+        raise ValueError("la finestra dell'add-on non ha un'immagine valida (indirizzo http/https o file dello zip)")
+    views = [v for v in (w.get("views") or ["2d", "3d"]) if v in ("2d", "3d")] or ["2d", "3d"]
+
+    def num(v, lo, hi, d):
+        try:
+            return int(min(hi, max(lo, float(v))))
+        except (TypeError, ValueError):
+            return d
+
+    return {
+        "id": aid,
+        "name": str(a.get("name") or aid)[:60],
+        "version": str(a.get("version") or "")[:20],
+        "description": str(a.get("description") or "")[:300],
+        "author": str(a.get("author") or "")[:60],
+        "enabled": a.get("enabled") is not False,
+        "window": {
+            "title": str(w.get("title") or "")[:60],
+            "image": img,
+            "refresh": num(w.get("refresh"), 0, 86400, 0),
+            "width": num(w.get("width"), 80, 800, 240),
+            "height": num(w.get("height"), 60, 800, 160),
+            "views": views,
+            "click": _addon_click(w.get("click", "close")),
+        },
+        "files": files,
+    }
+
+
 class Trips:
     def __init__(self, hass: HomeAssistant) -> None:
         self._hass = hass
@@ -232,6 +306,8 @@ class Trips:
         self.garage: list[dict] = []  # garage condiviso: gli stessi veicoli per tutti gli utenti di Home Assistant
         self.selected: dict[str, str] = {}  # utente -> veicolo scelto l'ultima volta ("base" o id del garage)
         self.layouts: dict[str, dict] = {}
+        self._addon_store: Store[dict] = Store(hass, 1, f"{DOMAIN}.addons")
+        self.addons: list[dict] = []
 
     async def _run(self, fn, *args):
         return await self._hass.async_add_executor_job(fn, *args)
@@ -256,6 +332,7 @@ class Trips:
         self.garage = garage
         self.selected = stored.get("selected", {})
         self.layouts = stored.get("layouts", {})  # posizioni dei riquadri della guida (es. "auto": schermo di Android Auto)
+        self.addons = ((await self._addon_store.async_load()) or {}).get("addons", [])
         # versioni fino alla 1.9.84: viaggi nel file JSON. Si copiano nel database e poi si tolgono dal file
         users = stored.get("users")
         if users:
@@ -270,6 +347,24 @@ class Trips:
 
     def _save(self) -> None:
         self._store.async_delay_save(lambda: {"garage": self.garage, "selected": self.selected, "layouts": self.layouts}, 5)
+
+    async def addon_change(self, add: dict | None = None, remove: str | None = None, enable: str | None = None,
+                           on: bool = True) -> list[dict]:
+        """Aggiunge (o aggiorna, stesso id) un add-on, lo toglie, oppure lo attiva/disattiva."""
+        addons = list(self.addons)
+        if add is not None:
+            c = clean_addon(add)
+            addons = [x for x in addons if x["id"] != c["id"]]
+            if len(addons) >= ADDON_MAX:
+                raise ValueError(f"al massimo {ADDON_MAX} add-on: togline qualcuno")
+            addons.append(c)
+        if remove:
+            addons = [x for x in addons if x["id"] != remove]
+        if enable:
+            addons = [{**x, "enabled": bool(on)} if x["id"] == enable else x for x in addons]
+        self.addons = addons
+        await self._addon_store.async_save({"addons": addons})
+        return addons
 
     def set_layout(self, profile: str, data: dict) -> dict:
         """Posizioni dei riquadri spostati a mano (frazioni 0..1 della mappa) per un profilo (es. "auto")."""

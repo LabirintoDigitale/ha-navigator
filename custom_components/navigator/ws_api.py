@@ -34,7 +34,7 @@ def async_setup(hass: HomeAssistant) -> None:
         return
     for handler in (ws_info, ws_search, ws_reverse, ws_route, ws_place_save, ws_place_delete, ws_recent_clear, ws_nearby,
                     ws_poi_tile, ws_live, ws_weather, ws_trip_save, ws_trips, ws_trip, ws_trip_delete, ws_garage,
-                    ws_garage_save, ws_trip_start, ws_trip_append, ws_trip_finish, ws_poi_tiles, ws_poi_info, ws_live_all, ws_garage_select, ws_cameras_area, ws_imagery, ws_layout, ws_speed_limit):
+                    ws_garage_save, ws_trip_start, ws_trip_append, ws_trip_finish, ws_poi_tiles, ws_poi_info, ws_live_all, ws_garage_select, ws_cameras_area, ws_imagery, ws_layout, ws_speed_limit, ws_addons):
         websocket_api.async_register_command(hass, handler)
     hass.data[DATA_WS_REGISTERED] = True
 
@@ -467,6 +467,29 @@ async def ws_layout(hass: HomeAssistant, connection: websocket_api.ActiveConnect
         if "data" in msg:
             return {"data": trips.set_layout(msg["profile"], msg["data"])}
         return {"data": trips.layouts.get(msg["profile"][:40], {})}
+
+    await _run(connection, msg["id"], go())
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "navigator/addons",
+    vol.Optional("add"): dict,
+    vol.Optional("remove"): str,
+    vol.Optional("enable"): str,
+    vol.Optional("on", default=True): bool,
+})
+@websocket_api.async_response
+async def ws_addons(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Add-on installati (finestre sulla mappa). Con "add" aggiunge o aggiorna, con "remove" toglie, con "enable" (e
+    "on") attiva o disattiva; risponde sempre con l'elenco aggiornato."""
+    async def go():
+        trips = _data(hass).trips
+        if any(k in msg for k in ("add", "remove", "enable")):
+            try:
+                return {"addons": await trips.addon_change(msg.get("add"), msg.get("remove"), msg.get("enable"), msg["on"])}
+            except ValueError as err:
+                raise NavigatorError(str(err)) from err
+        return {"addons": trips.addons}
 
     await _run(connection, msg["id"], go())
 
