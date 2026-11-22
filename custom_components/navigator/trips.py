@@ -298,6 +298,41 @@ def clean_addon(a: dict) -> dict:
     }
 
 
+def addon_from_zip(raw: bytes) -> dict:
+    """Add-on da un file .zip (scaricato da un indirizzo): addon.json, anche dentro una cartella, più l'immagine che usa."""
+    import base64
+    import io
+    import zipfile
+
+    try:
+        z = zipfile.ZipFile(io.BytesIO(raw))
+    except zipfile.BadZipFile as err:
+        raise ValueError("non è un file .zip valido") from err
+    names = [n for n in z.namelist() if not n.endswith("/") and not n.startswith("__MACOSX/")][:200]
+    key = next((n for n in names if n == "addon.json" or n.endswith("/addon.json")), None)
+    if not key:
+        raise ValueError("nello zip manca addon.json")
+    base = key[: -len("addon.json")]
+    try:
+        a = json.loads(z.read(key)[:200_000].decode("utf-8-sig"))
+    except (ValueError, UnicodeDecodeError) as err:
+        raise ValueError(f"addon.json non è valido ({err})") from err
+    if not isinstance(a, dict):
+        raise ValueError("addon.json non è valido")
+    img = str((a.get("window") or {}).get("image") or "")
+    mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif", "webp": "image/webp",
+            "svg": "image/svg+xml"}.get(img.rsplit(".", 1)[-1].lower())
+    a["files"] = {}
+    if img and not img.startswith(("http://", "https://")):
+        if not mime or base + img not in names:
+            raise ValueError(f"l'immagine \"{img}\" non è nello zip")
+        info = z.getinfo(base + img)
+        if info.file_size > ADDON_FILE_MAX * 3 // 4:
+            raise ValueError(f"l'immagine \"{img}\" è troppo grande")
+        a["files"] = {img: f"data:{mime};base64,{base64.b64encode(z.read(info)).decode()}"}
+    return a
+
+
 class Trips:
     def __init__(self, hass: HomeAssistant) -> None:
         self._hass = hass

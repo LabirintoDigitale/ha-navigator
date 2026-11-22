@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.31";
+const PANEL_VERSION = "1.13.32";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -8358,6 +8358,11 @@ class NavigatorPanel extends HTMLElement {
         <span class="sw" title="Attivo"><input type="checkbox" data-addon-on="${esc(a.id)}" ${a.enabled ? "checked" : ""}><i></i></span>
         <button data-addon-del="${esc(a.id)}" title="Togli">🗑</button></div>`).join("") : `<div class="note" style="margin-top:6px">Nessun add-on installato.</div>`}
       <label class="addfile">➕ Aggiungi add-on (.zip)<input type="file" accept=".zip,application/zip" data-addon-file></label>
+      <div class="note" style="margin-top:10px">Oppure da un indirizzo (lo scarica Home Assistant: utile nell'app Companion, che
+        ricarica la pagina quando scegli un file):</div>
+      <div class="row" style="gap:6px;margin-top:4px"><input type="url" data-addon-url placeholder="https://…/add-on.zip" style="flex:1;min-width:0">
+        <button data-addon-urlgo>Installa</button></div>
+      <button data-addon-example style="margin-top:8px">🛰️ Installa l'esempio: meteo dal satellite</button>
       <details class="addinfo"><summary>ℹ️ Come si crea un add-on</summary>
         <ol>
           <li>Crea una cartella e dentro scrivi il file <b>addon.json</b> (esempio qui sotto).</li>
@@ -8392,7 +8397,28 @@ class NavigatorPanel extends HTMLElement {
     </div>`;
   }
 
+  async _addonInstallUrl(url) {
+    try {
+      this._msg("Scarico l'add-on…");
+      const before = new Set((this._addons || []).map((a) => a.id));
+      await this._addonCall({ url });
+      const a = (this._addons || []).find((x) => !before.has(x.id)) || (this._addons || []).at(-1);
+      if (a) this._addonClosed?.delete(a.id);
+      this._renderAddons();
+      this._msg(a ? `Add-on «${a.name}» installato` : "Add-on installato");
+    } catch (err) {
+      this._msg(`Add-on non installato: ${err.message || err}`);
+    }
+    this._openSettings();
+  }
+
   _bindAddonSettings(wrap) {
+    wrap.querySelector("[data-addon-urlgo]")?.addEventListener("click", () => {
+      const url = wrap.querySelector("[data-addon-url]")?.value.trim();
+      if (url) this._addonInstallUrl(url);
+    });
+    wrap.querySelector("[data-addon-example]")?.addEventListener("click", () =>
+      this._addonInstallUrl("https://raw.githubusercontent.com/LabirintoDigitale/ha-navigator/main/addons/meteo-satellite.zip"));
     wrap.querySelector("[data-addon-file]")?.addEventListener("change", async (e) => {
       const f = e.target.files?.[0];
       e.target.value = "";

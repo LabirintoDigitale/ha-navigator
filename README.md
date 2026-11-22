@@ -298,7 +298,9 @@ aggiornata ogni tanto, oppure contenuta nell'add-on) che fa qualcosa quando la t
 **meteo dal satellite** che si chiude al tocco, una webcam, la piantina di un parcheggio, un pulsante che accende la luce
 del cortile.
 
-- Si installano da **⚙ → 🧩 Add-on → ➕ Aggiungi add-on (.zip)**; lì ogni add-on si accende, si spegne o si toglie.
+- Si installano da **⚙ → 🧩 Add-on**: con **➕ Aggiungi add-on (.zip)** scegliendo il file, oppure scrivendo l'**indirizzo**
+  dello zip (lo scarica Home Assistant: comodo nell'app Companion, che ricarica la pagina quando scegli un file); il tasto
+  **🛰️ Installa l'esempio** installa con un tocco il meteo dal satellite. Lì ogni add-on si accende, si spegne o si toglie.
 - Sono salvati in Home Assistant: valgono per **tutti i dispositivi**, anche lo schermo dell'auto.
 - La finestra si **sposta tenendola premuta**, come gli altri riquadri; la posizione resta.
 - Un add-on è **solo una descrizione** (`addon.json`): **nessun codice viene eseguito**, quindi uno zip trovato in giro

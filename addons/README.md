@@ -1,7 +1,9 @@
 # Add-on di Navigator
 
 Un add-on aggiunge una **finestra sulla mappa** (2D, 3D o entrambe): mostra un'immagine e fa qualcosa quando la tocchi.
-Si installa dalle impostazioni del pannello: **Impostazioni → 🧩 Add-on → ➕ Aggiungi add-on (.zip)**.
+Si installa dalle impostazioni del pannello: **Impostazioni → 🧩 Add-on → ➕ Aggiungi add-on (.zip)**, oppure scrivendo
+l'indirizzo dello zip (lo scarica Home Assistant; nell'app Companion scegliere un file ricarica la pagina). L'esempio si
+installa anche col tasto **🛰️ Installa l'esempio**.
 Gli add-on sono salvati in Home Assistant e valgono per tutti i dispositivi (anche lo schermo dell'auto).
 La finestra si sposta tenendola premuta, come gli altri riquadri.
 

@@ -474,6 +474,7 @@ async def ws_layout(hass: HomeAssistant, connection: websocket_api.ActiveConnect
 @websocket_api.websocket_command({
     vol.Required("type"): "navigator/addons",
     vol.Optional("add"): dict,
+    vol.Optional("url"): str,
     vol.Optional("remove"): str,
     vol.Optional("enable"): str,
     vol.Optional("on", default=True): bool,
@@ -484,14 +485,42 @@ async def ws_addons(hass: HomeAssistant, connection: websocket_api.ActiveConnect
     "on") attiva o disattiva; risponde sempre con l'elenco aggiornato."""
     async def go():
         trips = _data(hass).trips
-        if any(k in msg for k in ("add", "remove", "enable")):
+        add = msg.get("add")
+        if msg.get("url"):  # installazione da un indirizzo: lo zip lo scarica Home Assistant (niente scelta del file)
+            add = await _addon_download(hass, msg["url"])
+        if add is not None or any(k in msg for k in ("remove", "enable")):
             try:
-                return {"addons": await trips.addon_change(msg.get("add"), msg.get("remove"), msg.get("enable"), msg["on"])}
+                return {"addons": await trips.addon_change(add, msg.get("remove"), msg.get("enable"), msg["on"])}
             except ValueError as err:
                 raise NavigatorError(str(err)) from err
         return {"addons": trips.addons}
 
     await _run(connection, msg["id"], go())
+
+
+async def _addon_download(hass: HomeAssistant, url: str) -> dict:
+    import aiohttp
+    from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+    from .trips import addon_from_zip
+
+    url = url.strip()
+    if not url.startswith(("https://", "http://")) or len(url) > 500:
+        raise NavigatorError("l'indirizzo deve iniziare con https://")
+    try:
+        async with async_get_clientsession(hass).get(url, timeout=aiohttp.ClientTimeout(total=30),
+                                                     headers={"User-Agent": f"HomeAssistant-Navigator/{VERSION}"}) as resp:
+            if resp.status != 200:
+                raise NavigatorError(f"download non riuscito (errore {resp.status})")
+            raw = await resp.content.read(6_000_001)
+    except (aiohttp.ClientError, TimeoutError) as err:
+        raise NavigatorError(f"download non riuscito: {err.__class__.__name__}") from err
+    if len(raw) > 6_000_000:
+        raise NavigatorError("il file è troppo grande")
+    try:
+        return await hass.async_add_executor_job(addon_from_zip, raw)
+    except ValueError as err:
+        raise NavigatorError(str(err)) from err
 
 
 @websocket_api.websocket_command({
