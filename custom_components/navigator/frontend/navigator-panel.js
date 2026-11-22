@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.30";
+const PANEL_VERSION = "1.13.31";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1669,6 +1669,11 @@ const STYLE = `
   .addrow { display: flex; align-items: flex-start; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--divider-color, #333); }
   .addrow .ai { flex: 1; min-width: 0; }
   .addrow button { padding: 4px 10px; }
+  .addinfo { margin-top: 12px; }
+  .addinfo summary { cursor: pointer; font-weight: 600; }
+  .addinfo ol { margin: 6px 0; padding-left: 20px; }
+  .addinfo pre { background: rgba(127,127,127,.15); border-radius: 8px; padding: 8px; font-size: 11px; overflow-x: auto; white-space: pre; }
+  .addinfo code { background: rgba(127,127,127,.15); border-radius: 4px; padding: 0 3px; font-size: 11px; }
   .addfile { display: inline-flex; align-items: center; padding: 6px 12px; border: 1px solid var(--divider-color, #ccc); border-radius: 8px;
     cursor: pointer; position: relative; margin-top: 8px; }
   .addfile input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
@@ -8353,6 +8358,37 @@ class NavigatorPanel extends HTMLElement {
         <span class="sw" title="Attivo"><input type="checkbox" data-addon-on="${esc(a.id)}" ${a.enabled ? "checked" : ""}><i></i></span>
         <button data-addon-del="${esc(a.id)}" title="Togli">🗑</button></div>`).join("") : `<div class="note" style="margin-top:6px">Nessun add-on installato.</div>`}
       <label class="addfile">➕ Aggiungi add-on (.zip)<input type="file" accept=".zip,application/zip" data-addon-file></label>
+      <details class="addinfo"><summary>ℹ️ Come si crea un add-on</summary>
+        <ol>
+          <li>Crea una cartella e dentro scrivi il file <b>addon.json</b> (esempio qui sotto).</li>
+          <li>Se l'immagine è un file tuo (png, jpg, gif, webp o svg, al massimo ~1 MB) mettilo nella cartella e scrivi il suo
+            nome in <code>"image"</code>; altrimenti metti l'indirizzo <code>https://…</code> dell'immagine.</li>
+          <li>Comprimi la cartella in un <b>.zip</b> e caricalo con <i>Aggiungi add-on</i>. Con lo stesso <code>id</code> sostituisce
+            quello installato (aggiornamento).</li>
+        </ol>
+        <pre>${esc(`{
+  "id": "meteo-satellite",
+  "name": "Meteo dal satellite",
+  "version": "1.0",
+  "description": "Meteosat sull'Europa, ogni 15 min",
+  "window": {
+    "title": "🛰️ Satellite",
+    "image": "https://…/immagine.jpg",
+    "refresh": 900,
+    "width": 240, "height": 170,
+    "views": ["2d", "3d"],
+    "click": "close"
+  }
+}`)}</pre>
+        <div class="note"><b>refresh</b>: ogni quanti secondi ricaricare l'immagine (0 = mai) · <b>views</b>: "2d", "3d" o entrambe ·
+          <b>click</b>: <code>"close"</code> chiude, <code>"refresh"</code> ricarica, <code>"none"</code> niente,
+          <code>{"open": "https://…"}</code> apre un indirizzo,
+          <code>{"service": "light.toggle", "data": {"entity_id": "light.cortile"}}</code> chiama un servizio di Home Assistant.</div>
+        <div class="note">Nessun codice viene eseguito: un add-on è solo questa descrizione.</div>
+        <div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap">
+          <a href="https://github.com/LabirintoDigitale/ha-navigator/raw/main/addons/meteo-satellite.zip" target="_blank" rel="noopener">⬇ Scarica l'esempio (meteo dal satellite)</a>
+          <a href="https://github.com/LabirintoDigitale/ha-navigator/tree/main/addons" target="_blank" rel="noopener">📖 Guida completa</a></div>
+      </details>
     </div>`;
   }
 

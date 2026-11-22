@@ -291,6 +291,71 @@ La stessa finestra si apre dal link *Problemi con il GPS?* nella sezione *Naviga
 Navigator considera "fuori percorso" una posizione a più di 45 m dalla strada (30 m a piedi o in bici, più l'imprecisione del GPS).
 Se resti fuori per almeno 6 secondi (e almeno due posizioni) ricalcola il percorso dalla posizione attuale; trascinando la mappa smette di seguirti finché non premi **Ricentra**.
 
+### Add-on (finestre sulla mappa)
+
+Gli **add-on** aggiungono a Navigator delle **finestre sulla mappa** (2D, 3D o entrambe): un'immagine (da internet,
+aggiornata ogni tanto, oppure contenuta nell'add-on) che fa qualcosa quando la tocchi. Per esempio l'immagine del
+**meteo dal satellite** che si chiude al tocco, una webcam, la piantina di un parcheggio, un pulsante che accende la luce
+del cortile.
+
+- Si installano da **⚙ → 🧩 Add-on → ➕ Aggiungi add-on (.zip)**; lì ogni add-on si accende, si spegne o si toglie.
+- Sono salvati in Home Assistant: valgono per **tutti i dispositivi**, anche lo schermo dell'auto.
+- La finestra si **sposta tenendola premuta**, come gli altri riquadri; la posizione resta.
+- Un add-on è **solo una descrizione** (`addon.json`): **nessun codice viene eseguito**, quindi uno zip trovato in giro
+  non può fare niente di nascosto.
+
+#### Come si crea un add-on
+
+1. Crea una cartella, per esempio `meteo-satellite`.
+2. Dentro scrivi il file **`addon.json`**:
+
+   ```json
+   {
+     "id": "meteo-satellite",
+     "name": "Meteo dal satellite",
+     "version": "1.0",
+     "author": "Io",
+     "description": "Immagine Meteosat sull'Europa centrale, ogni 15 minuti",
+     "window": {
+       "title": "🛰️ Satellite",
+       "image": "https://eumetview.eumetsat.int/static-images/latestImages/EUMETSAT_MSG_RGBNatColourEnhncd_CentralEurope.jpg",
+       "refresh": 900,
+       "width": 240,
+       "height": 170,
+       "views": ["2d", "3d"],
+       "click": "close"
+     }
+   }
+   ```
+
+3. Se l'immagine è un file tuo (png, jpg, gif, webp o svg, al massimo ~1 MB), mettilo nella stessa cartella e scrivi il
+   suo nome in `"image"` (es. `"image": "piantina.png"`).
+4. Comprimi la cartella in un **.zip** e caricalo da ⚙ → 🧩 Add-on.
+
+| Campo | Cosa è |
+|---|---|
+| `id` | nome breve senza spazi; un add-on con lo stesso `id` sostituisce quello installato (così si aggiorna) |
+| `name`, `version`, `author`, `description` | come compare nelle impostazioni |
+| `window.title` | scritta sopra l'immagine (facoltativa) |
+| `window.image` | indirizzo `https://…` dell'immagine oppure nome di un file dello zip |
+| `window.refresh` | ogni quanti secondi ricaricare l'immagine da internet (`0` = mai) |
+| `window.width`, `window.height` | grandezza dell'immagine in pixel (80–800) |
+| `window.views` | dove compare: `"2d"`, `"3d"` o tutte e due |
+| `window.click` | cosa fa il tocco, vedi sotto |
+
+Cosa può fare il tocco (`click`):
+
+| Valore | Effetto |
+|---|---|
+| `"close"` | chiude la finestra (torna al prossimo avvio o con *Mostra di nuovo* nelle impostazioni) |
+| `"refresh"` | ricarica subito l'immagine |
+| `"none"` | niente |
+| `{"open": "https://…"}` | apre un indirizzo |
+| `{"service": "light.toggle", "data": {"entity_id": "light.cortile"}}` | chiama un servizio di Home Assistant |
+
+L'esempio completo è nella cartella [`addons/meteo-satellite`](addons/meteo-satellite), già pronto da installare in
+[`addons/meteo-satellite.zip`](addons/meteo-satellite.zip); i dettagli sono in [`addons/README.md`](addons/README.md).
+
 ## Note
 
 - Il tasto **⛶** (sulla mappa e nella barra della guida) mette Navigator a **schermo intero**, anche in orizzontale: solo la mappa,
