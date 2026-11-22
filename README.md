@@ -293,121 +293,16 @@ Se resti fuori per almeno 6 secondi (e almeno due posizioni) ricalcola il percor
 
 ### Add-on (finestre sulla mappa)
 
-Gli **add-on** aggiungono a Navigator delle **finestre sulla mappa** (2D, 3D o entrambe): un'immagine (da internet,
-aggiornata ogni tanto, oppure contenuta nell'add-on) che fa qualcosa quando la tocchi. Per esempio l'immagine del
-**meteo dal satellite** che si chiude al tocco, una webcam, la piantina di un parcheggio, un pulsante che accende la luce
-del cortile.
+Gli **add-on** aggiungono **finestre sulla mappa** (2D e 3D), con un'immagine che si aggiorna da sola e dei tasti sopra:
+per esempio il **meteo dal satellite** (anche intorno a te, col pallino dove sei) o la **musica da Music Assistant**
+(copertina, play, stop, brano successivo, scelta della playlist). In guida si attaccano alle barre, uno alla volta.
 
-- Si installano da **⚙ → 🧩 Add-on**: con **➕ Aggiungi add-on (.zip)** scegliendo il file, oppure scrivendo l'**indirizzo**
-  dello zip (lo scarica Home Assistant: comodo nell'app Companion, che ricarica la pagina quando scegli un file); il tasto
-  **🛰️ Installa l'esempio** installa con un tocco il meteo dal satellite. Lì ogni add-on si accende, si spegne o si toglie.
-- Sono salvati in Home Assistant: valgono per **tutti i dispositivi**, anche lo schermo dell'auto.
-- La finestra si **sposta tenendola premuta**, come gli altri riquadri; la posizione resta.
-- Per ogni add-on si sceglie **dove compare**: in guida e in pianificazione, solo in guida o solo in pianificazione.
-- In guida gli add-on si attaccano alle barre (in verticale sotto la barra verde, in orizzontale a sinistra sopra la
-  barra in basso), uno alla volta: ▲▼ sull'immagine per passare al successivo, ⟳ per cambiare formato.
-- Un add-on è **solo una descrizione** (`addon.json`): **nessun codice viene eseguito**, quindi uno zip trovato in giro
-  non può fare niente di nascosto.
+- Si installano da **⚙ → 🧩 Add-on**: da un file .zip, da un indirizzo o con i tasti degli esempi.
+- Valgono per tutti i dispositivi, auto compresa; per ognuno scegli dove compare (in guida, in pianificazione o entrambe).
+- Sono solo descrizioni (`addon.json`): **nessun codice viene eseguito**.
 
-#### Come si crea un add-on
-
-1. Crea una cartella, per esempio `meteo-satellite`.
-2. Dentro scrivi il file **`addon.json`**:
-
-   ```json
-   {
-     "id": "meteo-satellite",
-     "name": "Meteo dal satellite",
-     "version": "1.0",
-     "author": "Io",
-     "description": "Immagine Meteosat sull'Europa centrale, ogni 15 minuti",
-     "window": {
-       "title": "🛰️ Satellite",
-       "image": "https://view.eumetsat.int/geoserver/ows?service=WMS&request=GetMap&version=1.3.0&layers=msg_fes:ir108,backgrounds:ne_boundary_lines_land&styles=&format=image/jpeg&crs=EPSG:4326&bbox=40,0,52,22&width=480&height=340",
-       "refresh": 900,
-       "width": 240,
-       "height": 170,
-       "views": ["2d", "3d"],
-       "click": "close"
-     }
-   }
-   ```
-
-3. Se l'immagine è un file tuo (png, jpg, gif, webp o svg, al massimo ~1 MB), mettilo nella stessa cartella e scrivi il
-   suo nome in `"image"` (es. `"image": "piantina.png"`).
-4. Comprimi la cartella in un **.zip** e caricalo da ⚙ → 🧩 Add-on.
-
-| Campo | Cosa è |
-|---|---|
-| `id` | nome breve senza spazi; un add-on con lo stesso `id` sostituisce quello installato (così si aggiorna) |
-| `name`, `version`, `author`, `description` | come compare nelle impostazioni |
-| `window.title` | scritta sopra l'immagine (facoltativa) |
-| `window.image` | indirizzo `https://…` dell'immagine oppure nome di un file dello zip |
-| `window.images` | facoltativo: immagini alternative, ognuna con un tasto nella finestra per passarci: `[{"label": "IR", "image": "https://…"}, {"label": "Colori", "image": "https://…"}]` (al massimo 8; la scelta resta) |
-| `window.refresh` | ogni quanti secondi ricaricare l'immagine da internet (`0` = mai) |
-| `window.width`, `window.height` | grandezza dell'immagine in pixel (80–800) |
-| `window.views` | dove compare: `"2d"`, `"3d"` o tutte e due |
-| `window.click` | cosa fa il tocco, vedi sotto |
-
-Cosa può fare il tocco (`click`):
-
-| Valore | Effetto |
-|---|---|
-| `"close"` | chiude la finestra (torna al prossimo avvio o con *Mostra di nuovo* nelle impostazioni) |
-| `"refresh"` | ricarica subito l'immagine |
-| `"none"` | niente |
-| `{"open": "https://…"}` | apre un indirizzo |
-| `{"service": "light.toggle", "data": {"entity_id": "light.cortile"}}` | chiama un servizio di Home Assistant |
-
-#### Posizione e percorso negli indirizzi
-
-Negli indirizzi (`image`, `images`, `open`) si possono scrivere dei **segnaposto fra graffe**: Navigator li sostituisce
-con i dati del momento e, se l'indirizzo usa la posizione, **ricarica l'immagine quando ti sposti** (circa il 15% della
-zona, controllo ogni 10 secondi). L'add-on non riceve altro: nessun codice, solo questi valori.
-
-| Segnaposto | Valore |
-|---|---|
-| `{lat}`, `{lon}` | la tua posizione (in guida il GPS, altrimenti il centro della mappa) |
-| `{bbox}` | zona intorno a te come `lat_min,lon_min,lat_max,lon_max` (l'ordine dei servizi WMS 1.3.0) |
-| `{bbox_xy}` | la stessa zona come `lon_min,lat_min,lon_max,lat_max` |
-| `{lat_min}`, `{lat_max}`, `{lon_min}`, `{lon_max}` | i bordi della zona |
-| `{zoom}` | zoom della mappa |
-| `{speed}`, `{heading}` | velocità (km/h) e direzione di marcia (gradi), in guida |
-| `{dest_lat}`, `{dest_lon}`, `{dest_name}` | l'arrivo del percorso |
-| `{left_km}`, `{left_min}` | quanto manca all'arrivo, in guida |
-
-La zona è grande `window.area_km` km dal centro in su e in giù (predefinito 100), larga secondo la forma dell'immagine;
-con `"marker": true` al centro dell'immagine compare un pallino rosso (*tu sei qui*).
-Con `"follow": false` la posizione si aggiorna solo quando l'immagine si ricarica (`refresh`), non mentre ti sposti:
-basta per immagini molto ampie.
-Su un'immagine con area **fissa** (non centrata su di te) il pallino va comunque dove sei se l'add-on dice quale zona
-copre: `"marker_bbox": [lat_min, lon_min, lat_max, lon_max]` (la stessa del `bbox` dell'indirizzo, in EPSG:4326).
-L'esempio [`satellite-zona`](addons/satellite-zona) mostra il satellite solo intorno a te:
-`"image": "https://view.eumetsat.int/geoserver/ows?…&bbox={bbox}&width=480&height=340"`.
-
-#### Tasti, elenchi e impostazioni (es. la musica)
-
-Una finestra può avere dei **tasti sopra l'immagine** (`window.buttons`, al massimo 8). Ogni tasto ha un'`icon` (e una
-`label`, che compare tenendoci il dito sopra) e fa una di queste cose:
-
-- `"service": "dominio.servizio", "data": {…}`: chiama un servizio di Home Assistant (es. `media_player.media_play`);
-- `"list": {"browse": "media_player.x", "path": ["Playlists"]}`: apre **dentro l'add-on** l'elenco dei contenuti di un
-  lettore, sfogliato come nel pannello *Media* di Home Assistant (`path` = cartelle in cui entrare); toccando una voce
-  parte su quel lettore, toccando una cartella si apre.
-
-Con `"settings"` l'add-on chiede delle **scelte** a chi lo usa, in ⚙ → 🧩 Add-on: per esempio
-`{"key": "player", "label": "Lettore", "type": "entity", "domain": "media_player"}` mostra l'elenco dei lettori;
-il valore scelto si usa ovunque come `{player}` (nei `data` dei tasti, nel `browse`, nell'immagine). Le scelte restano anche
-reinstallando l'add-on.
-
-Con `"image": "entity:{player}"` l'immagine è la **copertina** di quello che il lettore sta suonando (si aggiorna da sola)
-e con `"caption": "media"` sopra compaiono **titolo e artista**. Con `"click": "none"` il tocco sull'immagine non chiude.
-
-L'esempio [`music-assistant`](addons/music-assistant) mostra la musica di Music Assistant: copertina, ▶ play, ⏹ stop, ⏭ brano successivo e
-📃 l'elenco delle playlist da scegliere, sempre sul lettore scelto nelle impostazioni dell'add-on.
-
-L'esempio completo è nella cartella [`addons/meteo-satellite`](addons/meteo-satellite), già pronto da installare in
-[`addons/meteo-satellite.zip`](addons/meteo-satellite.zip); i dettagli sono in [`addons/README.md`](addons/README.md).
+📖 **[Guida completa agli add-on: come si usano e come si creano](addons/README.md)**, con tutti i campi, i segnaposto
+della posizione, i tasti, gli elenchi e gli esempi pronti.
 
 ## Note
 
