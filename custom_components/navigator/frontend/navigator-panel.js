@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.67";
+const PANEL_VERSION = "1.13.68";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -8503,7 +8503,8 @@ class NavigatorPanel extends HTMLElement {
             return `<label class="note" style="display:block;margin-top:4px">${esc(st.label)}<input data-addon-set="${esc(a.id)}" data-k="${esc(st.key)}" value="${esc(val)}" style="display:block;max-width:100%"></label>`;
           }).join("")}
           ${a.background ? (() => {
-            const u = this._addonFill(a.background, this._addonVarsA(a)).trim();
+            const u = a.background.includes("{ma_ingress}") ? (this._maIng?.url || "Music Assistant (in preparazione)")
+              : this._addonFill(a.background, this._addonVarsA(a)).trim();
             const open = !!this.shadowRoot?.querySelector(`#addbg iframe[data-a="${CSS.escape(a.id)}"]`);
             return `<div class="note" style="margin-top:4px">${u ? `Pagina in sottofondo: <code>${esc(u)}</code> ${open && a.enabled ? "· aperta ✔" : "· chiusa"}`
               : /ma_panel/.test(a.background) ? "⚠ Music Assistant non trovato nella barra laterale di Home Assistant" : "Pagina in sottofondo: nessuna"}</div>`;
@@ -8789,9 +8790,12 @@ class NavigatorPanel extends HTMLElement {
 
   // pagine tenute aperte in sottofondo dagli add-on attivi (es. il lettore web di Music Assistant su questo dispositivo:
   // finché la sua pagina è aperta il lettore "Web" esiste e suona). Invisibili, restano aperte finché c'è Navigator.
-  _addonBackground() {
+  async _addonBackground() {
     const root = this.shadowRoot;
     if (!root) return;
+    // Navigator aperto dentro un riquadro (anche per sbaglio, es. dentro la sua stessa pagina in sottofondo): nessuna
+    // pagina in sottofondo, sennò si aprirebbero una dentro l'altra
+    try { if (window.top !== window.self) return; } catch (e) { return; }
     let box = root.getElementById("addbg");
     if (!box) {
       box = document.createElement("div");
@@ -8802,6 +8806,12 @@ class NavigatorPanel extends HTMLElement {
     const want = new Map();
     for (const a of this._addons || []) {
       if (!a.enabled || !a.background) continue;
+      if (a.background.includes("{ma_ingress}")) { // Music Assistant come componente aggiuntivo: la sua pagina, da sola
+        const ing = await this._maIngress();
+        if (ing) want.set(a.id, ing);
+        else this._alog(`${a.id}: pagina di Music Assistant non disponibile (serve il componente aggiuntivo e un utente amministratore)`);
+        continue;
+      }
       const u = this._addonFill(a.background, this._addonVarsA(a)).trim();
       if (/^(https?:\/\/|\/(?!\/))[^\s"'<>]*$/.test(u)) want.set(a.id, u);
     }
@@ -9082,6 +9092,38 @@ class NavigatorPanel extends HTMLElement {
       v.left_min = Math.round((rt.summary.time * left) / Math.max(1, tot) / 60);
     } else { v.left_km = ""; v.left_min = ""; }
     return v;
+  }
+
+  // Pagina di Music Assistant installato come componente aggiuntivo (ingress), senza l'interfaccia di Home Assistant
+  // intorno: come fa la barra laterale, si chiede al Supervisor l'indirizzo del componente e una sessione (cookie),
+  // rinnovata ogni minuto. Funziona con un utente amministratore.
+  async _maIngress() {
+    if (this._maIng?.url) return this._maIng.url;
+    if (this._maIngBusy) return null;
+    this._maIngBusy = true;
+    try {
+      const pan = Object.values(this._hass?.panels || {}).find((p) => /music_assistant|music-assistant/i.test(`${p.url_path || ""} ${p.config?.ingress || ""}`));
+      const slug = pan?.config?.ingress;
+      if (!slug) { this._alog("Music Assistant: nessun componente aggiuntivo nella barra laterale"); return null; }
+      const sup = (endpoint, method = "get", data) => this._hass.callWS({ type: "supervisor/api", endpoint, method, ...(data ? { data } : {}) });
+      const info = await sup(`/addons/${slug}/info`);
+      const url = info?.ingress_url;
+      if (!url) { this._alog(`Music Assistant: il componente ${slug} non ha la pagina (ingress)`); return null; }
+      const sess = await sup("/ingress/session", "post");
+      const setCookie = (sid) => { document.cookie = `ingress_session=${sid};path=/api/hassio_ingress/;SameSite=Strict${location.protocol === "https:" ? ";Secure" : ""}`; };
+      setCookie(sess.session);
+      clearInterval(this._maIngT);
+      this._maIngT = setInterval(async () => { // la sessione scade: si rinnova (o se ne chiede una nuova)
+        try { await sup("/ingress/validate_session", "post", { session: this._maIng.sid }); }
+        catch (e) { try { const s2 = await sup("/ingress/session", "post"); this._maIng.sid = s2.session; setCookie(s2.session); } catch (e2) { /* niente */ } }
+      }, 60000);
+      this._maIng = { url, sid: sess.session };
+      this._alog(`Music Assistant: pagina del componente ${slug} → ${url}`);
+      return url;
+    } catch (e) {
+      this._alog(`Music Assistant: accesso alla pagina non riuscito: ${e.message || e.code || e}`);
+      return null;
+    } finally { this._maIngBusy = false; }
   }
 
   // debug: la pagina in sottofondo (es. Music Assistant) diventa visibile in un riquadro, per vedere cosa mostra e toccarla

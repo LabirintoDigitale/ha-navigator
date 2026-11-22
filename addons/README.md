@@ -197,8 +197,8 @@ Esempio di tasti per la musica:
 Home Assistant `/…`, anche con un segnaposto come `{ma_url}`) che Navigator tiene **aperto e invisibile** finché è aperto
 e l'add-on è acceso. Serve per esempio al **lettore web di Music Assistant**: il lettore "Web" di un dispositivo esiste
 solo mentre la pagina di Music Assistant è aperta lì; con la pagina in sottofondo resta disponibile mentre usi Navigator
-e la musica esce da quel dispositivo. Il segnaposto `{ma_panel}` è la pagina di Music Assistant dentro Home Assistant, trovata da sola fra i
-pannelli della barra laterale.
+e la musica esce da quel dispositivo. Con `"background": "{ma_ingress}"` Navigator apre direttamente la pagina di Music Assistant
+installato come componente aggiuntivo (la trova da solo nella barra laterale; serve un utente amministratore).
 
 ### Cosa fa il tocco sull'immagine
 
