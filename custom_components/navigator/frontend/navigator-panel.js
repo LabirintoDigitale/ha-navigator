@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.66";
+const PANEL_VERSION = "1.13.67";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -7482,7 +7482,8 @@ class NavigatorPanel extends HTMLElement {
         <h3 style="margin-top:14px">Registro degli add-on</h3>
         <div class="note">Cosa fanno gli add-on (pagine in sottofondo, lettori, comandi, errori), ultime 150 righe.</div>
         <pre id="alogbox" style="max-height:260px;overflow:auto;white-space:pre-wrap;font-size:11px;background:rgba(127,127,127,.15);border-radius:8px;padding:8px;margin:6px 0">${esc((this._alogLines || []).join("\n")) || "(vuoto)"}</pre>
-        <div class="row" style="gap:8px"><button data-dbg="alogclear">🗑 Svuota il registro</button></div>
+        <div class="row" style="gap:8px;flex-wrap:wrap"><button data-dbg="alogcopy">📋 Copia</button><button data-dbg="alogclear">🗑 Svuota il registro</button>
+          <button data-dbg="bgshow">👁 ${this._bgShown ? "Nascondi" : "Mostra"} la pagina in sottofondo</button></div>
       </div>` : ""}
       <div class="grp note">Le impostazioni valgono per questo dispositivo.</div>
     </div>`;
@@ -7541,6 +7542,16 @@ class NavigatorPanel extends HTMLElement {
     });
     wrap.querySelector('[data-dbg="tunnelstop"]')?.addEventListener("click", () => this._debugTunnel(null));
     wrap.querySelector('[data-dbg="alogclear"]')?.addEventListener("click", () => { this._alogLines = []; this._openSettings(); });
+    wrap.querySelector('[data-dbg="alogcopy"]')?.addEventListener("click", async () => {
+      const txt = (this._alogLines || []).join("\n");
+      try { await navigator.clipboard.writeText(txt); this._msg("Registro copiato"); }
+      catch (e) { // senza permesso agli appunti: si seleziona il testo da copiare a mano
+        const ta = document.createElement("textarea"); ta.value = txt; this.shadowRoot.appendChild(ta); ta.select();
+        try { document.execCommand("copy"); this._msg("Registro copiato"); } catch (e2) { this._msg("Copia non riuscita"); }
+        ta.remove();
+      }
+    });
+    wrap.querySelector('[data-dbg="bgshow"]')?.addEventListener("click", () => this._bgToggle());
     const alb = wrap.querySelector("#alogbox"); if (alb) alb.scrollTop = alb.scrollHeight;
     this._bindAddonSettings(wrap);
     wrap.querySelector("[data-tileclear]")?.addEventListener("click", async () => {
@@ -8816,6 +8827,7 @@ class NavigatorPanel extends HTMLElement {
             try {
               const deep = (root, n = 0) => { if (n > 6 || !root) return 0; let c = root.querySelectorAll("iframe").length;
                 root.querySelectorAll("*").forEach((e) => { if (e.shadowRoot) c += deep(e.shadowRoot, n + 1); }); return c; };
+              if (!f.isConnected || !f.contentDocument) return; // nel frattempo chiusa
               this._alog(`${id}: dopo 8 s nella pagina ci sono ${deep(f.contentDocument)} riquadri (iframe), titolo "${f.contentDocument.title}"`);
             } catch (e) { this._alog(`${id}: controllo della pagina non riuscito: ${e.message}`); }
           }, 8000);
@@ -9072,8 +9084,32 @@ class NavigatorPanel extends HTMLElement {
     return v;
   }
 
+  // debug: la pagina in sottofondo (es. Music Assistant) diventa visibile in un riquadro, per vedere cosa mostra e toccarla
+  _bgToggle() {
+    this._bgShown = !this._bgShown;
+    const box = this.shadowRoot.getElementById("addbg");
+    if (box) {
+      box.style.cssText = this._bgShown
+        ? "position:fixed;left:4vw;top:8vh;width:92vw;height:70vh;overflow:hidden;opacity:1;pointer-events:auto;z-index:5000;border:3px solid #1a73e8;border-radius:12px;background:#000;"
+        : "position:fixed;left:0;top:0;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;";
+      box.querySelectorAll("iframe").forEach((f) => { f.style.cssText = this._bgShown ? "width:100%;height:100%;border:0;" : "width:400px;height:600px;border:0;"; });
+      box.querySelector(".bgx")?.remove();
+      if (this._bgShown) {
+        const x = document.createElement("button");
+        x.className = "bgx"; x.textContent = "✕ Nascondi";
+        x.style.cssText = "position:absolute;right:8px;top:8px;z-index:2;padding:8px 14px;border:none;border-radius:8px;background:#1a73e8;color:#fff;font:600 14px sans-serif;";
+        x.addEventListener("click", () => this._bgToggle());
+        box.appendChild(x);
+      }
+    }
+    this._alog(`pagina in sottofondo ${this._bgShown ? "mostrata" : "nascosta"}${box?.querySelector("iframe") ? "" : " (nessuna pagina aperta)"}`);
+    const sw = this.$("setwrap");
+    if (this._bgShown) { if (sw) sw.hidden = true; } else this._openSettings();
+  }
+
   // registro degli add-on (ultime 150 righe, in memoria): si legge in ⚙ → Debug
   _alog(msg) {
+    if (!this._debug) return; // senza il debug non si tiene niente (nessuna memoria occupata)
     const t = new Date();
     const line = `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}:${String(t.getSeconds()).padStart(2, "0")} ${msg}`;
     (this._alogLines ||= []).push(line);
