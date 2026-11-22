@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.45";
+const PANEL_VERSION = "1.13.46";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1673,6 +1673,12 @@ const STYLE = `
   /* in orizzontale: attaccato sopra la barra in basso, a sinistra */
   .addock.bot { border-radius: 14px 14px 0 0; box-shadow: 0 -4px 12px rgba(0,0,0,.3); align-items: center; }
   .addock.bot .alist { flex: none; }
+  .addock.bot .addwin img { max-width: none; }
+  .addwin .dkover button { position: absolute; left: 50%; transform: translateX(-50%); border: none; border-radius: 8px;
+    background: rgba(0,0,0,.55); color: #fff; font: 600 14px sans-serif; padding: 3px 14px; cursor: pointer; pointer-events: auto; }
+  .addwin .dkover .up { top: 4px; }
+  .addwin .dkover .dn { bottom: 4px; }
+  .addwin .dkover small { font-size: 11px; opacity: .8; }
   .addock .alist { flex: 1; min-width: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;
     -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
   .addock .addwin { position: static; right: auto; left: auto; top: auto; box-shadow: none; background: rgba(255,255,255,.06);
@@ -8660,7 +8666,12 @@ class NavigatorPanel extends HTMLElement {
     const guida = !!(this._nav && this._isGuida() && !top.hidden && wins.length);
     const mode = !guida ? null : window.innerHeight > window.innerWidth ? "top" : bot && !bot.hidden ? "bot" : null;
     if (dock && dock.dataset.mode !== mode) { // via il blocco (o cambia tipo, ruotando il telefono)
-      for (const w of wins) { w.style.display = ""; wrap.appendChild(w); }
+      for (const w of wins) {
+        w.style.display = ""; wrap.appendChild(w);
+        const im = w.querySelector(".aimg img");
+        if (im?.dataset.w) { im.style.setProperty("width", `${im.dataset.w}px`); im.style.setProperty("height", `${im.dataset.h}px`); }
+        w.querySelector(".dkover")?.remove();
+      }
       const h = this._pcHome;
       if (h?.parent && pc.parentNode !== h.parent) h.parent.insertBefore(pc, h.next && h.next.parentNode === h.parent ? h.next : null);
       dock.remove(); dock = null;
@@ -8683,10 +8694,10 @@ class NavigatorPanel extends HTMLElement {
         y0 = null;
       });
       list0.addEventListener("click", (e) => { if (Date.now() - (this._dockSwiped || 0) < 400) e.stopPropagation(); }, true);
-      dock.addEventListener("click", (e) => {
+      dock.addEventListener("click", (e) => { // in cattura: la freccia dentro l'immagine non deve chiudere l'add-on
         const b = e.target.closest?.("[data-dk]");
         if (b) { e.stopPropagation(); go(+b.dataset.dk); }
-      });
+      }, true);
     }
     const list = dock.querySelector(".alist"), cr = dock.querySelector(".across");
     for (const w of wins) if (w.parentNode !== list) list.appendChild(w);
@@ -8694,12 +8705,22 @@ class NavigatorPanel extends HTMLElement {
     const n = wins.length, k = (((this._dockIdx || 0) % n) + n) % n;
     wins.forEach((w, i) => { w.style.display = i === k ? "" : "none"; });
     let nav = cr.querySelector(".dknav");
-    if (n > 1) {
+    if (n > 1 && mode === "top") {
       if (!nav) { nav = document.createElement("div"); nav.className = "dknav"; cr.appendChild(nav); }
       const html = `<button data-dk="-1" title="Add-on precedente">▲</button><span>${k + 1}/${n}</span><button data-dk="1" title="Add-on successivo">▼</button>`;
       if (nav.innerHTML !== html) nav.innerHTML = html;
     } else nav?.remove();
-    cr.hidden = mode === "bot" && n < 2;
+    cr.hidden = mode === "bot";
+    // in orizzontale le frecce stanno dentro l'immagine: ▲ in alto, ▼ in basso (col numero)
+    for (const [i, w] of wins.entries()) {
+      const box = w.querySelector(".aimg");
+      let ov = w.querySelector(".dkover");
+      if (mode === "bot" && n > 1 && i === k && box) {
+        if (!ov) { ov = document.createElement("div"); ov.className = "dkover"; box.appendChild(ov); }
+        const html = `<button data-dk="-1" class="up" title="Add-on precedente">▲</button><button data-dk="1" class="dn" title="Add-on successivo">▼ <small>${k + 1}/${n}</small></button>`;
+        if (ov.innerHTML !== html) ov.innerHTML = html;
+      } else ov?.remove();
+    }
     if (mode === "top") {
       top.classList.add("docked");
       const y = top.offsetTop + top.offsetHeight;
@@ -8710,7 +8731,20 @@ class NavigatorPanel extends HTMLElement {
       bot.classList.add("docked");
       const yTop = top.offsetTop + top.offsetHeight + 8;
       Object.assign(dock.style, { top: "", bottom: `${wrap.clientHeight - bot.offsetTop}px`, left: `${bot.offsetLeft}px`, width: "" });
-      list.style.maxHeight = `${Math.max(120, bot.offsetTop - yTop - 16)}px`;
+      const avail = Math.max(120, bot.offsetTop - yTop - 16); // spazio fra la barra verde e quella in basso
+      list.style.maxHeight = "";
+      // l'add-on intero (titolo, immagine, tasti) deve starci: si rimpicciolisce l'immagine, con le sue proporzioni
+      const w = wins[k], im = w?.querySelector(".aimg img");
+      if (im) {
+        if (!im.dataset.w) { im.dataset.w = parseFloat(im.style.width) || 240; im.dataset.h = parseFloat(im.style.height) || 160; }
+        const W0 = +im.dataset.w, H0 = +im.dataset.h;
+        im.style.setProperty("width", `${W0}px`, "important"); im.style.setProperty("height", `${H0}px`, "important");
+        const extra = w.offsetHeight - im.offsetHeight; // titolo, tasti e margini
+        const h = Math.max(60, Math.min(H0, avail - extra));
+        im.style.setProperty("height", `${Math.round(h)}px`, "important"); im.style.setProperty("width", `${Math.round((h * W0) / H0)}px`, "important");
+        const bt = w.querySelector(".abtns");
+        if (bt) bt.style.maxWidth = im.style.width;
+      }
     }
   }
 
