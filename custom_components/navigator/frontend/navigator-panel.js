@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.28";
+const PANEL_VERSION = "1.13.29";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -4511,24 +4511,26 @@ class NavigatorPanel extends HTMLElement {
       } catch (e) { R.v = 0; R.fog = 0; R.snow = 0; }
       R.at = Date.now(); R.lat = c.lat; R.lon = c.lng; R.busy = false;
     }
-    // previsioni lungo il percorso: conta solo il punto del percorso PIÙ VICINO alla vista (entro 4 km). Prima valeva
-    // qualsiasi avviso entro 8 km in linea d'aria: su una salita a tornanti la neve prevista in cima arrivava anche
-    // alla partenza, dove invece è prevista pioggia
-    let route = 0, routeFog = 0, routeSnow = 0, best = null, bestD;
+    // previsioni lungo il percorso: conta solo il punto del percorso PIÙ VICINO (lungo la strada in guida, in linea
+    // d'aria fuori), entro 3 km. Se c'è, decide lui che tempo fa (pioggia, neve, nebbia): è la stessa icona che vedi
+    // sulla mappa lì sopra. Altrimenti vale il meteo di adesso nel punto che stai guardando.
+    let best = null, bestD;
     const along = this._nav?.snap && this._wx?.rt === this._geom?.(this._result?.routes?.[this._sel]) ? this._nav.snap.along : null;
-    bestD = along != null ? 6000 : 4000; // entro 6 km di strada in guida, 4 km in linea d'aria fuori
+    bestD = 3000;
     for (const p of this._wx?.done ? this._wx.items : []) {
-      // in guida: il punto più vicino LUNGO LA STRADA (sui tornanti la linea d'aria inganna); altrimenti alla vista
       const dd = along != null ? Math.abs(p.along - along) : distM(p.ll, [c.lat, c.lng]);
       if (dd < bestD) { bestD = dd; best = p; }
     }
+    let snow, fog, rainV;
     if (best?.warn?.length) {
-      if (best.warn.some((w) => /Pioggia|Temporale/.test(w.txt))) route = 0.55;
-      if (best.warn.some((w) => /Neve/.test(w.txt))) routeSnow = 0.6;
-      if (best.warn.some((w) => w.kind === "fog")) routeFog = 0.65;
+      const has = (re) => best.warn.some((w) => re.test(w.txt));
+      snow = has(/Neve/) ? 0.6 : 0;
+      rainV = !snow && has(/Pioggia|Temporale/) ? 0.55 : 0;
+      fog = best.warn.some((w) => w.kind === "fog") ? 0.65 : (R.fog || 0);
+    } else {
+      snow = R.snow || 0; rainV = R.v || 0; fog = R.fog || 0;
     }
-    const snow = Math.max(R.snow || 0, routeSnow), fog = Math.max(R.fog || 0, routeFog);
-    const v = snow > 0 ? 0 : Math.max(R.v, route); // con la neve niente pioggia insieme
+    const v = snow > 0 ? 0 : rainV; // con la neve niente pioggia insieme
     if (v !== this._rainHere || fog !== this._fogHere || snow !== this._snowHere) {
       this._rainHere = v; this._fogHere = fog; this._snowHere = snow; this._scheduleCloudDraw?.();
     }
