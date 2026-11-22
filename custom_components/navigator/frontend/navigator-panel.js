@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.69";
+const PANEL_VERSION = "1.13.70";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -9106,8 +9106,11 @@ class NavigatorPanel extends HTMLElement {
     this._maIngBusy = true;
     try {
       const pan = Object.values(this._hass?.panels || {}).find((p) => /music_assistant|music-assistant/i.test(`${p.url_path || ""} ${p.config?.ingress || ""}`));
-      const slug = pan?.config?.ingress;
-      if (!slug) { this._alog("Music Assistant: nessun componente aggiuntivo nella barra laterale"); return null; }
+      // nome del componente aggiuntivo: dal pannello (config.ingress) o, se manca, il suo indirizzo (per i componenti
+      // aggiuntivi coincide, es. "d5369777_music_assistant")
+      const slug = pan?.config?.ingress || pan?.url_path;
+      if (!slug) { this._alog("Music Assistant: nessun pannello di Music Assistant nella barra laterale"); return null; }
+      this._alog(`Music Assistant: pannello "${pan.url_path}" (${pan.component_name || "?"}), componente ${slug}`);
       const sup = (endpoint, method = "get", data) => this._hass.callWS({ type: "supervisor/api", endpoint, method, ...(data ? { data } : {}) });
       const info = await sup(`/addons/${slug}/info`);
       const url = info?.ingress_url;
