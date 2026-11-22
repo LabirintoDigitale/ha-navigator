@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.61";
+const PANEL_VERSION = "1.13.62";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1706,6 +1706,12 @@ const STYLE = `
   .addock .addwin.botmode { padding: 0; background: none; }
   .addwin.botmode .at, .addwin.botmode .abtns { display: none; }
   .addwin.botmode .aimg img { border-radius: 10px; }
+  .addwin .anopic { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 6px; padding: 30px 12px 50px; text-align: center; color: #fff; pointer-events: none;
+    background: radial-gradient(circle at 50% 40%, #2b3a55, #141821); border-radius: 8px; }
+  .addwin .anopic .ic { font-size: 34px; }
+  .addwin .anopic b { font: 700 20px sans-serif; line-height: 1.2; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical; }
   .addwin .acap { position: absolute; left: 0; right: 0; top: 0; padding: 4px 8px; color: #fff; font: 600 12px sans-serif;
     background: linear-gradient(rgba(0,0,0,.7), transparent); border-radius: 8px 8px 0 0; white-space: nowrap; overflow: hidden;
     text-overflow: ellipsis; pointer-events: none; }
@@ -8671,13 +8677,22 @@ class NavigatorPanel extends HTMLElement {
           const pic = st?.attributes?.entity_picture || "";
           if (pic && img.dataset.pic !== pic) { img.dataset.pic = pic; img.src = pic; img.style.display = ""; el.querySelector(".aerr")?.remove(); }
           if (!pic) { img.dataset.pic = ""; img.removeAttribute("src"); img.style.visibility = "hidden"; } else img.style.visibility = "";
+          // senza copertina (es. molte radio): il nome grande al centro
+          let np = el.querySelector(".anopic");
+          const at0 = st?.attributes || {};
+          const name = el._cyc?.items?.[el._cyc.idx]?.title || at0.media_channel || at0.media_title || at0.media_album_name || at0.source || "";
+          if (!pic && st && st.state !== "unavailable" && name) {
+            if (!np) { np = document.createElement("div"); np.className = "anopic"; img.after(np); }
+            const isRadio = !!el._cyc || /radio/i.test(`${at0.media_content_type || ""} ${at0.media_content_id || ""}`);
+            np.innerHTML = `<span class="ic">${isRadio ? "📻" : "🎵"}</span><b>${esc(name)}</b>`;
+          } else np?.remove();
           const cap = el.querySelector(".acap");
           if (cap) {
             const t = [st?.attributes?.media_title, st?.attributes?.media_artist].filter(Boolean).join(" — ");
             cap.textContent = !st ? "Scegli il lettore nelle impostazioni dell'add-on"
               : st.state === "unavailable" ? "Lettore non disponibile: scegline un altro nelle impostazioni"
                 : t || (st.state === "off" ? "Spento" : st.state === "idle" ? "In attesa" : st.state === "paused" ? "In pausa" : "");
-            cap.hidden = !cap.textContent;
+            cap.hidden = !cap.textContent || !!el.querySelector(".anopic"); // col nome grande al centro non si ripete in alto
           }
           return;
         }
