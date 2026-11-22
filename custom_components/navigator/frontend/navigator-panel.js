@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.58";
+const PANEL_VERSION = "1.13.59";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -9057,7 +9057,21 @@ class NavigatorPanel extends HTMLElement {
         await play0(c);
         el._cyc = cycle ? { items: playable, idx: playable.indexOf(c), play: play0 } : null;
       };
-      list.innerHTML = items.map((c, i) => `<button data-i="${i}">${c.thumbnail ? `<img src="${esc(c.thumbnail)}" alt="">` : "<i>🎵</i>"}<span>${esc(c.title || "")}</span></button>`).join("");
+      list.innerHTML = items.map((c, i) => `<button data-i="${i}">${c.thumbnail ? `<img data-src="${esc(c.thumbnail)}" alt="">` : "<i>🎵</i>"}<span>${esc(c.title || "")}</span></button>`).join("");
+      // copertine: quelle interne di Home Assistant (/api/…) si aprono solo con la firma, come nel pannello Media; quelle
+      // che non si caricano (es. dal server di Music Assistant in http) lasciano il posto all'icona
+      list.querySelectorAll("img[data-src]").forEach(async (im) => {
+        im.onerror = () => im.replaceWith(Object.assign(document.createElement("i"), { textContent: "🎵" }));
+        let src = im.dataset.src;
+        if (src.startsWith("/")) {
+          try { src = (await this._hass.callWS({ type: "auth/sign_path", path: src, expires: 3600 })).path; } catch (e) { /* senza firma */ }
+        } else if (location.protocol === "https:" && src.startsWith("http:")) {
+          // in https un'immagine in http non si carica: la scarica Home Assistant (indirizzo firmato) e la passa qui
+          try { src = (await this._hass.callWS({ type: "auth/sign_path", path: `/api/navigator/image?url=${encodeURIComponent(src)}`, expires: 3600 })).path; }
+          catch (e) { im.onerror(); return; }
+        }
+        im.src = src;
+      });
       list.querySelectorAll("[data-i]").forEach((btn) => btn.addEventListener("click", async () => {
         const c = items[+btn.dataset.i];
         if (c.can_play) {

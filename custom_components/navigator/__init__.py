@@ -88,6 +88,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: NavigatorConfigEntry) ->
         await hass.http.async_register_static_paths(
             [StaticPathConfig(STATIC_URL, str(Path(__file__).parent / "frontend"), False)]
         )
+        from .imgproxy import ImageProxyView
+
+        hass.http.register_view(ImageProxyView())  # copertine in http (es. Music Assistant) passate al pannello
         hass.data[DATA_STATIC_REGISTERED] = True
 
     await panel_custom.async_register_panel(
