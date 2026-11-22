@@ -54,6 +54,6 @@ Dentro lo zip (anche in una cartella) ci vuole `addon.json`; se l'immagine è ne
 
 ## Esempio
 
-La cartella [`meteo-satellite`](meteo-satellite) è l'add-on del meteo dal satellite (immagine Meteosat di EUMETSAT,
-gratuita). Per installarlo comprimi la cartella in un .zip (oppure scarica `meteo-satellite.zip`) e caricalo dalle
+La cartella [`meteo-satellite`](meteo-satellite) è l'add-on del meteo dal satellite (immagine Meteosat a infrarossi di EUMETSAT,
+gratuita, dal servizio EUMETView). Per installarlo comprimi la cartella in un .zip (oppure scarica `meteo-satellite.zip`) e caricalo dalle
 impostazioni.

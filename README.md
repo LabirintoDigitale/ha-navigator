@@ -320,7 +320,7 @@ del cortile.
      "description": "Immagine Meteosat sull'Europa centrale, ogni 15 minuti",
      "window": {
        "title": "🛰️ Satellite",
-       "image": "https://eumetview.eumetsat.int/static-images/latestImages/EUMETSAT_MSG_RGBNatColourEnhncd_CentralEurope.jpg",
+       "image": "https://view.eumetsat.int/geoserver/ows?service=WMS&request=GetMap&version=1.3.0&layers=msg_fes:ir108,backgrounds:ne_boundary_lines_land&styles=&format=image/jpeg&crs=EPSG:4326&bbox=40,0,52,22&width=480&height=340",
        "refresh": 900,
        "width": 240,
        "height": 170,
