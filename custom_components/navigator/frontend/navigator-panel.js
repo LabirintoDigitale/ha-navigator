@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.49";
+const PANEL_VERSION = "1.13.50";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1666,26 +1666,27 @@ const STYLE = `
   .addwin.moved { right: auto; } /* spostata: solo left/top (prima con right restava tirata per tutta la larghezza) */
   /* blocco della guida: barra verde in alto, sotto gli add-on (scorrono) con la croce a fianco */
   .navtop.docked { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
-  .navbot.docked { border-top-left-radius: 0; }
-  .navbot.docked .info { justify-content: center; text-align: center; } /* con gli add-on attaccati sopra a sinistra: dati al centro */
+  .navbot.docked { }
+
   .addock { position: absolute; z-index: 1001; display: flex; gap: 8px; align-items: flex-start; padding: 8px;
     background: rgba(24,24,24,.92); border-radius: 0 0 14px 14px; box-sizing: border-box; box-shadow: 0 4px 12px rgba(0,0,0,.35); }
   /* in orizzontale: attaccato sopra la barra in basso, a sinistra */
-  .addock.bot { border-radius: 14px 14px 0 0; box-shadow: 0 -4px 12px rgba(0,0,0,.3); align-items: center; }
+  .addock.bot { border-radius: 14px; box-shadow: 0 2px 12px rgba(0,0,0,.4); align-items: center; padding: 4px; z-index: 1002; }
   .addock.bot .alist { flex: none; }
   .addock.bot { overflow: hidden; }
   .addock.bot .addwin img { max-width: none; }
   .addock.bot .aimg { display: flex; justify-content: center; } /* immagine rimpicciolita al centro della cornice */
-  .addwin.botmode { display: grid; grid-template-columns: auto auto; column-gap: 8px; align-items: stretch; }
-  .addwin.botmode .at { grid-column: 1 / 3; }
-  .addwin.botmode .aimg { grid-column: 1; }
-  .addwin.botmode .abtns { display: none; }
-  .addwin.botmode .aside { grid-column: 2; display: flex; flex-direction: column; justify-content: space-between; gap: 8px; }
-  .addwin .aside button { border: none; border-radius: 8px; background: rgba(255,255,255,.14); color: #fff; font: 600 14px sans-serif;
-    padding: 10px 12px; cursor: pointer; }
-  .addwin .aside .fmt { background: #1a73e8; }
-  .addwin .aside .dk { display: flex; flex-direction: column; align-items: center; gap: 6px; color: #ddd; font: 600 12px sans-serif; }
-  .addwin .aside .dk button { width: 100%; }
+  .addock .addwin.botmode { padding: 0; background: none; }
+  .addwin.botmode .at, .addwin.botmode .abtns { display: none; }
+  .addwin.botmode .aimg img { border-radius: 10px; }
+  .addwin .aov button { position: absolute; border: none; border-radius: 8px; background: rgba(0,0,0,.55); color: #fff;
+    font: 600 13px sans-serif; padding: 4px 8px; cursor: pointer; line-height: 1.2; }
+  .addwin .aov .fmt { left: 4px; top: 4px; font-size: 15px; }
+  .addwin .aov .fmt small { font-size: 11px; opacity: .85; }
+  .addwin .aov .up { right: 4px; top: 4px; }
+  .addwin .aov .dn { right: 4px; bottom: 4px; }
+  .addwin .aov .cnt { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); color: #fff; font: 600 11px sans-serif;
+    background: rgba(0,0,0,.55); border-radius: 6px; padding: 2px 5px; }
   .addwin .dkover button { position: absolute; left: 50%; transform: translateX(-50%); border: none; border-radius: 8px;
     background: rgba(0,0,0,.55); color: #fff; font: 600 14px sans-serif; padding: 3px 14px; cursor: pointer; pointer-events: auto; }
   .addwin .dkover .up { top: 4px; }
@@ -8584,10 +8585,8 @@ class NavigatorPanel extends HTMLElement {
         // immagine con area fissa: il pallino va dove sei (fuori dall'area: nascosto)
         const me = el.querySelector(".ame"), bb = w.marker_bbox;
         if (me && bb && v._pos) {
-          const fx = (v._pos[1] - bb[1]) / (bb[3] - bb[1]), fy = (bb[2] - v._pos[0]) / (bb[2] - bb[0]);
-          const ok = fx >= 0 && fx <= 1 && fy >= 0 && fy <= 1;
-          me.style.display = ok ? "" : "none";
-          me.style.left = `${(fx * 100).toFixed(2)}%`; me.style.top = `${(fy * 100).toFixed(2)}%`;
+          me.dataset.fx = (v._pos[1] - bb[1]) / (bb[3] - bb[1]); me.dataset.fy = (bb[2] - v._pos[0]) / (bb[2] - bb[0]);
+          this._addonMarker(el, w.width / w.height);
         }
         const u = this._addonFill(u0, v);
         img.src = w.refresh ? `${u}${u.includes("?") ? "&" : "?"}_t=${Math.floor(Date.now() / (w.refresh * 1000))}` : u;
@@ -8698,6 +8697,7 @@ class NavigatorPanel extends HTMLElement {
       if (h?.parent && pc.parentNode !== h.parent) h.parent.insertBefore(pc, h.next && h.next.parentNode === h.parent ? h.next : null);
       dock.remove(); dock = null;
       top.classList.remove("docked"); bot?.classList.remove("docked");
+      if (bot) bot.style.paddingLeft = "";
       this._placeAddons();
     }
     if (!mode) return;
@@ -8733,23 +8733,24 @@ class NavigatorPanel extends HTMLElement {
       if (nav.innerHTML !== html) nav.innerHTML = html;
     } else nav?.remove();
     cr.hidden = mode === "bot";
-    // in orizzontale: a destra dell'immagine una colonna con un tasto che cicla i formati (il nome del formato va in
-    // alto al posto del nome dell'add-on) e, se ce n'è più d'uno, i tasti per passare all'add-on successivo
+    // in orizzontale: tasti piccoli SOPRA l'immagine, sul suo bordo: in alto a sinistra l'icona che cicla i formati (col
+    // nome del formato, piccolo), a destra ▲▼ per passare all'add-on successivo
     for (const [i, w] of wins.entries()) {
       w.querySelector(".dkover")?.remove();
       if (mode !== "bot" || i !== k) { if (w.classList.contains("botmode")) this._addonSize(w); continue; }
       w.classList.add("botmode");
-      let side = w.querySelector(".aside");
-      if (!side) { side = document.createElement("div"); side.className = "aside"; w.appendChild(side); }
+      const box = w.querySelector(".aimg");
+      let ov = box?.querySelector(".aov");
+      if (box && !ov) { ov = document.createElement("div"); ov.className = "aov"; box.appendChild(ov); }
+      if (!ov) continue;
       const fmt = w._fmtLabel?.();
-      const html = `${fmt ? `<button class="fmt" title="Cambia formato">⟳ Formato</button>` : ""}${n > 1
-        ? `<div class="dk"><button data-dk="-1" title="Add-on precedente">▲</button><span>${k + 1}/${n}</span><button data-dk="1" title="Add-on successivo">▼</button></div>` : ""}`;
-      if (side.innerHTML !== html) {
-        side.innerHTML = html;
-        side.querySelector(".fmt")?.addEventListener("click", (e) => { e.stopPropagation(); w._fmtNext?.(); });
+      const html = `${fmt ? `<button class="fmt" title="Cambia formato">⟳<small></small></button>` : ""}${n > 1
+        ? `<button class="up" data-dk="-1" title="Add-on precedente">▲</button><span class="cnt">${k + 1}/${n}</span><button class="dn" data-dk="1" title="Add-on successivo">▼</button>` : ""}`;
+      if (ov.dataset.h !== html) {
+        ov.dataset.h = html; ov.innerHTML = html;
+        ov.querySelector(".fmt")?.addEventListener("click", (e) => { e.stopPropagation(); w._fmtNext?.(); });
       }
-      const t = w.querySelector(".at");
-      w._onFmt = () => { if (t) t.textContent = w._fmtLabel?.() || w._title || ""; };
+      w._onFmt = () => { const sm = ov.querySelector(".fmt small"); if (sm) sm.textContent = ` ${w._fmtLabel?.() || ""}`; };
       w._onFmt();
     }
     if (mode === "top") {
@@ -8761,34 +8762,47 @@ class NavigatorPanel extends HTMLElement {
       list.style.maxHeight = `${Math.max(140, Math.round((lim - y) * 0.75) - 16)}px`;
     } else {
       bot.classList.add("docked");
-      const yTop = top.offsetTop + top.offsetHeight + 8;
-      Object.assign(dock.style, { top: "", bottom: `${wrap.clientHeight - bot.offsetTop}px`, left: `${bot.offsetLeft}px`, width: "" });
-      const avail = Math.max(120, bot.offsetTop - yTop - 16); // spazio fra la barra verde e quella in basso
+      // tutta l'altezza a sinistra: da sotto la barra verde fino al fondo della barra in basso; le scritte della barra
+      // in basso cominciano a destra dell'add-on
+      const y0 = top.offsetTop + top.offsetHeight + 8, y1 = bot.offsetTop + bot.offsetHeight;
+      Object.assign(dock.style, { top: `${y0}px`, bottom: "", left: `${bot.offsetLeft}px`, width: "", maxHeight: "" });
       list.style.maxHeight = "";
-      dock.style.maxHeight = `${avail + 16}px`; // mai sopra la barra verde
-      // l'add-on intero (titolo, immagine, tasti) deve starci: si rimpicciolisce l'immagine, con le sue proporzioni
+      const H = Math.max(80, y1 - y0 - 8); // altezza dell'immagine (dentro i bordi del riquadro)
       const w = wins[k], im = w?.querySelector(".aimg img");
       if (im) {
         if (!im.dataset.w) { im.dataset.w = parseFloat(im.style.width) || 240; im.dataset.h = parseFloat(im.style.height) || 160; }
         const W0 = +im.dataset.w, H0 = +im.dataset.h;
-        // l'immagine prende tutta l'altezza fra le due barre (con le sue proporzioni); a destra la colonna dei tasti
         w.style.width = "";
-        im.style.setProperty("width", `${W0}px`, "important"); im.style.setProperty("height", `${H0}px`, "important");
-        const extra = w.offsetHeight - im.offsetHeight; // titolo e margini (i tasti dei formati qui non ci sono)
-        let h = Math.max(60, avail - extra);
-        h = Math.min(h, (wrap.clientWidth * 0.5 * H0) / W0); // larga al massimo metà schermo
-        im.style.setProperty("height", `${Math.round(h)}px`, "important"); im.style.setProperty("width", `${Math.round((h * W0) / H0)}px`, "important");
+        // l'immagine riempie tutto il riquadro: alta quanto lo spazio, larga in proporzione ma al massimo il 55% dello
+        // schermo (oltre si taglia ai lati, al centro resta quello che conta)
+        const iw = Math.min((H * W0) / H0, wrap.clientWidth * 0.55);
+        im.style.setProperty("height", `${Math.round(H)}px`, "important"); im.style.setProperty("width", `${Math.round(iw)}px`, "important");
+        this._addonMarker(w, W0 / H0);
       }
+      dock.style.height = `${H + 8}px`;
+      bot.style.paddingLeft = `${dock.offsetWidth + 14}px`;
     }
   }
 
   // l'add-on torna alla sua grandezza (dopo essere stato rimpicciolito in orizzontale nel blocco della guida)
+  // pallino "sei qui" su un'immagine con area fissa: tiene conto del ritaglio quando l'immagine riempie un riquadro di
+  // forma diversa (in orizzontale nel blocco della guida)
+  _addonMarker(el, ar) {
+    const me = el.querySelector(".ame"), img = el.querySelector(".aimg img");
+    if (!me || !img || me.dataset.fx == null) return;
+    const bw = img.clientWidth, bh = img.clientHeight, fx = +me.dataset.fx, fy = +me.dataset.fy;
+    if (!bw || !bh) return;
+    let rw = bw, rh = bw / ar;
+    if (rh < bh) { rh = bh; rw = bh * ar; }
+    const x = (bw - rw) / 2 + fx * rw, y = (bh - rh) / 2 + fy * rh;
+    me.style.display = x >= 0 && x <= bw && y >= 0 && y <= bh ? "" : "none";
+    me.style.left = `${x.toFixed(1)}px`; me.style.top = `${y.toFixed(1)}px`;
+  }
+
   _addonSize(w) {
     if (w.classList.contains("botmode")) {
       w.classList.remove("botmode");
-      w.querySelector(".aside")?.remove();
-      const t = w.querySelector(".at");
-      if (t && w._title) t.textContent = w._title;
+      w.querySelector(".aov")?.remove();
       w._onFmt = null;
     }
     const im = w.querySelector(".aimg img"), bt = w.querySelector(".abtns");
@@ -8796,6 +8810,8 @@ class NavigatorPanel extends HTMLElement {
       im.style.removeProperty("width"); im.style.removeProperty("height");
       im.style.width = `${im.dataset.w}px`; im.style.height = `${im.dataset.h}px`;
       if (bt) bt.style.maxWidth = `${im.dataset.w}px`;
+      const ar = +im.dataset.w / +im.dataset.h;
+      requestAnimationFrame(() => this._addonMarker(w, ar));
       delete im.dataset.w; delete im.dataset.h;
     }
     w.style.width = "";
