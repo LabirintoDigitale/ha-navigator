@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.32";
+const PANEL_VERSION = "1.13.33";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1669,6 +1669,12 @@ const STYLE = `
   .addrow { display: flex; align-items: flex-start; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--divider-color, #333); }
   .addrow .ai { flex: 1; min-width: 0; }
   .addrow button { padding: 4px 10px; }
+  .addmenu { position: absolute; z-index: 1008; width: 220px; background: rgba(24,24,24,.95); border-radius: 12px; padding: 6px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.5); display: flex; flex-direction: column; gap: 4px; }
+  .addmenu .mt { color: #ddd; font: 600 12px sans-serif; padding: 4px 6px; }
+  .addmenu button { text-align: left; background: rgba(255,255,255,.08); color: #fff; border: none; border-radius: 8px;
+    padding: 10px; font: 14px sans-serif; cursor: pointer; }
+  .addmenu small { opacity: .6; }
   .addinfo { margin-top: 12px; }
   .addinfo summary { cursor: pointer; font-weight: 600; }
   .addinfo ol { margin: 6px 0; padding-left: 20px; }
@@ -2063,6 +2069,9 @@ class NavigatorPanel extends HTMLElement {
     $("pitchctl").querySelectorAll("[data-z]").forEach((b) => b.addEventListener("click", () => { if (tapOk()) this._zoomStep(+b.dataset.z); }));
     this._bindFloatDrag("pitchctl");
     this._bindFloatDrag("spdbox");
+    // tocco sul riquadro della velocità: elenco degli add-on che non sono sulla mappa, per farli comparire
+    $("spdbox").addEventListener("click", () => { if (tapOk()) this._addonMenu(); });
+    $("spdbox").style.cursor = "pointer";
     this._netWatch();
     this._loadLayout();
     this._map.on("moveend zoomend", () => this._sync3d());
@@ -8519,6 +8528,42 @@ class NavigatorPanel extends HTMLElement {
       this._bindFloatDrag(id, `addon:${a.id}`);
       this._applyFloat(id, `addon:${a.id}`);
     });
+  }
+
+  // elenco sotto il riquadro della velocità: add-on attivi ma chiusi, o spenti, che si possono mostrare in questa vista
+  _addonMenu() {
+    const wrap = this.$("mapwrap"), box = this.$("spdbox");
+    let menu = this.$("addmenu");
+    if (menu) { menu.remove(); return; } // secondo tocco: si chiude
+    this._addonClosed ||= new Set();
+    const view = this._3d ? "3d" : "2d";
+    const list = (this._addons || []).filter((a) => a.window.views.includes(view) && (!a.enabled || this._addonClosed.has(a.id)));
+    menu = document.createElement("div");
+    menu.id = "addmenu"; menu.className = "addmenu";
+    menu.innerHTML = list.length
+      ? `<div class="mt">🧩 Mostra sulla mappa</div>${list.map((a) => `<button data-a="${esc(a.id)}">${esc(a.window.title || a.name)}${a.enabled ? "" : " <small>(spento)</small>"}</button>`).join("")}`
+      : `<div class="mt">🧩 ${(this._addons || []).length ? "Tutti gli add-on sono già sulla mappa" : "Nessun add-on: aggiungili da ⚙ → Add-on"}</div>`;
+    const wr = wrap.getBoundingClientRect(), br = box.getBoundingClientRect();
+    menu.style.left = `${Math.max(4, Math.min(wrap.clientWidth - 230, br.left - wr.left))}px`;
+    menu.style.top = `${br.bottom - wr.top + 6}px`;
+    wrap.appendChild(menu);
+    menu.querySelectorAll("[data-a]").forEach((b) => b.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const a = (this._addons || []).find((x) => x.id === b.dataset.a);
+      menu.remove();
+      if (!a) return;
+      this._addonClosed.delete(a.id);
+      if (!a.enabled) {
+        try { await this._addonCall({ enable: a.id, on: true }); } catch (err) { this._msg(err.message || String(err)); }
+      } else this._renderAddons();
+    }));
+    // tocco altrove: si chiude
+    const off = (e) => {
+      if (e.composedPath().includes(menu) || e.composedPath().includes(box)) return;
+      menu.remove(); this.shadowRoot.removeEventListener("pointerdown", off, true);
+    };
+    setTimeout(() => this.shadowRoot.addEventListener("pointerdown", off, true), 0);
+    setTimeout(() => menu.isConnected || this.shadowRoot.removeEventListener("pointerdown", off, true), 15000);
   }
 
   _placeAddons() {
