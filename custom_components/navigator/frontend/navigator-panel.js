@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.48";
+const PANEL_VERSION = "1.13.49";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1676,6 +1676,16 @@ const STYLE = `
   .addock.bot { overflow: hidden; }
   .addock.bot .addwin img { max-width: none; }
   .addock.bot .aimg { display: flex; justify-content: center; } /* immagine rimpicciolita al centro della cornice */
+  .addwin.botmode { display: grid; grid-template-columns: auto auto; column-gap: 8px; align-items: stretch; }
+  .addwin.botmode .at { grid-column: 1 / 3; }
+  .addwin.botmode .aimg { grid-column: 1; }
+  .addwin.botmode .abtns { display: none; }
+  .addwin.botmode .aside { grid-column: 2; display: flex; flex-direction: column; justify-content: space-between; gap: 8px; }
+  .addwin .aside button { border: none; border-radius: 8px; background: rgba(255,255,255,.14); color: #fff; font: 600 14px sans-serif;
+    padding: 10px 12px; cursor: pointer; }
+  .addwin .aside .fmt { background: #1a73e8; }
+  .addwin .aside .dk { display: flex; flex-direction: column; align-items: center; gap: 6px; color: #ddd; font: 600 12px sans-serif; }
+  .addwin .aside .dk button { width: 100%; }
   .addwin .dkover button { position: absolute; left: 50%; transform: translateX(-50%); border: none; border-radius: 8px;
     background: rgba(0,0,0,.55); color: #fff; font: 600 14px sans-serif; padding: 3px 14px; cursor: pointer; pointer-events: auto; }
   .addwin .dkover .up { top: 4px; }
@@ -8582,14 +8592,21 @@ class NavigatorPanel extends HTMLElement {
         const u = this._addonFill(u0, v);
         img.src = w.refresh ? `${u}${u.includes("?") ? "&" : "?"}_t=${Math.floor(Date.now() / (w.refresh * 1000))}` : u;
       };
+      const pick = (k) => {
+        sel = k;
+        try { localStorage.setItem(selKey, String(sel)); } catch (err) { /* niente */ }
+        el.querySelectorAll(".abtns button").forEach((x) => x.classList.toggle("on", +x.dataset.k === k));
+        el.querySelector(".aerr")?.remove(); img.style.display = "";
+        load();
+        el._onFmt?.();
+      };
+      el._fmtLabel = () => (alts ? alts[sel].label : "");
+      el._fmtNext = () => { if (alts) pick((sel + 1) % alts.length); };
+      el._title = w.title || a.name;
       el.querySelectorAll(".abtns button").forEach((b) => b.addEventListener("click", (e) => {
         e.stopPropagation(); // il tasto cambia immagine, non è un tocco sulla finestra
         if (Date.now() - (this._longAt || 0) < 500) return;
-        sel = +b.dataset.k;
-        try { localStorage.setItem(selKey, String(sel)); } catch (err) { /* niente */ }
-        el.querySelectorAll(".abtns button").forEach((x) => x.classList.toggle("on", x === b));
-        el.querySelector(".aerr")?.remove(); img.style.display = "";
-        load();
+        pick(+b.dataset.k);
       }));
       img.onerror = () => {
         // errore momentaneo del server: si riprova fra un minuto (non solo al prossimo aggiornamento)
@@ -8716,15 +8733,24 @@ class NavigatorPanel extends HTMLElement {
       if (nav.innerHTML !== html) nav.innerHTML = html;
     } else nav?.remove();
     cr.hidden = mode === "bot";
-    // in orizzontale le frecce stanno dentro l'immagine: ▲ in alto, ▼ in basso (col numero)
+    // in orizzontale: a destra dell'immagine una colonna con un tasto che cicla i formati (il nome del formato va in
+    // alto al posto del nome dell'add-on) e, se ce n'è più d'uno, i tasti per passare all'add-on successivo
     for (const [i, w] of wins.entries()) {
-      const box = w.querySelector(".aimg");
-      let ov = w.querySelector(".dkover");
-      if (mode === "bot" && n > 1 && i === k && box) {
-        if (!ov) { ov = document.createElement("div"); ov.className = "dkover"; box.appendChild(ov); }
-        const html = `<button data-dk="-1" class="up" title="Add-on precedente">▲</button><button data-dk="1" class="dn" title="Add-on successivo">▼ <small>${k + 1}/${n}</small></button>`;
-        if (ov.innerHTML !== html) ov.innerHTML = html;
-      } else ov?.remove();
+      w.querySelector(".dkover")?.remove();
+      if (mode !== "bot" || i !== k) { if (w.classList.contains("botmode")) this._addonSize(w); continue; }
+      w.classList.add("botmode");
+      let side = w.querySelector(".aside");
+      if (!side) { side = document.createElement("div"); side.className = "aside"; w.appendChild(side); }
+      const fmt = w._fmtLabel?.();
+      const html = `${fmt ? `<button class="fmt" title="Cambia formato">⟳ Formato</button>` : ""}${n > 1
+        ? `<div class="dk"><button data-dk="-1" title="Add-on precedente">▲</button><span>${k + 1}/${n}</span><button data-dk="1" title="Add-on successivo">▼</button></div>` : ""}`;
+      if (side.innerHTML !== html) {
+        side.innerHTML = html;
+        side.querySelector(".fmt")?.addEventListener("click", (e) => { e.stopPropagation(); w._fmtNext?.(); });
+      }
+      const t = w.querySelector(".at");
+      w._onFmt = () => { if (t) t.textContent = w._fmtLabel?.() || w._title || ""; };
+      w._onFmt();
     }
     if (mode === "top") {
       for (const w of wins) this._addonSize(w); // in verticale sempre alla grandezza normale
@@ -8745,13 +8771,12 @@ class NavigatorPanel extends HTMLElement {
       if (im) {
         if (!im.dataset.w) { im.dataset.w = parseFloat(im.style.width) || 240; im.dataset.h = parseFloat(im.style.height) || 160; }
         const W0 = +im.dataset.w, H0 = +im.dataset.h;
-        // la cornice resta larga quanto l'add-on (i tasti dei formati non vanno a capo più del solito): cala solo l'immagine
-        w.style.width = `${W0 + 8}px`;
-        const bt = w.querySelector(".abtns");
-        if (bt) bt.style.maxWidth = `${W0}px`;
+        // l'immagine prende tutta l'altezza fra le due barre (con le sue proporzioni); a destra la colonna dei tasti
+        w.style.width = "";
         im.style.setProperty("width", `${W0}px`, "important"); im.style.setProperty("height", `${H0}px`, "important");
-        const extra = w.offsetHeight - im.offsetHeight; // titolo, tasti e margini
-        const h = Math.max(40, Math.min(H0, avail - extra));
+        const extra = w.offsetHeight - im.offsetHeight; // titolo e margini (i tasti dei formati qui non ci sono)
+        let h = Math.max(60, avail - extra);
+        h = Math.min(h, (wrap.clientWidth * 0.5 * H0) / W0); // larga al massimo metà schermo
         im.style.setProperty("height", `${Math.round(h)}px`, "important"); im.style.setProperty("width", `${Math.round((h * W0) / H0)}px`, "important");
       }
     }
@@ -8759,6 +8784,13 @@ class NavigatorPanel extends HTMLElement {
 
   // l'add-on torna alla sua grandezza (dopo essere stato rimpicciolito in orizzontale nel blocco della guida)
   _addonSize(w) {
+    if (w.classList.contains("botmode")) {
+      w.classList.remove("botmode");
+      w.querySelector(".aside")?.remove();
+      const t = w.querySelector(".at");
+      if (t && w._title) t.textContent = w._title;
+      w._onFmt = null;
+    }
     const im = w.querySelector(".aimg img"), bt = w.querySelector(".abtns");
     if (im?.dataset.w) {
       im.style.removeProperty("width"); im.style.removeProperty("height");
