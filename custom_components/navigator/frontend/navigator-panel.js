@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.50";
+const PANEL_VERSION = "1.13.51";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -8727,17 +8727,13 @@ class NavigatorPanel extends HTMLElement {
     const n = wins.length, k = (((this._dockIdx || 0) % n) + n) % n;
     wins.forEach((w, i) => { w.style.display = i === k ? "" : "none"; });
     let nav = cr.querySelector(".dknav");
-    if (n > 1 && mode === "top") {
-      if (!nav) { nav = document.createElement("div"); nav.className = "dknav"; cr.appendChild(nav); }
-      const html = `<button data-dk="-1" title="Add-on precedente">▲</button><span>${k + 1}/${n}</span><button data-dk="1" title="Add-on successivo">▼</button>`;
-      if (nav.innerHTML !== html) nav.innerHTML = html;
-    } else nav?.remove();
+    nav?.remove(); // le frecce ora stanno sopra l'immagine, in verticale e in orizzontale
     cr.hidden = mode === "bot";
     // in orizzontale: tasti piccoli SOPRA l'immagine, sul suo bordo: in alto a sinistra l'icona che cicla i formati (col
     // nome del formato, piccolo), a destra ▲▼ per passare all'add-on successivo
     for (const [i, w] of wins.entries()) {
       w.querySelector(".dkover")?.remove();
-      if (mode !== "bot" || i !== k) { if (w.classList.contains("botmode")) this._addonSize(w); continue; }
+      if (i !== k) { if (w.classList.contains("botmode")) this._addonSize(w); continue; }
       w.classList.add("botmode");
       const box = w.querySelector(".aimg");
       let ov = box?.querySelector(".aov");
@@ -8754,12 +8750,24 @@ class NavigatorPanel extends HTMLElement {
       w._onFmt();
     }
     if (mode === "top") {
-      for (const w of wins) this._addonSize(w); // in verticale sempre alla grandezza normale
       top.classList.add("docked");
       const y = top.offsetTop + top.offsetHeight;
-      Object.assign(dock.style, { top: `${y}px`, bottom: "", left: `${top.offsetLeft}px`, width: `${top.offsetWidth}px` });
+      Object.assign(dock.style, { top: `${y}px`, bottom: "", left: `${top.offsetLeft}px`, width: `${top.offsetWidth}px`, height: "" });
       const lim = (bot && !bot.hidden ? bot.offsetTop : wrap.clientHeight) - 8;
-      list.style.maxHeight = `${Math.max(140, Math.round((lim - y) * 0.75) - 16)}px`;
+      const maxH = Math.max(140, Math.round((lim - y) * 0.75) - 16);
+      list.style.maxHeight = `${maxH}px`;
+      // l'immagine riempie tutta la larghezza dell'add-on (accanto alla croce), con le sue proporzioni; se sarebbe troppo
+      // alta si taglia sopra e sotto
+      const w = wins[k], im = w?.querySelector(".aimg img");
+      if (im) {
+        if (!im.dataset.w) { im.dataset.w = parseFloat(im.style.width) || 240; im.dataset.h = parseFloat(im.style.height) || 160; }
+        const W0 = +im.dataset.w, H0 = +im.dataset.h;
+        w.style.width = "";
+        const iw = Math.max(120, list.clientWidth), ih = Math.min((iw * H0) / W0, maxH);
+        im.style.setProperty("width", `${Math.round(iw)}px`, "important"); im.style.setProperty("height", `${Math.round(ih)}px`, "important");
+        im.style.setProperty("max-width", "100%", "important");
+        this._addonMarker(w, W0 / H0);
+      }
     } else {
       bot.classList.add("docked");
       // tutta l'altezza a sinistra: da sotto la barra verde fino al fondo della barra in basso; le scritte della barra
@@ -8807,7 +8815,7 @@ class NavigatorPanel extends HTMLElement {
     }
     const im = w.querySelector(".aimg img"), bt = w.querySelector(".abtns");
     if (im?.dataset.w) {
-      im.style.removeProperty("width"); im.style.removeProperty("height");
+      im.style.removeProperty("width"); im.style.removeProperty("height"); im.style.removeProperty("max-width");
       im.style.width = `${im.dataset.w}px`; im.style.height = `${im.dataset.h}px`;
       if (bt) bt.style.maxWidth = `${im.dataset.w}px`;
       const ar = +im.dataset.w / +im.dataset.h;
