@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.46";
+const PANEL_VERSION = "1.13.47";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1673,7 +1673,9 @@ const STYLE = `
   /* in orizzontale: attaccato sopra la barra in basso, a sinistra */
   .addock.bot { border-radius: 14px 14px 0 0; box-shadow: 0 -4px 12px rgba(0,0,0,.3); align-items: center; }
   .addock.bot .alist { flex: none; }
+  .addock.bot { overflow: hidden; }
   .addock.bot .addwin img { max-width: none; }
+  .addock.bot .aimg { display: flex; justify-content: center; } /* immagine rimpicciolita al centro della cornice */
   .addwin .dkover button { position: absolute; left: 50%; transform: translateX(-50%); border: none; border-radius: 8px;
     background: rgba(0,0,0,.55); color: #fff; font: 600 14px sans-serif; padding: 3px 14px; cursor: pointer; pointer-events: auto; }
   .addwin .dkover .up { top: 4px; }
@@ -8670,6 +8672,7 @@ class NavigatorPanel extends HTMLElement {
         w.style.display = ""; wrap.appendChild(w);
         const im = w.querySelector(".aimg img");
         if (im?.dataset.w) { im.style.setProperty("width", `${im.dataset.w}px`); im.style.setProperty("height", `${im.dataset.h}px`); }
+        w.style.width = "";
         w.querySelector(".dkover")?.remove();
       }
       const h = this._pcHome;
@@ -8733,17 +8736,20 @@ class NavigatorPanel extends HTMLElement {
       Object.assign(dock.style, { top: "", bottom: `${wrap.clientHeight - bot.offsetTop}px`, left: `${bot.offsetLeft}px`, width: "" });
       const avail = Math.max(120, bot.offsetTop - yTop - 16); // spazio fra la barra verde e quella in basso
       list.style.maxHeight = "";
+      dock.style.maxHeight = `${avail + 16}px`; // mai sopra la barra verde
       // l'add-on intero (titolo, immagine, tasti) deve starci: si rimpicciolisce l'immagine, con le sue proporzioni
       const w = wins[k], im = w?.querySelector(".aimg img");
       if (im) {
         if (!im.dataset.w) { im.dataset.w = parseFloat(im.style.width) || 240; im.dataset.h = parseFloat(im.style.height) || 160; }
         const W0 = +im.dataset.w, H0 = +im.dataset.h;
+        // la cornice resta larga quanto l'add-on (i tasti dei formati non vanno a capo più del solito): cala solo l'immagine
+        w.style.width = `${W0 + 8}px`;
+        const bt = w.querySelector(".abtns");
+        if (bt) bt.style.maxWidth = `${W0}px`;
         im.style.setProperty("width", `${W0}px`, "important"); im.style.setProperty("height", `${H0}px`, "important");
         const extra = w.offsetHeight - im.offsetHeight; // titolo, tasti e margini
-        const h = Math.max(60, Math.min(H0, avail - extra));
+        const h = Math.max(40, Math.min(H0, avail - extra));
         im.style.setProperty("height", `${Math.round(h)}px`, "important"); im.style.setProperty("width", `${Math.round((h * W0) / H0)}px`, "important");
-        const bt = w.querySelector(".abtns");
-        if (bt) bt.style.maxWidth = im.style.width;
       }
     }
   }
