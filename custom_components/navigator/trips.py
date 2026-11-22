@@ -301,6 +301,12 @@ def _addon_click(c: Any) -> Any:
     return "close"
 
 
+def _bg(u: Any) -> str:
+    u = str(u or "").strip()[:500]
+    return u if (u.startswith(("https://", "http://", "/")) or re.fullmatch(r"\{[a-z0-9_]+\}", u)) and not u.startswith("//") \
+        and not re.search(r"[\s\"'<>]", u) else ""
+
+
 def _bbox4(b: Any) -> list[float] | None:
     try:
         v = [float(x) for x in b][:4]
@@ -375,6 +381,9 @@ def clean_addon(a: dict) -> dict:
             "caption": w.get("caption") == "media",  # titolo e artista del brano, sopra l'immagine (con "entity:")
         },
         "settings": _addon_settings(a.get("settings")),
+        # pagina tenuta aperta in sottofondo (invisibile) mentre Navigator è aperto, es. il lettore web di Music Assistant
+        # su questo dispositivo: indirizzo https://… o percorso di Home Assistant /…, anche con i segnaposto {…}
+        "background": _bg(a.get("background")),
         "values": {k: str(v)[:200] for k, v in (a.get("values") or {}).items() if isinstance(k, str) and _KEY.match(k)}
         if isinstance(a.get("values"), dict) else {},
         "files": files,

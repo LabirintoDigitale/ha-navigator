@@ -190,6 +190,12 @@ Esempio di tasti per la musica:
 ]
 ```
 
+**Pagina in sottofondo** (`"background"`, nell'add-on, non nella finestra): un indirizzo (`https://…` o un percorso di
+Home Assistant `/…`, anche con un segnaposto come `{ma_url}`) che Navigator tiene **aperto e invisibile** finché è aperto
+e l'add-on è acceso. Serve per esempio al **lettore web di Music Assistant**: il lettore "Web" di un dispositivo esiste
+solo mentre la pagina di Music Assistant è aperta lì; con la pagina in sottofondo resta disponibile mentre usi Navigator
+e la musica esce da quel dispositivo.
+
 ### Cosa fa il tocco sull'immagine
 
 `window.click`:

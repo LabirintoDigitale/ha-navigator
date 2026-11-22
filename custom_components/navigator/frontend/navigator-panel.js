@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.59";
+const PANEL_VERSION = "1.13.60";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -8743,6 +8743,39 @@ class NavigatorPanel extends HTMLElement {
     });
     this._syncDock();
     if (this._nav) this._placePitchCtl();
+    this._addonBackground();
+  }
+
+  // pagine tenute aperte in sottofondo dagli add-on attivi (es. il lettore web di Music Assistant su questo dispositivo:
+  // finché la sua pagina è aperta il lettore "Web" esiste e suona). Invisibili, restano aperte finché c'è Navigator.
+  _addonBackground() {
+    const root = this.shadowRoot;
+    if (!root) return;
+    let box = root.getElementById("addbg");
+    if (!box) {
+      box = document.createElement("div");
+      box.id = "addbg";
+      box.style.cssText = "position:fixed;left:0;top:0;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;";
+      root.appendChild(box);
+    }
+    const want = new Map();
+    for (const a of this._addons || []) {
+      if (!a.enabled || !a.background) continue;
+      const u = this._addonFill(a.background, this._addonVarsA(a)).trim();
+      if (/^(https?:\/\/|\/(?!\/))[^\s"'<>]*$/.test(u)) want.set(a.id, u);
+    }
+    box.querySelectorAll("iframe").forEach((f) => { if (want.get(f.dataset.a) !== f.dataset.u) f.remove(); });
+    for (const [id, u] of want) {
+      if (box.querySelector(`iframe[data-a="${CSS.escape(id)}"]`)) continue;
+      const f = document.createElement("iframe");
+      f.dataset.a = id; f.dataset.u = u;
+      f.setAttribute("allow", "autoplay; encrypted-media");
+      f.setAttribute("aria-hidden", "true");
+      f.tabIndex = -1;
+      f.style.cssText = "width:400px;height:600px;border:0;";
+      f.src = u;
+      box.appendChild(f);
+    }
   }
 
   // l'add-on è previsto qui? "where": in guida e in pianificazione (both), solo in guida, solo in pianificazione
