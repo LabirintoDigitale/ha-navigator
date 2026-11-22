@@ -150,6 +150,20 @@ tenendoci il dito sopra) e fa una di queste cose:
 `refresh`, `shuffle`, `repeat` (valgono anche le emoji corrispondenti, es. `▶`, `⏹`, `⏭`, `📃`). Altrimenti compare il
 testo o l'emoji scritta. I tasti con un elenco (`list`) stanno in alto a sinistra, gli altri in basso, allineati.
 
+**Schede nell'elenco e voci a giro**: un elenco può avere delle schede in alto, ognuna con le sue cartelle, e una scheda
+può far **ciclare** le sue voci col tasto *successivo* (comodo per le radio, che non hanno un brano successivo):
+
+```json
+{"icon": "next", "label": "Successivo", "cycle": "next", "service": "media_player.media_next_track", "data": {"entity_id": "{player}"}},
+{"icon": "playlist", "label": "Playlist e radio", "list": {"browse": "{player}", "tabs": [
+  {"label": "Playlist", "path": ["Playlists"]},
+  {"label": "Radio", "path": ["Radio"], "cycle": true}
+]}}
+```
+
+Se l'ultima voce partita viene da una scheda con `"cycle": true`, il tasto con `"cycle": "next"` (o `"prev"`) fa partire la
+voce dopo (o prima) di quell'elenco, a giro; altrimenti chiama il suo servizio come sempre.
+
 **Impostazioni scelte da chi usa l'add-on** (`settings`, al massimo 6), in ⚙ → 🧩 Add-on:
 
 ```json
@@ -195,7 +209,7 @@ Esempio di tasti per la musica:
 |---|---|---|
 | [`meteo-satellite`](meteo-satellite) | nuvole dal satellite Meteosat (EUMETSAT, gratuito) su tutta l'Europa, col pallino dove sei; IR, colori, visibile, vapore, masse d'aria, pioggia | [meteo-satellite.zip](meteo-satellite.zip) |
 | [`satellite-zona`](satellite-zona) | il satellite per 150 km intorno a te, con regioni e città, ti segue mentre guidi | [satellite-zona.zip](satellite-zona.zip) |
-| [`music-assistant`](music-assistant) | musica da Music Assistant: copertina, titolo, ▶ ⏹ ⏭ e l'elenco delle playlist, sul lettore scelto | [music-assistant.zip](music-assistant.zip) |
+| [`music-assistant`](music-assistant) | musica da Music Assistant: copertina, titolo, ▶ ⏹ ⏭ e l'elenco di playlist e radio (con una radio ⏭ passa alla radio dopo), sul lettore scelto | [music-assistant.zip](music-assistant.zip) |
 
 Le immagini del satellite vengono dal servizio gratuito EUMETView di EUMETSAT (WMS). Per avere i nomi di città e stati
 più grandi l'immagine si chiede a 640×453 pixel con `format_options=dpi:190`: con immagini più piccole il servizio toglie

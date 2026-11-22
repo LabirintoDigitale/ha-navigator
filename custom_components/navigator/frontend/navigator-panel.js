@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.56";
+const PANEL_VERSION = "1.13.57";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1722,6 +1722,9 @@ const STYLE = `
   .addwin .alp { position: absolute; inset: 0; background: rgba(18,18,18,.96); border-radius: 8px; display: flex;
     flex-direction: column; z-index: 2; }
   .addwin .alh { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; color: #fff; font: 600 13px sans-serif; }
+  .addwin .altabs { display: flex; gap: 4px; }
+  .addwin .altabs button { width: auto !important; padding: 0 10px; font: 600 12px sans-serif; opacity: .75; }
+  .addwin .altabs button.on { background: #1a73e8 !important; opacity: 1; }
   .addwin .alh button { border: none; background: rgba(255,255,255,.14); color: #fff; border-radius: 8px; width: 32px; height: 28px; cursor: pointer; }
   .addwin .all { flex: 1; overflow-y: auto; padding: 0 6px 6px; color: #ccc; font: 12px sans-serif; touch-action: pan-y;
     -webkit-overflow-scrolling: touch; }
@@ -8988,6 +8991,14 @@ class NavigatorPanel extends HTMLElement {
     if (!b) return;
     const v = this._addonVarsA(a);
     if (b.list) { this._addonList(a, el, b); return; }
+    // tasto "successivo" mentre suona una voce di un elenco che cicla (es. le radio): passa alla voce dopo, a giro
+    if (b.cycle && el._cyc?.items?.length) {
+      const c = el._cyc, n = c.items.length;
+      c.idx = (((c.idx + (b.cycle === "prev" ? -1 : 1)) % n) + n) % n;
+      try { await c.play(c.items[c.idx]); this._msg(`📻 ${c.items[c.idx].title}`); }
+      catch (err) { this._msg(`${a.name}: ${err.message || err}`); }
+      return;
+    }
     if (b.service) {
       const [dom, svc] = b.service.split(".");
       try { await this._hass.callService(dom, svc, this._addonFillDeep(b.data, v)); }
@@ -8997,20 +9008,37 @@ class NavigatorPanel extends HTMLElement {
 
   // elenco dentro l'add-on: contenuti di un lettore sfogliati come nel pannello Media di Home Assistant (es. le
   // playlist di Music Assistant); una voce che si può riprodurre parte sul lettore, una cartella si apre
-  async _addonList(a, el, b, at = null) {
+  async _addonList(a, el, b, at = null, tab = null) {
     const box = el.querySelector(".aimg");
     if (!box) return;
     const v = this._addonVarsA(a);
     const ent = this._addonFill(b.list.browse, v);
+    // schede in alto (es. Playlist / Radio): ognuna con le sue cartelle; si ricorda l'ultima usata
+    const tabs = b.list.tabs || [];
+    if (tab != null) el._tab = tab;
+    const ti = Math.min(el._tab || 0, Math.max(0, tabs.length - 1));
+    const path = tabs.length ? tabs[ti].path : b.list.path || [];
+    const cycle = !!tabs[ti]?.cycle;
     let pane = box.querySelector(".alp");
-    if (!pane) { pane = document.createElement("div"); pane.className = "alp"; box.appendChild(pane); }
-    pane.innerHTML = `<div class="alh"><span>${esc(b.label || "Elenco")}</span><button data-x title="Chiudi">✕</button></div><div class="all">Carico…</div>`;
-    pane.addEventListener("click", (e) => e.stopPropagation()); // dentro l'elenco il tocco non chiude l'add-on
+    if (!pane) {
+      pane = document.createElement("div"); pane.className = "alp"; box.appendChild(pane);
+      pane.addEventListener("click", (e) => e.stopPropagation()); // dentro l'elenco il tocco non chiude l'add-on
+    }
+    pane.innerHTML = `<div class="alh">${tabs.length > 1
+      ? `<span class="altabs">${tabs.map((t, i) => `<button data-t="${i}" class="${i === ti ? "on" : ""}">${esc(t.label)}</button>`).join("")}</span>`
+      : `<span>${esc(b.label || "Elenco")}</span>`}<button data-x title="Chiudi">✕</button></div><div class="all">Carico…</div>`;
     pane.querySelector("[data-x]").addEventListener("click", () => pane.remove());
+    pane.querySelectorAll("[data-t]").forEach((t) => t.addEventListener("click", () => this._addonList(a, el, b, null, +t.dataset.t)));
     const list = pane.querySelector(".all");
     // elenco di voci da toccare: play(c) fa partire, open(c) apre una cartella
-    const show = (items, play, open) => {
+    const show = (items, play0, open) => {
       if (!items.length) { list.textContent = "Vuoto"; return; }
+      const playable = items.filter((c) => c.can_play);
+      // partita una voce di una scheda che cicla (es. una radio): il tasto "successivo" passerà alla voce dopo
+      const play = async (c) => {
+        await play0(c);
+        el._cyc = cycle ? { items: playable, idx: playable.indexOf(c), play: play0 } : null;
+      };
       list.innerHTML = items.map((c, i) => `<button data-i="${i}">${c.thumbnail ? `<img src="${esc(c.thumbnail)}" alt="">` : "<i>🎵</i>"}<span>${esc(c.title || "")}</span></button>`).join("");
       list.querySelectorAll("[data-i]").forEach((btn) => btn.addEventListener("click", async () => {
         const c = items[+btn.dataset.i];
@@ -9022,7 +9050,7 @@ class NavigatorPanel extends HTMLElement {
     // Music Assistant direttamente (servizio get_library): quando il lettore non si può sfogliare come nel pannello Media
     const MA_TYPES = { playlist: "playlist", artist: "artist", album: "album", track: "track", radio: "radio" };
     const viaMA = async () => {
-      const want = (b.list.path || ["Playlists"]).join(" ").toLowerCase();
+      const want = (path.length ? path : ["Playlists"]).join(" ").toLowerCase();
       const type = Object.keys(MA_TYPES).find((k) => want.includes(k)) || "playlist";
       const entries = await this._hass.callWS({ type: "config_entries/get", domain: "music_assistant" });
       const entry = entries?.find((e) => e.state === "loaded") || entries?.[0];
@@ -9039,7 +9067,7 @@ class NavigatorPanel extends HTMLElement {
         ...(node ? { media_content_id: node.media_content_id, media_content_type: node.media_content_type } : {}) });
       let node = await browse(at);
       if (!at) {
-        for (const want of b.list.path || []) { // es. ["Playlists"]: si entra nelle cartelle con quel nome
+        for (const want of path) { // es. ["Playlists"]: si entra nelle cartelle con quel nome
           const w = want.toLowerCase();
           const next = (node.children || []).find((c) => (c.title || "").toLowerCase() === w)
             || (node.children || []).find((c) => (c.title || "").toLowerCase().includes(w));

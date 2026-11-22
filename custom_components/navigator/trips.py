@@ -248,6 +248,10 @@ def _addon_buttons(lst: Any) -> list[dict]:
         if not isinstance(b, dict):
             continue
         item = {"icon": str(b.get("icon") or "")[:12], "label": str(b.get("label") or "")[:24]}
+        # "cycle": "next"/"prev": se l'ultima voce partita viene da una scheda che cicla (es. le radio), il tasto passa
+        # alla voce successiva/precedente di quell'elenco invece di chiamare il suo servizio
+        if b.get("cycle") in ("next", "prev"):
+            item["cycle"] = b["cycle"]
         if isinstance(b.get("service"), str) and _SERVICE.match(b["service"]):
             data = b.get("data") if isinstance(b.get("data"), dict) else {}
             if len(json.dumps(data)) > 2000:
@@ -255,7 +259,13 @@ def _addon_buttons(lst: Any) -> list[dict]:
             item.update(service=b["service"], data=data)
         elif isinstance(b.get("list"), dict) and isinstance(b["list"].get("browse"), str):
             path = [str(p)[:60] for p in (b["list"].get("path") or []) if isinstance(p, str)][:5]
-            item["list"] = {"browse": b["list"]["browse"][:120], "path": path}
+            tabs = []  # schede in alto nell'elenco (es. Playlist / Radio), ognuna con le sue cartelle
+            for t in (b["list"].get("tabs") or [])[:4] if isinstance(b["list"].get("tabs"), list) else []:
+                if isinstance(t, dict):
+                    tabs.append({"label": str(t.get("label") or "")[:20],
+                                 "path": [str(p)[:60] for p in (t.get("path") or []) if isinstance(p, str)][:5],
+                                 "cycle": t.get("cycle") is True})
+            item["list"] = {"browse": b["list"]["browse"][:120], "path": path or (tabs[0]["path"] if tabs else []), "tabs": tabs}
         else:
             continue
         if item["icon"] or item["label"]:

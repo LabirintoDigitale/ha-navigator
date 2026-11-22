@@ -1,9 +1,9 @@
 {
   "id": "music-assistant",
   "name": "Music Assistant",
-  "version": "1.1",
+  "version": "1.2",
   "author": "Navigator",
-  "description": "Musica da Music Assistant (o da un altro lettore di Home Assistant): copertina e titolo del brano, play, stop, brano successivo e l'elenco delle playlist da scegliere. Il lettore si sceglie qui sotto.",
+  "description": "Musica da Music Assistant (o da un altro lettore di Home Assistant): copertina e titolo del brano, play, stop, brano successivo e l'elenco da cui scegliere una playlist o una radio; con una radio il tasto successivo passa alla radio dopo. Il lettore si sceglie qui sotto.",
   "settings": [
     {
       "key": "player",
@@ -42,19 +42,32 @@
       },
       {
         "icon": "next",
-        "label": "Brano successivo",
+        "label": "Successivo",
         "service": "media_player.media_next_track",
         "data": {
           "entity_id": "{player}"
-        }
+        },
+        "cycle": "next"
       },
       {
         "icon": "playlist",
-        "label": "Playlist",
+        "label": "Playlist e radio",
         "list": {
           "browse": "{player}",
-          "path": [
-            "Playlists"
+          "tabs": [
+            {
+              "label": "Playlist",
+              "path": [
+                "Playlists"
+              ]
+            },
+            {
+              "label": "Radio",
+              "path": [
+                "Radio"
+              ],
+              "cycle": true
+            }
           ]
         }
       }
