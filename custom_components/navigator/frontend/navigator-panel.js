@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.36";
+const PANEL_VERSION = "1.13.37";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1663,6 +1663,18 @@ const STYLE = `
   /* finestre degli add-on sulla mappa (spostabili tenendo premuto, come gli altri riquadri) */
   .addwin { position: absolute; z-index: 1002; right: 70px; top: 120px; background: rgba(24,24,24,.88); border-radius: 12px;
     padding: 4px; box-shadow: 0 2px 10px rgba(0,0,0,.45); touch-action: none; user-select: none; -webkit-user-select: none; cursor: pointer; }
+  .addwin.moved { right: auto; } /* spostata: solo left/top (prima con right restava tirata per tutta la larghezza) */
+  /* blocco della guida: barra verde in alto, sotto gli add-on (scorrono) con la croce a fianco */
+  .navtop.docked { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+  .addock { position: absolute; z-index: 1001; display: flex; gap: 8px; align-items: flex-start; padding: 8px;
+    background: rgba(24,24,24,.92); border-radius: 0 0 14px 14px; box-sizing: border-box; box-shadow: 0 4px 12px rgba(0,0,0,.35); }
+  .addock .alist { flex: 1; min-width: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;
+    -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+  .addock .addwin { position: static; right: auto; left: auto; top: auto; box-shadow: none; background: rgba(255,255,255,.06);
+    touch-action: pan-y; }
+  .addock .addwin img { max-width: 100%; height: auto !important; }
+  .addock .across { flex: none; }
+  .addock .pitchctl { position: static !important; left: auto !important; top: auto !important; right: auto !important; }
   .addwin .at { color: #fff; font: 600 12px sans-serif; padding: 2px 6px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .addwin img { display: block; border-radius: 8px; object-fit: cover; background: #333; pointer-events: none; }
   .addwin .aimg { position: relative; }
@@ -4136,6 +4148,7 @@ class NavigatorPanel extends HTMLElement {
   _placePitchCtl(pitch) {
     const el = this.$("pitchctl");
     if (!el || this._dragging) return; // durante uno spostamento non si tocca niente
+    this._syncDock();
     // sempre visibile: zoom −/+ con la lampadina giorno/notte in mezzo; in 3D anche l'inclinazione (croce)
     const guida = !!(this._isGuida() && this._nav);
     el.hidden = false;
@@ -4143,10 +4156,12 @@ class NavigatorPanel extends HTMLElement {
     el.classList.toggle("plan", !guida);
     this._syncNightBtn();
     const top = this.$("navtop");
-    el.style.top = !guida ? "" : top && !top.hidden ? `${top.offsetTop + top.offsetHeight + 8}px` : "56px";
-    el.style.left = "";
-    el.classList.remove("moved");
-    this._applyFloat("pitchctl"); // spostata a mano: lì (in guida e fuori)
+    if (!this.$("addock")?.contains(el)) { // nel blocco della guida (con gli add-on) la croce sta lì dentro
+      el.style.top = !guida ? "" : top && !top.hidden ? `${top.offsetTop + top.offsetHeight + 8}px` : "56px";
+      el.style.left = "";
+      el.classList.remove("moved");
+      this._applyFloat("pitchctl"); // spostata a mano: lì (in guida e fuori)
+    }
     if (!this._3d || !this._g3) return;
     const p = Math.round(pitch ?? this._g3.getPitch());
     el.querySelector('[data-p="-15"]').disabled = p <= 0;
@@ -6848,6 +6863,7 @@ class NavigatorPanel extends HTMLElement {
     let timer = null, drag = false, sx = 0, sy = 0, ox = 0, oy = 0, gh = null, nx = 0, ny = 0;
     el.addEventListener("pointerdown", (e) => {
       if (e.button > 0) return;
+      if (el.closest(".addock")) return; // nel blocco della guida non si sposta (si scorre)
       sx = e.clientX; sy = e.clientY; drag = false;
       clearTimeout(timer);
       timer = setTimeout(() => {
@@ -8575,6 +8591,8 @@ class NavigatorPanel extends HTMLElement {
       this._bindFloatDrag(id, `addon:${a.id}`);
       this._applyFloat(id, `addon:${a.id}`);
     });
+    this._syncDock();
+    if (this._nav) this._placePitchCtl();
   }
 
   // elenco sotto il riquadro della velocità: add-on attivi ma chiusi, o spenti, che si possono mostrare in questa vista
@@ -8613,8 +8631,47 @@ class NavigatorPanel extends HTMLElement {
     setTimeout(() => menu.isConnected || this.shadowRoot.removeEventListener("pointerdown", off, true), 15000);
   }
 
+  // In guida, con almeno un add-on aperto, barra verde + add-on + croce diventano un blocco unico: la barra in alto per
+  // tutta la larghezza e, attaccati sotto, gli add-on (che scorrono su e giù) con la croce a fianco. Chiusi tutti gli
+  // add-on la barra e la croce tornano separate, ognuna al suo posto.
+  _syncDock() {
+    const wrap = this.$?.("mapwrap"), top = this.$?.("navtop"), pc = this.$?.("pitchctl");
+    if (!wrap || !top || !pc) return;
+    let dock = this.$("addock");
+    const wins = [...wrap.querySelectorAll(".addwin")];
+    const want = !!(this._nav && this._isGuida() && !top.hidden && wins.length);
+    if (want) {
+      if (!dock) {
+        dock = document.createElement("div");
+        dock.id = "addock"; dock.className = "addock";
+        dock.innerHTML = `<div class="alist"></div><div class="across"></div>`;
+        wrap.appendChild(dock);
+        this._pcHome = { parent: pc.parentNode, next: pc.nextSibling };
+      }
+      const list = dock.querySelector(".alist"), cr = dock.querySelector(".across");
+      for (const w of wins) if (w.parentNode !== list) list.appendChild(w);
+      if (pc.parentNode !== cr) cr.appendChild(pc);
+      top.classList.add("docked");
+      const y = top.offsetTop + top.offsetHeight;
+      dock.style.top = `${y}px`; dock.style.left = `${top.offsetLeft}px`; dock.style.width = `${top.offsetWidth}px`;
+      const bot = this.$("navbot");
+      const lim = (bot && !bot.hidden ? bot.offsetTop : wrap.clientHeight) - 8;
+      list.style.maxHeight = `${Math.max(140, Math.round((lim - y) * 0.75) - 16)}px`;
+    } else if (dock) {
+      for (const w of wins) wrap.appendChild(w);
+      const h = this._pcHome;
+      if (h?.parent) h.parent.insertBefore(pc, h.next && h.next.parentNode === h.parent ? h.next : null);
+      dock.remove();
+      top.classList.remove("docked");
+      this._placeAddons();
+    }
+  }
+
   _placeAddons() {
-    for (const a of this._addons || []) if (this.$(`addon-${a.id}`)) this._applyFloat(`addon-${a.id}`, `addon:${a.id}`);
+    for (const a of this._addons || []) {
+      const el = this.$(`addon-${a.id}`);
+      if (el && !el.closest(".addock")) this._applyFloat(`addon-${a.id}`, `addon:${a.id}`);
+    }
   }
 
   // dati che un add-on può usare negli indirizzi, scritti fra graffe: {lat} {lon} (la tua posizione in guida, altrimenti
@@ -8671,6 +8728,8 @@ class NavigatorPanel extends HTMLElement {
     this._addonClosed.add(a.id);
     clearInterval(el._timer);
     el.remove();
+    this._syncDock(); // ultimo add-on chiuso in guida: barra e croce tornano separate
+    if (this._nav) this._placePitchCtl();
   }
 
   // ----------------------------------------------------------------- garage
