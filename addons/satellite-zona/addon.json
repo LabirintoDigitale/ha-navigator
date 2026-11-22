@@ -1,7 +1,7 @@
 {
   "id": "satellite-zona",
   "name": "Satellite sulla tua zona",
-  "version": "1.3",
+  "version": "1.4",
   "author": "Navigator",
   "description": "Le nuvole viste dal satellite Meteosat (EUMETSAT) per 150 km intorno a te, col pallino rosso dove sei: segue la tua posizione in guida (fuori dalla guida il centro della mappa). Con i confini delle regioni e i nomi delle città. Tocca l'immagine per chiuderla.",
   "window": {
@@ -18,18 +18,18 @@
     "images": [
       {
         "label": "Colori",
-        "image": "https://view.eumetsat.int/geoserver/ows?service=WMS&request=GetMap&version=1.3.0&layers=mtg_fd:rgb_geocolour,osmgray:ne_10m_admin_1_states_provinces_lines,backgrounds:ne_boundary_lines_land,backgrounds:ne_10m_coastline,osmgray:dark_labels&styles=&format=image/jpeg&crs=EPSG:4326&bbox={bbox}&width=480&height=340"
+        "image": "https://view.eumetsat.int/geoserver/ows?service=WMS&request=GetMap&version=1.3.0&layers=mtg_fd:rgb_geocolour,osmgray:ne_10m_admin_1_states_provinces_lines,backgrounds:ne_boundary_lines_land,backgrounds:ne_10m_coastline,osmgray:dark_labels&styles=&format=image/jpeg&crs=EPSG:4326&bbox={bbox}&width=640&height=453&format_options=dpi:190"
       },
       {
         "label": "IR",
-        "image": "https://view.eumetsat.int/geoserver/ows?service=WMS&request=GetMap&version=1.3.0&layers=msg_fes:ir108,osmgray:ne_10m_admin_1_states_provinces_lines,backgrounds:ne_boundary_lines_land,backgrounds:ne_10m_coastline,osmgray:dark_labels&styles=&format=image/jpeg&crs=EPSG:4326&bbox={bbox}&width=480&height=340"
+        "image": "https://view.eumetsat.int/geoserver/ows?service=WMS&request=GetMap&version=1.3.0&layers=msg_fes:ir108,osmgray:ne_10m_admin_1_states_provinces_lines,backgrounds:ne_boundary_lines_land,backgrounds:ne_10m_coastline,osmgray:dark_labels&styles=&format=image/jpeg&crs=EPSG:4326&bbox={bbox}&width=640&height=453&format_options=dpi:190"
       },
       {
         "label": "Pioggia",
-        "image": "https://view.eumetsat.int/geoserver/ows?service=WMS&request=GetMap&version=1.3.0&layers=msg_fes:ir108,msg_fes:h60b,osmgray:ne_10m_admin_1_states_provinces_lines,backgrounds:ne_boundary_lines_land,backgrounds:ne_10m_coastline,osmgray:dark_labels&styles=&format=image/jpeg&crs=EPSG:4326&bbox={bbox}&width=480&height=340"
+        "image": "https://view.eumetsat.int/geoserver/ows?service=WMS&request=GetMap&version=1.3.0&layers=msg_fes:ir108,msg_fes:h60b,osmgray:ne_10m_admin_1_states_provinces_lines,backgrounds:ne_boundary_lines_land,backgrounds:ne_10m_coastline,osmgray:dark_labels&styles=&format=image/jpeg&crs=EPSG:4326&bbox={bbox}&width=640&height=453&format_options=dpi:190"
       }
     ],
-    "image": "https://view.eumetsat.int/geoserver/ows?service=WMS&request=GetMap&version=1.3.0&layers=mtg_fd:rgb_geocolour,osmgray:ne_10m_admin_1_states_provinces_lines,backgrounds:ne_boundary_lines_land,backgrounds:ne_10m_coastline,osmgray:dark_labels&styles=&format=image/jpeg&crs=EPSG:4326&bbox={bbox}&width=480&height=340",
+    "image": "https://view.eumetsat.int/geoserver/ows?service=WMS&request=GetMap&version=1.3.0&layers=mtg_fd:rgb_geocolour,osmgray:ne_10m_admin_1_states_provinces_lines,backgrounds:ne_boundary_lines_land,backgrounds:ne_10m_coastline,osmgray:dark_labels&styles=&format=image/jpeg&crs=EPSG:4326&bbox={bbox}&width=640&height=453&format_options=dpi:190",
     "marker": true
   }
 }
