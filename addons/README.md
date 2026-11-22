@@ -141,6 +141,9 @@ tenendoci il dito sopra) e fa una di queste cose:
 - `"list": {"browse": "media_player.x", "path": ["Playlists"]}`: apre **dentro l'add-on** l'elenco dei contenuti di un
   lettore, sfogliato come nel pannello *Media* di Home Assistant (`path` = cartelle in cui entrare, per nome). Toccando
   una voce parte su quel lettore, toccando una cartella si apre, ✕ chiude.
+  Se il lettore non si può sfogliare così (Home Assistant risponde *Entity not found*) e c'è **Music Assistant**,
+  l'elenco si chiede direttamente a Music Assistant (`music_assistant.get_library`: playlist, artisti, album, brani o
+  radio, secondo il nome in `path`) e la voce scelta parte con `music_assistant.play_media` sul lettore.
 
 **Icone**: per avere tasti tutti nello stesso stile (linee sottili, bianche) scrivi in `icon` uno di questi nomi:
 `play`, `pause`, `playpause`, `stop`, `next`, `prev`, `playlist`, `volup`, `voldown`, `mute`, `power`, `light`,

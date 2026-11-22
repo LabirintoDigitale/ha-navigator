@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.55";
+const PANEL_VERSION = "1.13.56";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -9008,6 +9008,31 @@ class NavigatorPanel extends HTMLElement {
     pane.addEventListener("click", (e) => e.stopPropagation()); // dentro l'elenco il tocco non chiude l'add-on
     pane.querySelector("[data-x]").addEventListener("click", () => pane.remove());
     const list = pane.querySelector(".all");
+    // elenco di voci da toccare: play(c) fa partire, open(c) apre una cartella
+    const show = (items, play, open) => {
+      if (!items.length) { list.textContent = "Vuoto"; return; }
+      list.innerHTML = items.map((c, i) => `<button data-i="${i}">${c.thumbnail ? `<img src="${esc(c.thumbnail)}" alt="">` : "<i>🎵</i>"}<span>${esc(c.title || "")}</span></button>`).join("");
+      list.querySelectorAll("[data-i]").forEach((btn) => btn.addEventListener("click", async () => {
+        const c = items[+btn.dataset.i];
+        if (c.can_play) {
+          try { await play(c); pane.remove(); } catch (err) { this._msg(`${a.name}: ${err.message || err}`); }
+        } else if (c.can_expand && open) open(c);
+      }));
+    };
+    // Music Assistant direttamente (servizio get_library): quando il lettore non si può sfogliare come nel pannello Media
+    const MA_TYPES = { playlist: "playlist", artist: "artist", album: "album", track: "track", radio: "radio" };
+    const viaMA = async () => {
+      const want = (b.list.path || ["Playlists"]).join(" ").toLowerCase();
+      const type = Object.keys(MA_TYPES).find((k) => want.includes(k)) || "playlist";
+      const entries = await this._hass.callWS({ type: "config_entries/get", domain: "music_assistant" });
+      const entry = entries?.find((e) => e.state === "loaded") || entries?.[0];
+      if (!entry) return false;
+      const r = await this._hass.callWS({ type: "call_service", domain: "music_assistant", service: "get_library",
+        service_data: { config_entry_id: entry.entry_id, media_type: type, limit: 200, order_by: "name" }, return_response: true });
+      const items = (r?.response?.items || []).map((it) => ({ title: it.name, thumbnail: it.image || "", can_play: true, uri: it.uri, mt: it.media_type || type }));
+      show(items, (c) => this._hass.callService("music_assistant", "play_media", { entity_id: ent, media_id: c.uri, media_type: c.mt }));
+      return true;
+    };
     try {
       if (!this._hass.states?.[ent]) throw new Error("scegli il lettore nelle impostazioni dell'add-on (⚙ → Add-on)");
       const browse = (node) => this._hass.callWS({ type: "media_player/browse_media", entity_id: ent,
@@ -9022,22 +9047,14 @@ class NavigatorPanel extends HTMLElement {
           node = await browse(next);
         }
       }
-      const items = node.children || [];
-      if (!items.length) { list.textContent = "Vuoto"; return; }
-      list.innerHTML = items.map((c, i) => `<button data-i="${i}">${c.thumbnail ? `<img src="${esc(c.thumbnail)}" alt="">` : "<i>🎵</i>"}<span>${esc(c.title || "")}</span></button>`).join("");
-      list.querySelectorAll("[data-i]").forEach((btn) => btn.addEventListener("click", async () => {
-        const c = items[+btn.dataset.i];
-        if (c.can_play) {
-          try {
-            await this._hass.callService("media_player", "play_media", { entity_id: ent, media_content_id: c.media_content_id, media_content_type: c.media_content_type });
-            pane.remove();
-          } catch (err) { this._msg(`${a.name}: ${err.message || err}`); }
-        } else if (c.can_expand) {
-          this._addonList(a, el, { ...b, label: c.title }, c);
-        }
-      }));
+      show(node.children || [],
+        (c) => this._hass.callService("media_player", "play_media", { entity_id: ent, media_content_id: c.media_content_id, media_content_type: c.media_content_type }),
+        (c) => this._addonList(a, el, { ...b, label: c.title }, c));
     } catch (err) {
-      list.textContent = `Non disponibile: ${err.message || err}`;
+      // il lettore non si sfoglia (es. "Entity not found"): si prova con Music Assistant
+      let ok = false;
+      if (!at && this._hass.states?.[ent]) { try { ok = await viaMA(); } catch (e2) { console.debug("Navigator add-on, Music Assistant:", e2); } }
+      if (!ok) list.textContent = `Non disponibile: ${err.message || err}`;
     }
   }
 
