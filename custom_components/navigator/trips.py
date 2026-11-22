@@ -260,14 +260,22 @@ def clean_addon(a: dict) -> dict:
         raise ValueError("all'add-on manca il nome (campo \"id\" o \"name\" in addon.json)")
     files = {}
     total = 0
+    w0 = a.get("window") if isinstance(a.get("window"), dict) else {}
     for name, data in list((a.get("files") or {}).items())[:20]:
         if isinstance(data, str) and len(data) <= ADDON_FILE_MAX and _DATA_IMG.match(data):
             files[str(name)[:80]] = data
             total += len(data)
     if total > ADDON_TOTAL_MAX:
         raise ValueError("le immagini dell'add-on sono troppo grandi (al massimo ~2 MB in tutto)")
-    w = a.get("window") if isinstance(a.get("window"), dict) else {}
-    img = str(w.get("image") or "")[:500]
+    w = w0
+    # immagini alternative (es. infrarosso, colori, vapore): tasti nella finestra per passare dall'una all'altra
+    images = []
+    for it in (w.get("images") or [])[:8] if isinstance(w.get("images"), list) else []:
+        if isinstance(it, dict):
+            u = str(it.get("image") or "")[:500]
+            if _URL.match(u) or u in files:
+                images.append({"label": str(it.get("label") or "")[:14] or str(len(images) + 1), "image": u})
+    img = str(w.get("image") or (images[0]["image"] if images else ""))[:500]
     if not (_URL.match(img) or img in files):
         raise ValueError("la finestra dell'add-on non ha un'immagine valida (indirizzo http/https o file dello zip)")
     views = [v for v in (w.get("views") or ["2d", "3d"]) if v in ("2d", "3d")] or ["2d", "3d"]
@@ -293,6 +301,7 @@ def clean_addon(a: dict) -> dict:
             "height": num(w.get("height"), 60, 800, 160),
             "views": views,
             "click": _addon_click(w.get("click", "close")),
+            "images": images,
         },
         "files": files,
     }
@@ -319,17 +328,20 @@ def addon_from_zip(raw: bytes) -> dict:
         raise ValueError(f"addon.json non è valido ({err})") from err
     if not isinstance(a, dict):
         raise ValueError("addon.json non è valido")
-    img = str((a.get("window") or {}).get("image") or "")
-    mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif", "webp": "image/webp",
-            "svg": "image/svg+xml"}.get(img.rsplit(".", 1)[-1].lower())
+    win = a.get("window") if isinstance(a.get("window"), dict) else {}
+    wanted = [str(win.get("image") or "")] + [str(i.get("image") or "") for i in (win.get("images") or []) if isinstance(i, dict)]
     a["files"] = {}
-    if img and not img.startswith(("http://", "https://")):
+    for img in dict.fromkeys(w for w in wanted if w):
+        if img.startswith(("http://", "https://")):
+            continue
+        mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif", "webp": "image/webp",
+                "svg": "image/svg+xml"}.get(img.rsplit(".", 1)[-1].lower())
         if not mime or base + img not in names:
             raise ValueError(f"l'immagine \"{img}\" non è nello zip")
         info = z.getinfo(base + img)
         if info.file_size > ADDON_FILE_MAX * 3 // 4:
             raise ValueError(f"l'immagine \"{img}\" è troppo grande")
-        a["files"] = {img: f"data:{mime};base64,{base64.b64encode(z.read(info)).decode()}"}
+        a["files"][img] = f"data:{mime};base64,{base64.b64encode(z.read(info)).decode()}"
     return a
 
 

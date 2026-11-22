@@ -340,6 +340,7 @@ del cortile.
 | `name`, `version`, `author`, `description` | come compare nelle impostazioni |
 | `window.title` | scritta sopra l'immagine (facoltativa) |
 | `window.image` | indirizzo `https://…` dell'immagine oppure nome di un file dello zip |
+| `window.images` | facoltativo: immagini alternative, ognuna con un tasto nella finestra per passarci: `[{"label": "IR", "image": "https://…"}, {"label": "Colori", "image": "https://…"}]` (al massimo 8; la scelta resta) |
 | `window.refresh` | ogni quanti secondi ricaricare l'immagine da internet (`0` = mai) |
 | `window.width`, `window.height` | grandezza dell'immagine in pixel (80–800) |
 | `window.views` | dove compare: `"2d"`, `"3d"` o tutte e due |

@@ -1,9 +1,9 @@
 {
   "id": "meteo-satellite",
   "name": "Meteo dal satellite",
-  "version": "1.1",
+  "version": "1.2",
   "author": "Navigator",
-  "description": "Nuvole viste dal satellite Meteosat (EUMETSAT, infrarosso: anche di notte) su Italia e Alpi, aggiornate ogni 15 minuti. Tocca per chiuderla.",
+  "description": "Nuvole viste dal satellite Meteosat (EUMETSAT) su Italia e Alpi, aggiornate ogni 15 minuti: infrarosso (anche di notte), colori, visibile, vapore acqueo, masse d'aria e pioggia. Tocca l'immagine per chiuderla.",
   "window": {
     "title": "🛰️ Satellite",
     "image": "https://view.eumetsat.int/geoserver/ows?service=WMS&request=GetMap&version=1.3.0&layers=msg_fes:ir108,backgrounds:ne_boundary_lines_land,backgrounds:ne_10m_coastline&styles=&format=image/jpeg&crs=EPSG:4326&bbox=40,0,52,22&width=480&height=340",
@@ -14,6 +14,32 @@
       "2d",
       "3d"
     ],
-    "click": "close"
+    "click": "close",
+    "images": [
+      {
+        "label": "IR",
+        "image": "https://view.eumetsat.int/geoserver/ows?service=WMS&request=GetMap&version=1.3.0&layers=msg_fes:ir108,backgrounds:ne_boundary_lines_land,backgrounds:ne_10m_coastline&styles=&format=image/jpeg&crs=EPSG:4326&bbox=40,0,52,22&width=480&height=340"
+      },
+      {
+        "label": "Colori",
+        "image": "https://view.eumetsat.int/geoserver/ows?service=WMS&request=GetMap&version=1.3.0&layers=mtg_fd:rgb_geocolour,backgrounds:ne_boundary_lines_land,backgrounds:ne_10m_coastline&styles=&format=image/jpeg&crs=EPSG:4326&bbox=40,0,52,22&width=480&height=340"
+      },
+      {
+        "label": "Visibile",
+        "image": "https://view.eumetsat.int/geoserver/ows?service=WMS&request=GetMap&version=1.3.0&layers=msg_fes:vis006,backgrounds:ne_boundary_lines_land,backgrounds:ne_10m_coastline&styles=&format=image/jpeg&crs=EPSG:4326&bbox=40,0,52,22&width=480&height=340"
+      },
+      {
+        "label": "Vapore",
+        "image": "https://view.eumetsat.int/geoserver/ows?service=WMS&request=GetMap&version=1.3.0&layers=msg_fes:wv062,backgrounds:ne_boundary_lines_land,backgrounds:ne_10m_coastline&styles=&format=image/jpeg&crs=EPSG:4326&bbox=40,0,52,22&width=480&height=340"
+      },
+      {
+        "label": "Masse d'aria",
+        "image": "https://view.eumetsat.int/geoserver/ows?service=WMS&request=GetMap&version=1.3.0&layers=msg_fes:rgb_airmass,backgrounds:ne_boundary_lines_land,backgrounds:ne_10m_coastline&styles=&format=image/jpeg&crs=EPSG:4326&bbox=40,0,52,22&width=480&height=340"
+      },
+      {
+        "label": "Pioggia",
+        "image": "https://view.eumetsat.int/geoserver/ows?service=WMS&request=GetMap&version=1.3.0&layers=msg_fes:ir108,msg_fes:h60b,backgrounds:ne_boundary_lines_land,backgrounds:ne_10m_coastline&styles=&format=image/jpeg&crs=EPSG:4326&bbox=40,0,52,22&width=480&height=340"
+      }
+    ]
   }
 }

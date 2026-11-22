@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.34";
+const PANEL_VERSION = "1.13.35";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1665,6 +1665,10 @@ const STYLE = `
     padding: 4px; box-shadow: 0 2px 10px rgba(0,0,0,.45); touch-action: none; user-select: none; -webkit-user-select: none; cursor: pointer; }
   .addwin .at { color: #fff; font: 600 12px sans-serif; padding: 2px 6px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .addwin img { display: block; border-radius: 8px; object-fit: cover; background: #333; pointer-events: none; }
+  .addwin .abtns { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 2px 0; }
+  .addwin .abtns button { flex: 1 0 auto; border: none; border-radius: 6px; padding: 5px 7px; font: 600 11px sans-serif;
+    background: rgba(255,255,255,.12); color: #ddd; cursor: pointer; }
+  .addwin .abtns button.on { background: #1a73e8; color: #fff; }
   .addwin .aerr { display: flex; align-items: center; justify-content: center; color: #bbb; font: 12px sans-serif; text-align: center; }
   .addrow { display: flex; align-items: flex-start; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--divider-color, #333); }
   .addrow .ai { flex: 1; min-width: 0; }
@@ -8395,6 +8399,7 @@ class NavigatorPanel extends HTMLElement {
   }
 }`)}</pre>
         <div class="note"><b>refresh</b>: ogni quanti secondi ricaricare l'immagine (0 = mai) · <b>views</b>: "2d", "3d" o entrambe ·
+          <b>images</b> (facoltativo): immagini alternative con un tasto ciascuna, <code>[{"label": "IR", "image": "https://…"}, …]</code> ·
           <b>click</b>: <code>"close"</code> chiude, <code>"refresh"</code> ricarica, <code>"none"</code> niente,
           <code>{"open": "https://…"}</code> apre un indirizzo,
           <code>{"service": "light.toggle", "data": {"entity_id": "light.cortile"}}</code> chiama un servizio di Home Assistant.</div>
@@ -8479,9 +8484,13 @@ class NavigatorPanel extends HTMLElement {
       for (let i = 0; i < data.length; i += 0x8000) bin += String.fromCharCode(...data.subarray(i, i + 0x8000));
       imgs[rel] = `data:${mime};base64,${btoa(bin)}`;
     }
-    const img = a.window?.image;
-    if (img && !/^https?:/.test(img) && !imgs[img]) throw new Error(`l'immagine "${img}" non è nello zip`);
-    a.files = img && imgs[img] ? { [img]: imgs[img] } : {};
+    a.files = {};
+    const all = [a.window?.image, ...(Array.isArray(a.window?.images) ? a.window.images.map((i) => i?.image) : [])];
+    for (const img of all) {
+      if (!img || /^https?:/.test(img)) continue;
+      if (!imgs[img]) throw new Error(`l'immagine "${img}" non è nello zip`);
+      a.files[img] = imgs[img];
+    }
     return a;
   }
 
@@ -8506,12 +8515,27 @@ class NavigatorPanel extends HTMLElement {
       el.className = "addwin"; el.id = id; el._sig = sig;
       el.title = `${a.name} (tieni premuto per spostarla)`;
       el.style.top = `${120 + i * 30}px`;
-      el.innerHTML = `${w.title ? `<div class="at">${esc(w.title)}</div>` : ""}<img alt="" style="width:${w.width}px;height:${w.height}px">`;
+      const alts = Array.isArray(w.images) && w.images.length > 1 ? w.images : null;
+      const selKey = `${STORE_KEY}-addon-${a.id}`;
+      let sel = 0;
+      try { sel = Math.max(0, Math.min((alts?.length || 1) - 1, +localStorage.getItem(selKey) || 0)); } catch (e) { /* niente */ }
+      el.innerHTML = `${w.title ? `<div class="at">${esc(w.title)}</div>` : ""}<img alt="" style="width:${w.width}px;height:${w.height}px">${
+        alts ? `<div class="abtns" style="max-width:${w.width}px">${alts.map((it, k) => `<button data-k="${k}" class="${k === sel ? "on" : ""}">${esc(it.label)}</button>`).join("")}</div>` : ""}`;
       const img = el.querySelector("img");
+      const cur = () => (alts ? alts[sel].image : w.image);
       const load = () => {
-        const local = a.files?.[w.image];
-        img.src = local || (w.refresh ? `${w.image}${w.image.includes("?") ? "&" : "?"}_t=${Math.floor(Date.now() / (w.refresh * 1000))}` : w.image);
+        const u = cur(), local = a.files?.[u];
+        img.src = local || (w.refresh ? `${u}${u.includes("?") ? "&" : "?"}_t=${Math.floor(Date.now() / (w.refresh * 1000))}` : u);
       };
+      el.querySelectorAll(".abtns button").forEach((b) => b.addEventListener("click", (e) => {
+        e.stopPropagation(); // il tasto cambia immagine, non è un tocco sulla finestra
+        if (Date.now() - (this._longAt || 0) < 500) return;
+        sel = +b.dataset.k;
+        try { localStorage.setItem(selKey, String(sel)); } catch (err) { /* niente */ }
+        el.querySelectorAll(".abtns button").forEach((x) => x.classList.toggle("on", x === b));
+        el.querySelector(".aerr")?.remove(); img.style.display = "";
+        load();
+      }));
       img.onerror = () => {
         if (el.querySelector(".aerr")) return;
         img.insertAdjacentHTML("afterend", `<div class="aerr" style="width:${w.width}px;height:${w.height}px">Immagine non disponibile</div>`);
@@ -8519,7 +8543,7 @@ class NavigatorPanel extends HTMLElement {
       };
       img.onload = () => { el.querySelector(".aerr")?.remove(); img.style.display = ""; };
       load();
-      if (w.refresh && !a.files?.[w.image]) el._timer = setInterval(load, w.refresh * 1000);
+      if (w.refresh) el._timer = setInterval(() => { if (!a.files?.[cur()]) load(); }, w.refresh * 1000);
       el.addEventListener("click", () => {
         if (Date.now() - (this._longAt || 0) < 500) return; // fine di uno spostamento: non è un tocco
         this._addonClick(a, el, load);
