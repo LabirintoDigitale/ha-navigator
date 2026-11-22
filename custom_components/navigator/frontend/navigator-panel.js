@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.65";
+const PANEL_VERSION = "1.13.66";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -7479,6 +7479,10 @@ class NavigatorPanel extends HTMLElement {
         <label class="line"><span>Prova animazione galleria<div class="note">I visitatori dipendono dalla data: Natale (5 dic → 4 gen),
           Halloween (11 ott → 10 nov), altrimenti pipistrelli</div></span><input type="date" data-dbgdate value="${new Date().toISOString().slice(0, 10)}"></label>
         <div class="row" style="gap:8px"><button data-dbg="tunnel">▶ Avvia prova galleria</button><button data-dbg="tunnelstop">■ Ferma</button></div>
+        <h3 style="margin-top:14px">Registro degli add-on</h3>
+        <div class="note">Cosa fanno gli add-on (pagine in sottofondo, lettori, comandi, errori), ultime 150 righe.</div>
+        <pre id="alogbox" style="max-height:260px;overflow:auto;white-space:pre-wrap;font-size:11px;background:rgba(127,127,127,.15);border-radius:8px;padding:8px;margin:6px 0">${esc((this._alogLines || []).join("\n")) || "(vuoto)"}</pre>
+        <div class="row" style="gap:8px"><button data-dbg="alogclear">🗑 Svuota il registro</button></div>
       </div>` : ""}
       <div class="grp note">Le impostazioni valgono per questo dispositivo.</div>
     </div>`;
@@ -7536,6 +7540,8 @@ class NavigatorPanel extends HTMLElement {
       this._debugTunnel(d);
     });
     wrap.querySelector('[data-dbg="tunnelstop"]')?.addEventListener("click", () => this._debugTunnel(null));
+    wrap.querySelector('[data-dbg="alogclear"]')?.addEventListener("click", () => { this._alogLines = []; this._openSettings(); });
+    const alb = wrap.querySelector("#alogbox"); if (alb) alb.scrollTop = alb.scrollHeight;
     this._bindAddonSettings(wrap);
     wrap.querySelector("[data-tileclear]")?.addEventListener("click", async () => {
       await tileClear();
@@ -8679,7 +8685,10 @@ class NavigatorPanel extends HTMLElement {
         const u0 = cur(), local = a.files?.[u0];
         if (local) { img.src = local; return; }
         if (u0.startsWith("entity:")) { // copertina (e titolo) presi da un'entità, es. il lettore della musica
-          const st = this._hass?.states?.[this._addonFill(u0.slice(7), this._addonVarsA(a))];
+          const eid = this._addonFill(u0.slice(7), this._addonVarsA(a));
+          const st = this._hass?.states?.[eid];
+          const sk = `${eid}=${st ? st.state : "assente"}`;
+          if (el._lastSt !== sk) { el._lastSt = sk; this._alog(`${a.id}: lettore ${eid}: ${st ? `stato "${st.state}"` : "non esiste in Home Assistant"}`); }
           const pic = st?.attributes?.entity_picture || "";
           if (pic && img.dataset.pic !== pic) { img.dataset.pic = pic; img.src = pic; img.style.display = ""; el.querySelector(".aerr")?.remove(); }
           if (!pic) { img.dataset.pic = ""; img.removeAttribute("src"); img.style.visibility = "hidden"; } else img.style.visibility = "";
@@ -8785,15 +8794,41 @@ class NavigatorPanel extends HTMLElement {
       const u = this._addonFill(a.background, this._addonVarsA(a)).trim();
       if (/^(https?:\/\/|\/(?!\/))[^\s"'<>]*$/.test(u)) want.set(a.id, u);
     }
-    box.querySelectorAll("iframe").forEach((f) => { if (want.get(f.dataset.a) !== f.dataset.u) f.remove(); });
+    for (const a of this._addons || []) {
+      if (a.enabled && a.background && !want.has(a.id)) this._alog(`${a.id}: pagina in sottofondo NON aperta (indirizzo "${this._addonFill(a.background, this._addonVarsA(a))}" non valido o Music Assistant non trovato nei pannelli)`);
+    }
+    box.querySelectorAll("iframe").forEach((f) => { if (want.get(f.dataset.a) !== f.dataset.u) { this._alog(`${f.dataset.a}: pagina in sottofondo chiusa`); f.remove(); } });
     for (const [id, u] of want) {
       if (box.querySelector(`iframe[data-a="${CSS.escape(id)}"]`)) continue;
+      this._alog(`${id}: apro in sottofondo ${u}`);
       const f = document.createElement("iframe");
       f.dataset.a = id; f.dataset.u = u;
       f.setAttribute("allow", "autoplay; encrypted-media");
       f.setAttribute("aria-hidden", "true");
       f.tabIndex = -1;
       f.style.cssText = "width:400px;height:600px;border:0;";
+      f.addEventListener("load", () => {
+        let info = "";
+        try { // stessa origine (pagina di Home Assistant): si vede dove è arrivata e se dentro c'è il riquadro di Music Assistant
+          const w = f.contentWindow, d = f.contentDocument;
+          info = ` → ${w.location.pathname} · "${d.title}"`;
+          setTimeout(() => {
+            try {
+              const deep = (root, n = 0) => { if (n > 6 || !root) return 0; let c = root.querySelectorAll("iframe").length;
+                root.querySelectorAll("*").forEach((e) => { if (e.shadowRoot) c += deep(e.shadowRoot, n + 1); }); return c; };
+              this._alog(`${id}: dopo 8 s nella pagina ci sono ${deep(f.contentDocument)} riquadri (iframe), titolo "${f.contentDocument.title}"`);
+            } catch (e) { this._alog(`${id}: controllo della pagina non riuscito: ${e.message}`); }
+          }, 8000);
+        } catch (e) { info = " (altra origine: non leggibile)"; }
+        this._alog(`${id}: pagina in sottofondo caricata${info}`);
+      });
+      f.addEventListener("error", () => this._alog(`${id}: errore nel caricare la pagina in sottofondo`));
+      setTimeout(async () => { // dopo 20 s: i lettori di Music Assistant e il loro stato (si vede se ne è nato uno nuovo)
+        if (!this._entPlat) await this._loadEntPlat();
+        const ps = Object.entries(this._entPlat || {}).filter(([e, pl]) => pl === "music_assistant" && e.startsWith("media_player."))
+          .map(([e]) => `${e} (${this._hass.states[e]?.attributes?.friendly_name || "?"}): ${this._hass.states[e]?.state || "assente"}`);
+        this._alog(`${id}: lettori di Music Assistant dopo 20 s → ${ps.length ? ps.join(" | ") : "nessuno trovato"}`);
+      }, 20000);
       f.src = u;
       box.appendChild(f);
     }
@@ -9037,6 +9072,16 @@ class NavigatorPanel extends HTMLElement {
     return v;
   }
 
+  // registro degli add-on (ultime 150 righe, in memoria): si legge in ⚙ → Debug
+  _alog(msg) {
+    const t = new Date();
+    const line = `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}:${String(t.getSeconds()).padStart(2, "0")} ${msg}`;
+    (this._alogLines ||= []).push(line);
+    if (this._alogLines.length > 150) this._alogLines.splice(0, this._alogLines.length - 150);
+    const box = this.$?.("alogbox");
+    if (box) { box.textContent = this._alogLines.join("\n"); box.scrollTop = box.scrollHeight; }
+  }
+
   // dati per i segnaposto: posizione e percorso più le impostazioni scelte per l'add-on (es. {player})
   _addonVarsA(a) {
     const v = { ...this._addonVars(a.window), ...(a.values || {}) };
@@ -9080,8 +9125,10 @@ class NavigatorPanel extends HTMLElement {
     }
     if (b.service) {
       const [dom, svc] = b.service.split(".");
-      try { await this._hass.callService(dom, svc, this._addonFillDeep(b.data, v)); }
-      catch (err) { this._msg(`${a.name}: ${err.message || err}`); }
+      const data = this._addonFillDeep(b.data, v);
+      this._alog(`${a.id}: tasto ${b.icon || b.label} → ${b.service} ${JSON.stringify(data)}`);
+      try { await this._hass.callService(dom, svc, data); this._alog(`${a.id}: ${b.service} inviato`); }
+      catch (err) { this._alog(`${a.id}: ${b.service} ERRORE ${err.message || err.code || err}`); this._msg(`${a.name}: ${err.message || err}`); }
     }
   }
 
@@ -9142,7 +9189,9 @@ class NavigatorPanel extends HTMLElement {
       list.querySelectorAll("[data-i]").forEach((btn) => btn.addEventListener("click", async () => {
         const c = items[+btn.dataset.i];
         if (c.can_play) {
-          try { await play(c); pane.remove(); } catch (err) { this._msg(`${a.name}: ${err.message || err}`); }
+          this._alog(`${a.id}: scelto "${c.title}" (${c.uri || c.media_content_id || ""}) su ${ent}`);
+          try { await play(c); this._alog(`${a.id}: avvio inviato`); pane.remove(); }
+          catch (err) { this._alog(`${a.id}: avvio ERRORE ${err.message || err.code || err}`); this._msg(`${a.name}: ${err.message || err}`); }
         } else if (c.can_expand && open) open(c);
       }));
     };
@@ -9156,6 +9205,7 @@ class NavigatorPanel extends HTMLElement {
       if (!entry) return false;
       const r = await this._hass.callWS({ type: "call_service", domain: "music_assistant", service: "get_library",
         service_data: { config_entry_id: entry.entry_id, media_type: type, limit: 200, order_by: "name" }, return_response: true });
+      this._alog(`${a.id}: Music Assistant get_library ${type}: ${(r?.response?.items || []).length} voci`);
       const items = (r?.response?.items || []).map((it) => ({ title: it.name, thumbnail: it.image || "", can_play: true, uri: it.uri, mt: it.media_type || type }));
       show(items, (c) => this._hass.callService("music_assistant", "play_media", { entity_id: ent, media_id: c.uri, media_type: c.mt }));
       return true;
@@ -9179,6 +9229,7 @@ class NavigatorPanel extends HTMLElement {
         (c) => this._addonList(a, el, { ...b, label: c.title }, c));
     } catch (err) {
       // il lettore non si sfoglia (es. "Entity not found"): si prova con Music Assistant
+      this._alog(`${a.id}: sfogliare ${ent} non riuscito: ${err.message || err.code || err} → provo Music Assistant`);
       let ok = false;
       if (!at && this._hass.states?.[ent]) { try { ok = await viaMA(); } catch (e2) { console.debug("Navigator add-on, Music Assistant:", e2); } }
       if (!ok) list.textContent = `Non disponibile: ${err.message || err}`;
