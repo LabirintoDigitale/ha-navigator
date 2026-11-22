@@ -142,6 +142,11 @@ tenendoci il dito sopra) e fa una di queste cose:
   lettore, sfogliato come nel pannello *Media* di Home Assistant (`path` = cartelle in cui entrare, per nome). Toccando
   una voce parte su quel lettore, toccando una cartella si apre, ✕ chiude.
 
+**Icone**: per avere tasti tutti nello stesso stile (linee sottili, bianche) scrivi in `icon` uno di questi nomi:
+`play`, `pause`, `playpause`, `stop`, `next`, `prev`, `playlist`, `volup`, `voldown`, `mute`, `power`, `light`,
+`refresh`, `shuffle`, `repeat` (valgono anche le emoji corrispondenti, es. `▶`, `⏹`, `⏭`, `📃`). Altrimenti compare il
+testo o l'emoji scritta. I tasti con un elenco (`list`) stanno in alto a sinistra, gli altri in basso, allineati.
+
 **Impostazioni scelte da chi usa l'add-on** (`settings`, al massimo 6), in ⚙ → 🧩 Add-on:
 
 ```json
@@ -161,9 +166,9 @@ Esempio di tasti per la musica:
 
 ```json
 "buttons": [
-  {"icon": "▶", "label": "Play", "service": "media_player.media_play", "data": {"entity_id": "{player}"}},
-  {"icon": "⏭", "label": "Brano successivo", "service": "media_player.media_next_track", "data": {"entity_id": "{player}"}},
-  {"icon": "📃", "label": "Playlist", "list": {"browse": "{player}", "path": ["Playlists"]}}
+  {"icon": "play", "label": "Play", "service": "media_player.media_play", "data": {"entity_id": "{player}"}},
+  {"icon": "next", "label": "Brano successivo", "service": "media_player.media_next_track", "data": {"entity_id": "{player}"}},
+  {"icon": "playlist", "label": "Playlist", "list": {"browse": "{player}", "path": ["Playlists"]}}
 ]
 ```
 

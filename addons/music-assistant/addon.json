@@ -1,7 +1,7 @@
 {
   "id": "music-assistant",
   "name": "Music Assistant",
-  "version": "1.0",
+  "version": "1.1",
   "author": "Navigator",
   "description": "Musica da Music Assistant (o da un altro lettore di Home Assistant): copertina e titolo del brano, play, stop, brano successivo e l'elenco delle playlist da scegliere. Il lettore si sceglie qui sotto.",
   "settings": [
@@ -25,7 +25,7 @@
     "click": "none",
     "buttons": [
       {
-        "icon": "▶",
+        "icon": "play",
         "label": "Play",
         "service": "media_player.media_play",
         "data": {
@@ -33,7 +33,7 @@
         }
       },
       {
-        "icon": "⏹",
+        "icon": "stop",
         "label": "Stop",
         "service": "media_player.media_stop",
         "data": {
@@ -41,7 +41,7 @@
         }
       },
       {
-        "icon": "⏭",
+        "icon": "next",
         "label": "Brano successivo",
         "service": "media_player.media_next_track",
         "data": {
@@ -49,7 +49,7 @@
         }
       },
       {
-        "icon": "📃",
+        "icon": "playlist",
         "label": "Playlist",
         "list": {
           "browse": "{player}",

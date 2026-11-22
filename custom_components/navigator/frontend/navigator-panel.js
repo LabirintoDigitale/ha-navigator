@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.54";
+const PANEL_VERSION = "1.13.55";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -895,6 +895,33 @@ const TF_PUMPKIN = `<svg viewBox="0 0 60 56"><path d="M30 10c-2-5-1-8 3-9" strok
 const TF_GHOST = `<svg viewBox="0 0 50 60"><path d="M25 3C12 3 5 13 5 26v30l6-5 6 5 8-5 8 5 6-5 6 5V26C45 13 38 3 25 3z" fill="#f4f6f8" fill-opacity=".92" stroke="#c9d1d8" stroke-width="1"/><ellipse cx="18" cy="25" rx="3.6" ry="5" fill="#222"/><ellipse cx="32" cy="25" rx="3.6" ry="5" fill="#222"/><ellipse cx="25" cy="38" rx="4" ry="5.5" fill="#222"/></svg>`;
 
 // icone meteo DISEGNATE (SVG): sempre uguali su ogni dispositivo, al posto delle emoji (che a volte diventano un quadrato)
+// icone dei tasti degli add-on: un solo stile (linee sottili, bianche), al posto delle emoji che ogni telefono disegna a
+// modo suo. Un add-on le chiama per nome ("play") o con l'emoji equivalente ("▶"); altrimenti resta il testo scritto.
+const ADDON_ICONS = (() => {
+  const S = (d) => `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+  const I = {
+    play: S('<path d="M8 5.5v13l10.5-6.5z"/>'),
+    pause: S('<path d="M9 5.5v13M15 5.5v13"/>'),
+    playpause: S('<path d="M5 6v12l7-6z"/><path d="M15.5 6v12M19.5 6v12"/>'),
+    stop: S('<rect x="6.5" y="6.5" width="11" height="11" rx="1.5"/>'),
+    next: S('<path d="M6 6v12l8.5-6z"/><path d="M18 6v12"/>'),
+    prev: S('<path d="M18 6v12l-8.5-6z"/><path d="M6 6v12"/>'),
+    playlist: S('<path d="M4 6.5h11M4 11h11M4 15.5h6"/><path d="M17 17.5V9.5l3.5-1"/><circle cx="15.5" cy="17.5" r="1.6"/>'),
+    volup: S('<path d="M5 9.5h3l4-3.5v12l-4-3.5H5z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11"/>'),
+    voldown: S('<path d="M5 9.5h3l4-3.5v12l-4-3.5H5z"/><path d="M16 9a4 4 0 0 1 0 6"/>'),
+    mute: S('<path d="M5 9.5h3l4-3.5v12l-4-3.5H5z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/>'),
+    power: S('<path d="M12 4v8"/><path d="M7.5 6.8a7 7 0 1 0 9 0"/>'),
+    light: S('<path d="M9 17.5h6M10 20.5h4"/><path d="M12 3.5a5.5 5.5 0 0 0-3.2 10c.6.5 1 1.2 1 2h4.4c0-.8.4-1.5 1-2A5.5 5.5 0 0 0 12 3.5z"/>'),
+    refresh: S('<path d="M19 12a7 7 0 1 1-2.1-5"/><path d="M19 4.5V9h-4.5"/>'),
+    shuffle: S('<path d="M4 7h3.5c4 0 5 10 9 10H20M4 17h3.5c1.6 0 2.7-1.6 3.6-3.4M14 9.5c.7-1.3 1.6-2.5 2.5-2.5H20"/><path d="M17.5 4.5 20 7l-2.5 2.5M17.5 14.5 20 17l-2.5 2.5"/>'),
+    repeat: S('<path d="M5 11V9.5A2.5 2.5 0 0 1 7.5 7H19M19 13v1.5a2.5 2.5 0 0 1-2.5 2.5H5"/><path d="M16.5 4.5 19 7l-2.5 2.5M7.5 19.5 5 17l2.5-2.5"/>'),
+  };
+  const alias = { "▶": "play", "▶️": "play", "⏸": "pause", "⏸️": "pause", "⏯": "playpause", "⏯️": "playpause", "⏹": "stop",
+    "⏹️": "stop", "⏭": "next", "⏭️": "next", "⏮": "prev", "⏮️": "prev", "📃": "playlist", "📜": "playlist", "🎶": "playlist",
+    "🔊": "volup", "🔉": "voldown", "🔇": "mute", "⏻": "power", "💡": "light", "🔄": "refresh", "🔀": "shuffle", "🔁": "repeat" };
+  return (ic) => I[ic] || I[alias[ic]] || null;
+})();
+
 // ---------------------------------------------------------------- lettura di un file .zip (per gli add-on)
 // Legge l'indice in fondo al file e scompatta ogni voce (salvata così com'è o compressa "deflate", come fanno tutti i
 // programmi di compressione) con il DecompressionStream del browser: niente librerie. Restituisce {nome: Uint8Array}.
@@ -1683,8 +1710,15 @@ const STYLE = `
     background: linear-gradient(rgba(0,0,0,.7), transparent); border-radius: 8px 8px 0 0; white-space: nowrap; overflow: hidden;
     text-overflow: ellipsis; pointer-events: none; }
   .addwin .abar { position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); display: flex; gap: 6px; }
-  .addwin .abar button { border: none; border-radius: 10px; background: rgba(0,0,0,.6); color: #fff; font-size: 18px;
-    min-width: 40px; height: 36px; padding: 0 8px; cursor: pointer; }
+  .addwin .abar button, .addwin .abl button { border: none; border-radius: 10px; background: rgba(0,0,0,.55); color: #fff;
+    font-size: 16px; min-width: 40px; height: 36px; padding: 0 8px; cursor: pointer; display: flex; align-items: center;
+    justify-content: center; backdrop-filter: blur(2px); }
+  .addwin .abar button svg, .addwin .abl button svg { display: block; }
+  /* elenco (es. playlist) in alto a sinistra, allineato al primo tasto in basso; il titolo del brano parte dopo */
+  .addwin .abl { position: absolute; left: 6px; top: 6px; display: flex; gap: 6px; z-index: 1; }
+  .addwin .abl ~ .abar, .addwin.botmode .abar { left: 6px; transform: none; }
+  .addwin .aimg:has(.abl) .acap { padding-left: 54px; }
+  .addwin.botmode .acap { padding-right: 46px; }
   .addwin .alp { position: absolute; inset: 0; background: rgba(18,18,18,.96); border-radius: 8px; display: flex;
     flex-direction: column; z-index: 2; }
   .addwin .alh { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; color: #fff; font: 600 13px sans-serif; }
@@ -8617,7 +8651,8 @@ class NavigatorPanel extends HTMLElement {
       try { sel = Math.max(0, Math.min((alts?.length || 1) - 1, +localStorage.getItem(selKey) || 0)); } catch (e) { /* niente */ }
       el.innerHTML = `${w.title ? `<div class="at">${esc(w.title)}</div>` : ""}<div class="aimg"><img alt="" style="width:${w.width}px;height:${w.height}px">${
         w.marker ? `<i class="ame" title="Tu sei qui"></i>` : ""}${w.caption ? `<div class="acap"></div>` : ""}${
-        w.buttons?.length ? `<div class="abar">${w.buttons.map((b, i) => `<button data-b="${i}" title="${esc(b.label || "")}">${esc(b.icon || b.label)}</button>`).join("")}</div>` : ""}</div>${
+        w.buttons?.some((b) => b.list) ? `<div class="abl">${w.buttons.map((b, i) => (b.list ? `<button data-b="${i}" title="${esc(b.label || "")}">${ADDON_ICONS(b.icon) || esc(b.icon || b.label)}</button>` : "")).join("")}</div>` : ""}${
+        w.buttons?.some((b) => !b.list) ? `<div class="abar">${w.buttons.map((b, i) => (!b.list ? `<button data-b="${i}" title="${esc(b.label || "")}">${ADDON_ICONS(b.icon) || esc(b.icon || b.label)}</button>` : "")).join("")}</div>` : ""}</div>${
         alts ? `<div class="abtns" style="max-width:${w.width}px">${alts.map((it, k) => `<button data-k="${k}" class="${k === sel ? "on" : ""}">${esc(it.label)}</button>`).join("")}</div>` : ""}`;
       const img = el.querySelector("img");
       const cur = () => (alts ? alts[sel].image : w.image);
@@ -8659,7 +8694,7 @@ class NavigatorPanel extends HTMLElement {
       };
       el._fmtLabel = () => (alts ? alts[sel].label : "");
       el._entityTick = cur().startsWith("entity:") ? load : null; // aggiornata quando cambia lo stato di Home Assistant
-      el.querySelectorAll(".abar button").forEach((b) => b.addEventListener("click", (e) => {
+      el.querySelectorAll(".abar button, .abl button").forEach((b) => b.addEventListener("click", (e) => {
         e.stopPropagation(); // il tasto fa la sua azione, non è un tocco sulla finestra
         if (Date.now() - (this._longAt || 0) < 500) return;
         this._addonButton(a, el, w.buttons[+b.dataset.b]);

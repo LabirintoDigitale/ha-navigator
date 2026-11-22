@@ -247,7 +247,7 @@ def _addon_buttons(lst: Any) -> list[dict]:
     for b in (lst if isinstance(lst, list) else [])[:8]:
         if not isinstance(b, dict):
             continue
-        item = {"icon": str(b.get("icon") or "")[:4], "label": str(b.get("label") or "")[:24]}
+        item = {"icon": str(b.get("icon") or "")[:12], "label": str(b.get("label") or "")[:24]}
         if isinstance(b.get("service"), str) and _SERVICE.match(b["service"]):
             data = b.get("data") if isinstance(b.get("data"), dict) else {}
             if len(json.dumps(data)) > 2000:
