@@ -14,7 +14,7 @@
     },
     {
       "key": "ma_url",
-      "label": "Indirizzo di Music Assistant (vuoto = da solo)",
+      "label": "Indirizzo (vuoto = lo trova da solo)",
       "type": "text"
     }
   ],
