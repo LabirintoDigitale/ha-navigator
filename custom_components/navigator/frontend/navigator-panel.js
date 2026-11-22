@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.43";
+const PANEL_VERSION = "1.13.44";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1666,8 +1666,12 @@ const STYLE = `
   .addwin.moved { right: auto; } /* spostata: solo left/top (prima con right restava tirata per tutta la larghezza) */
   /* blocco della guida: barra verde in alto, sotto gli add-on (scorrono) con la croce a fianco */
   .navtop.docked { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+  .navbot.docked { border-top-left-radius: 0; }
   .addock { position: absolute; z-index: 1001; display: flex; gap: 8px; align-items: flex-start; padding: 8px;
     background: rgba(24,24,24,.92); border-radius: 0 0 14px 14px; box-sizing: border-box; box-shadow: 0 4px 12px rgba(0,0,0,.35); }
+  /* in orizzontale: attaccato sopra la barra in basso, a sinistra */
+  .addock.bot { border-radius: 14px 14px 0 0; box-shadow: 0 -4px 12px rgba(0,0,0,.3); align-items: center; }
+  .addock.bot .alist { flex: none; }
   .addock .alist { flex: 1; min-width: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;
     -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
   .addock .addwin { position: static; right: auto; left: auto; top: auto; box-shadow: none; background: rgba(255,255,255,.06);
@@ -8642,62 +8646,70 @@ class NavigatorPanel extends HTMLElement {
     setTimeout(() => menu.isConnected || this.shadowRoot.removeEventListener("pointerdown", off, true), 15000);
   }
 
-  // In guida, con almeno un add-on aperto, barra verde + add-on + croce diventano un blocco unico: la barra in alto per
-  // tutta la larghezza e, attaccati sotto, gli add-on (che scorrono su e giù) con la croce a fianco. Chiusi tutti gli
-  // add-on la barra e la croce tornano separate, ognuna al suo posto.
+  // In guida, con almeno un add-on aperto, gli add-on si attaccano alle barre della guida e se ne vede uno alla volta
+  // (▲▼ o strisciata su/giù per passare al successivo, in giro):
+  // - in verticale: blocco unico con la barra verde in alto, gli add-on sotto e la croce a fianco;
+  // - in orizzontale: attaccati sopra la barra in basso, a sinistra (la croce resta al suo posto).
+  // Chiusi tutti gli add-on, barre e croce tornano come prima.
   _syncDock() {
-    const wrap = this.$?.("mapwrap"), top = this.$?.("navtop"), pc = this.$?.("pitchctl");
+    const wrap = this.$?.("mapwrap"), top = this.$?.("navtop"), bot = this.$?.("navbot"), pc = this.$?.("pitchctl");
     if (!wrap || !top || !pc) return;
     let dock = this.$("addock");
     const wins = [...wrap.querySelectorAll(".addwin")];
-    // solo in verticale: in orizzontale lo spazio c'è e restano finestre staccate, come fuori dalla guida
-    const want = !!(this._nav && this._isGuida() && !top.hidden && wins.length && window.innerHeight > window.innerWidth);
-    if (want) {
-      if (!dock) {
-        dock = document.createElement("div");
-        dock.id = "addock"; dock.className = "addock";
-        dock.innerHTML = `<div class="alist"></div><div class="across"></div>`;
-        wrap.appendChild(dock);
-        this._pcHome = { parent: pc.parentNode, next: pc.nextSibling };
-        // un add-on alla volta: frecce ▲▼ o strisciata su/giù per passare al successivo, in giro (dopo l'ultimo il primo)
-        const go = (d) => { this._dockIdx = (this._dockIdx || 0) + d; this._syncDock(); };
-        const list0 = dock.querySelector(".alist");
-        let y0 = null;
-        list0.addEventListener("pointerdown", (e) => { y0 = e.clientY; });
-        list0.addEventListener("pointerup", (e) => {
-          if (y0 != null && Math.abs(e.clientY - y0) > 40) { this._dockSwiped = Date.now(); go(e.clientY < y0 ? 1 : -1); }
-          y0 = null;
-        });
-        list0.addEventListener("click", (e) => { if (Date.now() - (this._dockSwiped || 0) < 400) e.stopPropagation(); }, true);
-        dock.addEventListener("click", (e) => {
-          const b = e.target.closest?.("[data-dk]");
-          if (b) { e.stopPropagation(); go(+b.dataset.dk); }
-        });
-      }
-      const list = dock.querySelector(".alist"), cr = dock.querySelector(".across");
-      for (const w of wins) if (w.parentNode !== list) list.appendChild(w);
-      if (pc.parentNode !== cr) cr.appendChild(pc);
-      const n = wins.length, k = (((this._dockIdx || 0) % n) + n) % n;
-      wins.forEach((w, i) => { w.style.display = i === k ? "" : "none"; });
-      let nav = cr.querySelector(".dknav");
-      if (n > 1) {
-        if (!nav) { nav = document.createElement("div"); nav.className = "dknav"; cr.appendChild(nav); }
-        const html = `<button data-dk="-1" title="Add-on precedente">▲</button><span>${k + 1}/${n}</span><button data-dk="1" title="Add-on successivo">▼</button>`;
-        if (nav.innerHTML !== html) nav.innerHTML = html;
-      } else nav?.remove();
-      top.classList.add("docked");
-      const y = top.offsetTop + top.offsetHeight;
-      dock.style.top = `${y}px`; dock.style.left = `${top.offsetLeft}px`; dock.style.width = `${top.offsetWidth}px`;
-      const bot = this.$("navbot");
-      const lim = (bot && !bot.hidden ? bot.offsetTop : wrap.clientHeight) - 8;
-      list.style.maxHeight = `${Math.max(140, Math.round((lim - y) * 0.75) - 16)}px`;
-    } else if (dock) {
+    const guida = !!(this._nav && this._isGuida() && !top.hidden && wins.length);
+    const mode = !guida ? null : window.innerHeight > window.innerWidth ? "top" : bot && !bot.hidden ? "bot" : null;
+    if (dock && dock.dataset.mode !== mode) { // via il blocco (o cambia tipo, ruotando il telefono)
       for (const w of wins) { w.style.display = ""; wrap.appendChild(w); }
       const h = this._pcHome;
-      if (h?.parent) h.parent.insertBefore(pc, h.next && h.next.parentNode === h.parent ? h.next : null);
-      dock.remove();
-      top.classList.remove("docked");
+      if (h?.parent && pc.parentNode !== h.parent) h.parent.insertBefore(pc, h.next && h.next.parentNode === h.parent ? h.next : null);
+      dock.remove(); dock = null;
+      top.classList.remove("docked"); bot?.classList.remove("docked");
       this._placeAddons();
+    }
+    if (!mode) return;
+    if (!dock) {
+      dock = document.createElement("div");
+      dock.id = "addock"; dock.className = `addock ${mode}`; dock.dataset.mode = mode;
+      dock.innerHTML = `<div class="alist"></div><div class="across"></div>`;
+      wrap.appendChild(dock);
+      this._pcHome = { parent: pc.parentNode, next: pc.nextSibling };
+      const go = (d) => { this._dockIdx = (this._dockIdx || 0) + d; this._syncDock(); };
+      const list0 = dock.querySelector(".alist");
+      let y0 = null;
+      list0.addEventListener("pointerdown", (e) => { y0 = e.clientY; });
+      list0.addEventListener("pointerup", (e) => {
+        if (y0 != null && Math.abs(e.clientY - y0) > 40) { this._dockSwiped = Date.now(); go(e.clientY < y0 ? 1 : -1); }
+        y0 = null;
+      });
+      list0.addEventListener("click", (e) => { if (Date.now() - (this._dockSwiped || 0) < 400) e.stopPropagation(); }, true);
+      dock.addEventListener("click", (e) => {
+        const b = e.target.closest?.("[data-dk]");
+        if (b) { e.stopPropagation(); go(+b.dataset.dk); }
+      });
+    }
+    const list = dock.querySelector(".alist"), cr = dock.querySelector(".across");
+    for (const w of wins) if (w.parentNode !== list) list.appendChild(w);
+    if (mode === "top" && pc.parentNode !== cr) cr.insertBefore(pc, cr.firstChild);
+    const n = wins.length, k = (((this._dockIdx || 0) % n) + n) % n;
+    wins.forEach((w, i) => { w.style.display = i === k ? "" : "none"; });
+    let nav = cr.querySelector(".dknav");
+    if (n > 1) {
+      if (!nav) { nav = document.createElement("div"); nav.className = "dknav"; cr.appendChild(nav); }
+      const html = `<button data-dk="-1" title="Add-on precedente">▲</button><span>${k + 1}/${n}</span><button data-dk="1" title="Add-on successivo">▼</button>`;
+      if (nav.innerHTML !== html) nav.innerHTML = html;
+    } else nav?.remove();
+    cr.hidden = mode === "bot" && n < 2;
+    if (mode === "top") {
+      top.classList.add("docked");
+      const y = top.offsetTop + top.offsetHeight;
+      Object.assign(dock.style, { top: `${y}px`, bottom: "", left: `${top.offsetLeft}px`, width: `${top.offsetWidth}px` });
+      const lim = (bot && !bot.hidden ? bot.offsetTop : wrap.clientHeight) - 8;
+      list.style.maxHeight = `${Math.max(140, Math.round((lim - y) * 0.75) - 16)}px`;
+    } else {
+      bot.classList.add("docked");
+      const yTop = top.offsetTop + top.offsetHeight + 8;
+      Object.assign(dock.style, { top: "", bottom: `${wrap.clientHeight - bot.offsetTop}px`, left: `${bot.offsetLeft}px`, width: "" });
+      list.style.maxHeight = `${Math.max(120, bot.offsetTop - yTop - 16)}px`;
     }
   }
 
