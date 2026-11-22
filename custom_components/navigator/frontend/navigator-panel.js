@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.47";
+const PANEL_VERSION = "1.13.48";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -8592,6 +8592,9 @@ class NavigatorPanel extends HTMLElement {
         load();
       }));
       img.onerror = () => {
+        // errore momentaneo del server: si riprova fra un minuto (non solo al prossimo aggiornamento)
+        clearTimeout(el._retry);
+        el._retry = setTimeout(() => { if (el.isConnected) load(); }, 60000);
         if (el.querySelector(".aerr")) return;
         img.insertAdjacentHTML("afterend", `<div class="aerr" style="width:${w.width}px;height:${w.height}px">Immagine non disponibile</div>`);
         img.style.display = "none";
@@ -8671,8 +8674,7 @@ class NavigatorPanel extends HTMLElement {
       for (const w of wins) {
         w.style.display = ""; wrap.appendChild(w);
         const im = w.querySelector(".aimg img");
-        if (im?.dataset.w) { im.style.setProperty("width", `${im.dataset.w}px`); im.style.setProperty("height", `${im.dataset.h}px`); }
-        w.style.width = "";
+        this._addonSize(w);
         w.querySelector(".dkover")?.remove();
       }
       const h = this._pcHome;
@@ -8725,6 +8727,7 @@ class NavigatorPanel extends HTMLElement {
       } else ov?.remove();
     }
     if (mode === "top") {
+      for (const w of wins) this._addonSize(w); // in verticale sempre alla grandezza normale
       top.classList.add("docked");
       const y = top.offsetTop + top.offsetHeight;
       Object.assign(dock.style, { top: `${y}px`, bottom: "", left: `${top.offsetLeft}px`, width: `${top.offsetWidth}px` });
@@ -8752,6 +8755,18 @@ class NavigatorPanel extends HTMLElement {
         im.style.setProperty("height", `${Math.round(h)}px`, "important"); im.style.setProperty("width", `${Math.round((h * W0) / H0)}px`, "important");
       }
     }
+  }
+
+  // l'add-on torna alla sua grandezza (dopo essere stato rimpicciolito in orizzontale nel blocco della guida)
+  _addonSize(w) {
+    const im = w.querySelector(".aimg img"), bt = w.querySelector(".abtns");
+    if (im?.dataset.w) {
+      im.style.removeProperty("width"); im.style.removeProperty("height");
+      im.style.width = `${im.dataset.w}px`; im.style.height = `${im.dataset.h}px`;
+      if (bt) bt.style.maxWidth = `${im.dataset.w}px`;
+      delete im.dataset.w; delete im.dataset.h;
+    }
+    w.style.width = "";
   }
 
   _placeAddons() {
