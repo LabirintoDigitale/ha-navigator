@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.41";
+const PANEL_VERSION = "1.13.42";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -8558,6 +8558,14 @@ class NavigatorPanel extends HTMLElement {
         if (local) { img.src = local; return; }
         const v = this._addonVars(w);
         at = v._pos;
+        // immagine con area fissa: il pallino va dove sei (fuori dall'area: nascosto)
+        const me = el.querySelector(".ame"), bb = w.marker_bbox;
+        if (me && bb && v._pos) {
+          const fx = (v._pos[1] - bb[1]) / (bb[3] - bb[1]), fy = (bb[2] - v._pos[0]) / (bb[2] - bb[0]);
+          const ok = fx >= 0 && fx <= 1 && fy >= 0 && fy <= 1;
+          me.style.display = ok ? "" : "none";
+          me.style.left = `${(fx * 100).toFixed(2)}%`; me.style.top = `${(fy * 100).toFixed(2)}%`;
+        }
         const u = this._addonFill(u0, v);
         img.src = w.refresh ? `${u}${u.includes("?") ? "&" : "?"}_t=${Math.floor(Date.now() / (w.refresh * 1000))}` : u;
       };

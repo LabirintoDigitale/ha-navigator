@@ -252,6 +252,16 @@ def _addon_click(c: Any) -> Any:
     return "close"
 
 
+def _bbox4(b: Any) -> list[float] | None:
+    try:
+        v = [float(x) for x in b][:4]
+    except (TypeError, ValueError):
+        return None
+    if len(v) == 4 and -90 <= v[0] < v[2] <= 90 and -180 <= v[1] < v[3] <= 180:
+        return v
+    return None
+
+
 def clean_addon(a: dict) -> dict:
     if not isinstance(a, dict):
         raise ValueError("add-on non valido")
@@ -302,6 +312,9 @@ def clean_addon(a: dict) -> dict:
             "marker": w.get("marker") is True,  # pallino al centro dell'immagine: "tu sei qui" (con {bbox})
             # con la posizione negli indirizzi: false = si aggiorna solo al ricaricamento (refresh), non quando ti sposti
             "follow": w.get("follow") is not False,
+            # area fissa dell'immagine [lat_min, lon_min, lat_max, lon_max] (proiezione EPSG:4326): il pallino "sei qui"
+            # va nel punto giusto anche su un'immagine che non è centrata su di te
+            "marker_bbox": _bbox4(w.get("marker_bbox")),
             "width": num(w.get("width"), 80, 800, 240),
             "height": num(w.get("height"), 60, 800, 160),
             "views": views,
