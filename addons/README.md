@@ -161,6 +161,9 @@ può far **ciclare** le sue voci col tasto *successivo* (comodo per le radio, ch
 ]}}
 ```
 
+Con `"exclude": ["filesystem"]` una scheda nasconde le voci il cui indirizzo (o quello della copertina) contiene una di
+quelle parole: per esempio le playlist che Music Assistant crea dalle cartelle della condivisione di rete.
+
 Se l'ultima voce partita viene da una scheda con `"cycle": true`, il tasto con `"cycle": "next"` (o `"prev"`) fa partire la
 voce dopo (o prima) di quell'elenco, a giro; altrimenti chiama il suo servizio come sempre.
 

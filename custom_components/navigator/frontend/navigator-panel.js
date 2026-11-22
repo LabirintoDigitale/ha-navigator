@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.60";
+const PANEL_VERSION = "1.13.61";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -9070,6 +9070,7 @@ class NavigatorPanel extends HTMLElement {
     const ti = Math.min(el._tab || 0, Math.max(0, tabs.length - 1));
     const path = tabs.length ? tabs[ti].path : b.list.path || [];
     const cycle = !!tabs[ti]?.cycle;
+    const excl = tabs[ti]?.exclude || [];
     let pane = box.querySelector(".alp");
     if (!pane) {
       pane = document.createElement("div"); pane.className = "alp"; box.appendChild(pane);
@@ -9082,7 +9083,12 @@ class NavigatorPanel extends HTMLElement {
     pane.querySelectorAll("[data-t]").forEach((t) => t.addEventListener("click", () => this._addonList(a, el, b, null, +t.dataset.t)));
     const list = pane.querySelector(".all");
     // elenco di voci da toccare: play(c) fa partire, open(c) apre una cartella
-    const show = (items, play0, open) => {
+    const show = (items0, play0, open) => {
+      // voci nascoste (es. le playlist che vengono dalle cartelle: "filesystem" nell'indirizzo o nella copertina)
+      const items = excl.length ? items0.filter((c) => {
+        const k = `${c.uri || ""} ${c.media_content_id || ""} ${c.thumbnail || ""}`.toLowerCase();
+        return !excl.some((x) => k.includes(x));
+      }) : items0;
       if (!items.length) { list.textContent = "Vuoto"; return; }
       const playable = items.filter((c) => c.can_play);
       // partita una voce di una scheda che cicla (es. una radio): il tasto "successivo" passerà alla voce dopo

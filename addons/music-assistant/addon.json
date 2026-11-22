@@ -1,7 +1,7 @@
 {
   "id": "music-assistant",
   "name": "Music Assistant",
-  "version": "1.4",
+  "version": "1.5",
   "author": "Navigator",
   "description": "Musica da Music Assistant: copertina e titolo del brano, play, stop, brano successivo e l'elenco da cui scegliere una playlist o una radio (con una radio il tasto successivo passa alla radio dopo). Per suonare su questo telefono scrivi qui sotto l'indirizzo di Music Assistant: Navigator ne tiene aperta la pagina in sottofondo, così il lettore Web resta disponibile.",
   "settings": [
@@ -65,6 +65,9 @@
               "label": "Playlist",
               "path": [
                 "Playlists"
+              ],
+              "exclude": [
+                "filesystem"
               ]
             },
             {

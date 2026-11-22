@@ -264,7 +264,10 @@ def _addon_buttons(lst: Any) -> list[dict]:
                 if isinstance(t, dict):
                     tabs.append({"label": str(t.get("label") or "")[:20],
                                  "path": [str(p)[:60] for p in (t.get("path") or []) if isinstance(p, str)][:5],
-                                 "cycle": t.get("cycle") is True})
+                                 "cycle": t.get("cycle") is True,
+                                 # voci da nascondere: se l'indirizzo della voce o della copertina contiene una di
+                                 # queste parole (es. "filesystem" = le playlist che vengono dalle cartelle)
+                                 "exclude": [str(x).lower()[:40] for x in (t.get("exclude") or []) if isinstance(x, str)][:5]})
             item["list"] = {"browse": b["list"]["browse"][:120], "path": path or (tabs[0]["path"] if tabs else []), "tabs": tabs}
         else:
             continue
