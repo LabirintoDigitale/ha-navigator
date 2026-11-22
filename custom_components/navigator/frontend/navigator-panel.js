@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.64";
+const PANEL_VERSION = "1.13.65";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -8485,6 +8485,12 @@ class NavigatorPanel extends HTMLElement {
             }
             return `<label class="note" style="display:block;margin-top:4px">${esc(st.label)}<input data-addon-set="${esc(a.id)}" data-k="${esc(st.key)}" value="${esc(val)}" style="display:block;max-width:100%"></label>`;
           }).join("")}
+          ${a.background ? (() => {
+            const u = this._addonFill(a.background, this._addonVarsA(a)).trim();
+            const open = !!this.shadowRoot?.querySelector(`#addbg iframe[data-a="${CSS.escape(a.id)}"]`);
+            return `<div class="note" style="margin-top:4px">${u ? `Pagina in sottofondo: <code>${esc(u)}</code> ${open && a.enabled ? "· aperta ✔" : "· chiusa"}`
+              : /ma_panel/.test(a.background) ? "⚠ Music Assistant non trovato nella barra laterale di Home Assistant" : "Pagina in sottofondo: nessuna"}</div>`;
+          })() : ""}
           <select data-addon-where="${esc(a.id)}" style="margin-top:4px;max-width:100%">${[["both", "In guida e in pianificazione"],
             ["guida", "Solo in guida"], ["plan", "Solo in pianificazione"]].map(([v, t]) =>
             `<option value="${v}" ${(a.where || "both") === v ? "selected" : ""}>${t}</option>`).join("")}</select>
