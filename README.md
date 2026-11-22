@@ -356,6 +356,28 @@ Cosa può fare il tocco (`click`):
 | `{"open": "https://…"}` | apre un indirizzo |
 | `{"service": "light.toggle", "data": {"entity_id": "light.cortile"}}` | chiama un servizio di Home Assistant |
 
+#### Posizione e percorso negli indirizzi
+
+Negli indirizzi (`image`, `images`, `open`) si possono scrivere dei **segnaposto fra graffe**: Navigator li sostituisce
+con i dati del momento e, se l'indirizzo usa la posizione, **ricarica l'immagine quando ti sposti** (circa il 15% della
+zona, controllo ogni 10 secondi). L'add-on non riceve altro: nessun codice, solo questi valori.
+
+| Segnaposto | Valore |
+|---|---|
+| `{lat}`, `{lon}` | la tua posizione (in guida il GPS, altrimenti il centro della mappa) |
+| `{bbox}` | zona intorno a te come `lat_min,lon_min,lat_max,lon_max` (l'ordine dei servizi WMS 1.3.0) |
+| `{bbox_xy}` | la stessa zona come `lon_min,lat_min,lon_max,lat_max` |
+| `{lat_min}`, `{lat_max}`, `{lon_min}`, `{lon_max}` | i bordi della zona |
+| `{zoom}` | zoom della mappa |
+| `{speed}`, `{heading}` | velocità (km/h) e direzione di marcia (gradi), in guida |
+| `{dest_lat}`, `{dest_lon}`, `{dest_name}` | l'arrivo del percorso |
+| `{left_km}`, `{left_min}` | quanto manca all'arrivo, in guida |
+
+La zona è grande `window.area_km` km dal centro in su e in giù (predefinito 100), larga secondo la forma dell'immagine;
+con `"marker": true` al centro dell'immagine compare un pallino rosso (*tu sei qui*).
+L'esempio [`satellite-zona`](addons/satellite-zona) mostra il satellite solo intorno a te:
+`"image": "https://view.eumetsat.int/geoserver/ows?…&bbox={bbox}&width=480&height=340"`.
+
 L'esempio completo è nella cartella [`addons/meteo-satellite`](addons/meteo-satellite), già pronto da installare in
 [`addons/meteo-satellite.zip`](addons/meteo-satellite.zip); i dettagli sono in [`addons/README.md`](addons/README.md).
 

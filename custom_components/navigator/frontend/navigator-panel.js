@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.35";
+const PANEL_VERSION = "1.13.36";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1665,6 +1665,9 @@ const STYLE = `
     padding: 4px; box-shadow: 0 2px 10px rgba(0,0,0,.45); touch-action: none; user-select: none; -webkit-user-select: none; cursor: pointer; }
   .addwin .at { color: #fff; font: 600 12px sans-serif; padding: 2px 6px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .addwin img { display: block; border-radius: 8px; object-fit: cover; background: #333; pointer-events: none; }
+  .addwin .aimg { position: relative; }
+  .addwin .ame { position: absolute; left: 50%; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%;
+    background: #e53935; border: 2px solid #fff; box-shadow: 0 0 0 2px rgba(229,57,53,.35); pointer-events: none; }
   .addwin .abtns { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 2px 0; }
   .addwin .abtns button { flex: 1 0 auto; border: none; border-radius: 6px; padding: 5px 7px; font: 600 11px sans-serif;
     background: rgba(255,255,255,.12); color: #ddd; cursor: pointer; }
@@ -8375,7 +8378,9 @@ class NavigatorPanel extends HTMLElement {
         ricarica la pagina quando scegli un file):</div>
       <div class="row" style="gap:6px;margin-top:4px"><input type="url" data-addon-url placeholder="https://…/add-on.zip" style="flex:1;min-width:0">
         <button data-addon-urlgo>Installa</button></div>
-      <button data-addon-example style="margin-top:8px">🛰️ Installa l'esempio: meteo dal satellite</button>
+      <div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap">
+        <button data-addon-example="meteo-satellite">🛰️ Esempio: meteo dal satellite</button>
+        <button data-addon-example="satellite-zona">📍 Esempio: satellite sulla tua zona</button></div>
       <details class="addinfo"><summary>ℹ️ Come si crea un add-on</summary>
         <ol>
           <li>Crea una cartella e dentro scrivi il file <b>addon.json</b> (esempio qui sotto).</li>
@@ -8403,6 +8408,10 @@ class NavigatorPanel extends HTMLElement {
           <b>click</b>: <code>"close"</code> chiude, <code>"refresh"</code> ricarica, <code>"none"</code> niente,
           <code>{"open": "https://…"}</code> apre un indirizzo,
           <code>{"service": "light.toggle", "data": {"entity_id": "light.cortile"}}</code> chiama un servizio di Home Assistant.</div>
+        <div class="note"><b>Posizione e percorso</b>: negli indirizzi si possono scrivere <code>{lat}</code> <code>{lon}</code>
+          (la tua posizione), <code>{bbox}</code> (zona intorno a te di <b>area_km</b> km, per i servizi WMS), <code>{zoom}</code>,
+          <code>{speed}</code>, <code>{dest_lat}</code> <code>{dest_lon}</code>, <code>{left_km}</code>…: l'immagine si ricarica quando ti
+          sposti; <code>"marker": true</code> mette un pallino al centro (tu sei qui).</div>
         <div class="note">Nessun codice viene eseguito: un add-on è solo questa descrizione.</div>
         <div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap">
           <a href="https://github.com/LabirintoDigitale/ha-navigator/raw/main/addons/meteo-satellite.zip" target="_blank" rel="noopener">⬇ Scarica l'esempio (meteo dal satellite)</a>
@@ -8431,8 +8440,8 @@ class NavigatorPanel extends HTMLElement {
       const url = wrap.querySelector("[data-addon-url]")?.value.trim();
       if (url) this._addonInstallUrl(url);
     });
-    wrap.querySelector("[data-addon-example]")?.addEventListener("click", () =>
-      this._addonInstallUrl("https://raw.githubusercontent.com/LabirintoDigitale/ha-navigator/main/addons/meteo-satellite.zip"));
+    wrap.querySelectorAll("[data-addon-example]").forEach((b) => b.addEventListener("click", () =>
+      this._addonInstallUrl(`https://raw.githubusercontent.com/LabirintoDigitale/ha-navigator/main/addons/${b.dataset.addonExample}.zip`)));
     wrap.querySelector("[data-addon-file]")?.addEventListener("change", async (e) => {
       const f = e.target.files?.[0];
       e.target.value = "";
@@ -8519,13 +8528,19 @@ class NavigatorPanel extends HTMLElement {
       const selKey = `${STORE_KEY}-addon-${a.id}`;
       let sel = 0;
       try { sel = Math.max(0, Math.min((alts?.length || 1) - 1, +localStorage.getItem(selKey) || 0)); } catch (e) { /* niente */ }
-      el.innerHTML = `${w.title ? `<div class="at">${esc(w.title)}</div>` : ""}<img alt="" style="width:${w.width}px;height:${w.height}px">${
+      el.innerHTML = `${w.title ? `<div class="at">${esc(w.title)}</div>` : ""}<div class="aimg"><img alt="" style="width:${w.width}px;height:${w.height}px">${
+        w.marker ? `<i class="ame" title="Tu sei qui"></i>` : ""}</div>${
         alts ? `<div class="abtns" style="max-width:${w.width}px">${alts.map((it, k) => `<button data-k="${k}" class="${k === sel ? "on" : ""}">${esc(it.label)}</button>`).join("")}</div>` : ""}`;
       const img = el.querySelector("img");
       const cur = () => (alts ? alts[sel].image : w.image);
+      let at = null; // posizione usata per l'ultima immagine (per i segnaposto {lat}, {bbox}…)
       const load = () => {
-        const u = cur(), local = a.files?.[u];
-        img.src = local || (w.refresh ? `${u}${u.includes("?") ? "&" : "?"}_t=${Math.floor(Date.now() / (w.refresh * 1000))}` : u);
+        const u0 = cur(), local = a.files?.[u0];
+        if (local) { img.src = local; return; }
+        const v = this._addonVars(w);
+        at = v._pos;
+        const u = this._addonFill(u0, v);
+        img.src = w.refresh ? `${u}${u.includes("?") ? "&" : "?"}_t=${Math.floor(Date.now() / (w.refresh * 1000))}` : u;
       };
       el.querySelectorAll(".abtns button").forEach((b) => b.addEventListener("click", (e) => {
         e.stopPropagation(); // il tasto cambia immagine, non è un tocco sulla finestra
@@ -8544,6 +8559,14 @@ class NavigatorPanel extends HTMLElement {
       img.onload = () => { el.querySelector(".aerr")?.remove(); img.style.display = ""; };
       load();
       if (w.refresh) el._timer = setInterval(() => { if (!a.files?.[cur()]) load(); }, w.refresh * 1000);
+      // indirizzi con la posizione: nuova immagine quando ti sei spostato di un buon tratto (controllo ogni 10 s)
+      if ([w.image, ...(w.images || []).map((i) => i.image)].some((u) => /\{(lat|lon|bbox|lat_min|lat_max|lon_min|lon_max|bbox_xy|zoom)\}/.test(u))) {
+        const chk = setInterval(() => {
+          if (!el.isConnected) { clearInterval(chk); return; }
+          const p = this._addonVars(w)._pos;
+          if (at && p && distM(at, p) > Math.max(300, (w.area_km || 100) * 1000 * 0.15)) load();
+        }, 10000);
+      }
       el.addEventListener("click", () => {
         if (Date.now() - (this._longAt || 0) < 500) return; // fine di uno spostamento: non è un tocco
         this._addonClick(a, el, load);
@@ -8594,11 +8617,50 @@ class NavigatorPanel extends HTMLElement {
     for (const a of this._addons || []) if (this.$(`addon-${a.id}`)) this._applyFloat(`addon-${a.id}`, `addon:${a.id}`);
   }
 
+  // dati che un add-on può usare negli indirizzi, scritti fra graffe: {lat} {lon} (la tua posizione in guida, altrimenti
+  // il centro della mappa), {bbox} {bbox_xy} {lat_min} {lat_max} {lon_min} {lon_max} (zona intorno, metà altezza
+  // window.area_km, larghezza secondo la forma dell'immagine), {zoom}, {speed} (km/h), {heading} (gradi),
+  // {dest_lat} {dest_lon} {dest_name} (arrivo del percorso), {left_km} {left_min} (quanto manca, in guida)
+  _addonVars(w) {
+    const f = this._nav?.fix;
+    let lat, lon, zoom;
+    if (f) { lat = f.lat; lon = f.lon; }
+    else if (this._3d && this._g3) { const c = this._g3.getCenter(); lat = c.lat; lon = c.lng; }
+    else if (this._map) { const c = this._map.getCenter(); lat = c.lat; lon = c.lng; }
+    zoom = Math.round(this._3d && this._g3 ? this._g3.getZoom() : this._map?.getZoom() || 10);
+    const v = { zoom };
+    if (lat != null) {
+      const hl = (w.area_km || 100) / 111.32;
+      const hw = (hl * ((w.width || 240) / (w.height || 160))) / Math.max(0.2, Math.cos((lat * Math.PI) / 180));
+      const r = (x) => (+x).toFixed(4);
+      Object.assign(v, { lat: r(lat), lon: r(lon), lat_min: r(lat - hl), lat_max: r(lat + hl), lon_min: r(lon - hw), lon_max: r(lon + hw) });
+      v.bbox = `${v.lat_min},${v.lon_min},${v.lat_max},${v.lon_max}`;
+      v.bbox_xy = `${v.lon_min},${v.lat_min},${v.lon_max},${v.lat_max}`;
+      v._pos = [lat, lon];
+    }
+    v.speed = f?.speed != null ? Math.round(f.speed * 3.6) : "";
+    v.heading = this._nav?.dir != null ? Math.round(this._nav.dir) : "";
+    const dest = this._points?.length > 1 ? this._points[this._points.length - 1] : null;
+    v.dest_lat = dest ? (+dest.lat).toFixed(4) : ""; v.dest_lon = dest ? (+dest.lon).toFixed(4) : "";
+    v.dest_name = dest?.name || "";
+    const rt = this._result?.routes?.[this._sel];
+    if (this._nav?.snap && rt) {
+      const g = this._geom(rt), tot = g._cum[g._cum.length - 1], left = Math.max(0, tot - this._nav.snap.along);
+      v.left_km = (left / 1000).toFixed(1);
+      v.left_min = Math.round((rt.summary.time * left) / Math.max(1, tot) / 60);
+    } else { v.left_km = ""; v.left_min = ""; }
+    return v;
+  }
+
+  _addonFill(u, v) {
+    return u.replace(/\{(\w+)\}/g, (m, k) => (k in v && k[0] !== "_" ? (k === "dest_name" ? encodeURIComponent(v[k]) : String(v[k])) : m));
+  }
+
   async _addonClick(a, el, reload) {
     const c = a.window.click;
     if (c === "none") return;
     if (c === "refresh") { reload(); return; }
-    if (c?.open) { window.open(c.open, "_blank", "noopener"); return; }
+    if (c?.open) { window.open(this._addonFill(c.open, this._addonVars(a.window)), "_blank", "noopener"); return; }
     if (c?.service) {
       const [dom, svc] = c.service.split(".");
       try { await this._hass.callService(dom, svc, c.data || {}); this._msg(`${a.name}: fatto`); }

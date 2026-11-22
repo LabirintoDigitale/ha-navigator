@@ -297,6 +297,9 @@ def clean_addon(a: dict) -> dict:
             "title": str(w.get("title") or "")[:60],
             "image": img,
             "refresh": num(w.get("refresh"), 0, 86400, 0),
+            # zona intorno a te per i segnaposto {bbox}… degli indirizzi: metà altezza in km (0 = 100 km)
+            "area_km": num(w.get("area_km"), 0, 2000, 0),
+            "marker": w.get("marker") is True,  # pallino al centro dell'immagine: "tu sei qui" (con {bbox})
             "width": num(w.get("width"), 80, 800, 240),
             "height": num(w.get("height"), 60, 800, 160),
             "views": views,
