@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.51";
+const PANEL_VERSION = "1.13.52";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -8413,6 +8413,9 @@ class NavigatorPanel extends HTMLElement {
         <div class="ai"><b>${esc(a.name)}</b>${a.version ? ` <span class="note">v${esc(a.version)}</span>` : ""}
           ${a.description ? `<div class="note">${esc(a.description)}</div>` : ""}
           <div class="note">Mappa ${a.window.views.map((v) => v.toUpperCase()).join(" e ")}${a.author ? ` · di ${esc(a.author)}` : ""}</div>
+          <select data-addon-where="${esc(a.id)}" style="margin-top:4px;max-width:100%">${[["both", "In guida e in pianificazione"],
+            ["guida", "Solo in guida"], ["plan", "Solo in pianificazione"]].map(([v, t]) =>
+            `<option value="${v}" ${(a.where || "both") === v ? "selected" : ""}>${t}</option>`).join("")}</select>
           ${this._addonClosed?.has(a.id) && a.enabled ? `<button data-addon-show="${esc(a.id)}" style="margin-top:4px">Mostra di nuovo</button>` : ""}</div>
         <span class="sw" title="Attivo"><input type="checkbox" data-addon-on="${esc(a.id)}" ${a.enabled ? "checked" : ""}><i></i></span>
         <button data-addon-del="${esc(a.id)}" title="Togli">🗑</button></div>`).join("") : `<div class="note" style="margin-top:6px">Nessun add-on installato.</div>`}
@@ -8504,6 +8507,9 @@ class NavigatorPanel extends HTMLElement {
       try { await this._addonCall({ enable: el.dataset.addonOn, on: el.checked }); } catch (err) { this._msg(err.message || String(err)); }
       this._openSettings();
     }));
+    wrap.querySelectorAll("[data-addon-where]").forEach((el) => el.addEventListener("change", async () => {
+      try { await this._addonCall({ where_id: el.dataset.addonWhere, where: el.value }); } catch (err) { this._msg(err.message || String(err)); }
+    }));
     wrap.querySelectorAll("[data-addon-del]").forEach((el) => el.addEventListener("click", async () => {
       const a = (this._addons || []).find((x) => x.id === el.dataset.addonDel);
       if (!a || !confirm(`Togliere l'add-on «${a.name}»?`)) return;
@@ -8552,7 +8558,9 @@ class NavigatorPanel extends HTMLElement {
     if (!wrap) return;
     this._addonClosed ||= new Set();
     const view = this._3d ? "3d" : "2d";
-    const want = (this._addons || []).filter((a) => a.enabled && a.window.views.includes(view) && !this._addonClosed.has(a.id));
+    this._addonGuida = !!(this._nav && this._isGuida());
+    const want = (this._addons || []).filter((a) => a.enabled && a.window.views.includes(view) && !this._addonClosed.has(a.id)
+      && this._addonHere(a));
     const ids = new Set(want.map((a) => `addon-${a.id}`));
     wrap.querySelectorAll(".addwin").forEach((el) => {
       if (!ids.has(el.id)) { clearInterval(el._timer); el.remove(); }
@@ -8638,6 +8646,12 @@ class NavigatorPanel extends HTMLElement {
     if (this._nav) this._placePitchCtl();
   }
 
+  // l'add-on è previsto qui? "where": in guida e in pianificazione (both), solo in guida, solo in pianificazione
+  _addonHere(a) {
+    const g = !!(this._nav && this._isGuida());
+    return (a.where || "both") === "both" || (a.where === "guida") === g;
+  }
+
   // elenco sotto il riquadro della velocità: add-on attivi ma chiusi, o spenti, che si possono mostrare in questa vista
   _addonMenu() {
     const wrap = this.$("mapwrap"), box = this.$("spdbox");
@@ -8645,7 +8659,8 @@ class NavigatorPanel extends HTMLElement {
     if (menu) { menu.remove(); return; } // secondo tocco: si chiude
     this._addonClosed ||= new Set();
     const view = this._3d ? "3d" : "2d";
-    const list = (this._addons || []).filter((a) => a.window.views.includes(view) && (!a.enabled || this._addonClosed.has(a.id)));
+    const list = (this._addons || []).filter((a) => a.window.views.includes(view) && this._addonHere(a)
+      && (!a.enabled || this._addonClosed.has(a.id)));
     menu = document.createElement("div");
     menu.id = "addmenu"; menu.className = "addmenu";
     menu.innerHTML = list.length
@@ -8682,6 +8697,8 @@ class NavigatorPanel extends HTMLElement {
   _syncDock() {
     const wrap = this.$?.("mapwrap"), top = this.$?.("navtop"), bot = this.$?.("navbot"), pc = this.$?.("pitchctl");
     if (!wrap || !top || !pc) return;
+    // entrando o uscendo dalla guida cambiano gli add-on previsti (solo in guida / solo in pianificazione)
+    if (this._addonGuida !== undefined && this._addonGuida !== !!(this._nav && this._isGuida())) { this._renderAddons(); return; }
     let dock = this.$("addock");
     const wins = [...wrap.querySelectorAll(".addwin")];
     const guida = !!(this._nav && this._isGuida() && !top.hidden && wins.length);

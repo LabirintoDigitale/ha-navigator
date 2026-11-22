@@ -478,6 +478,8 @@ async def ws_layout(hass: HomeAssistant, connection: websocket_api.ActiveConnect
     vol.Optional("remove"): str,
     vol.Optional("enable"): str,
     vol.Optional("on", default=True): bool,
+    vol.Optional("where_id"): str,
+    vol.Optional("where"): vol.In(["both", "guida", "plan"]),
 })
 @websocket_api.async_response
 async def ws_addons(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
@@ -488,9 +490,10 @@ async def ws_addons(hass: HomeAssistant, connection: websocket_api.ActiveConnect
         add = msg.get("add")
         if msg.get("url"):  # installazione da un indirizzo: lo zip lo scarica Home Assistant (niente scelta del file)
             add = await _addon_download(hass, msg["url"])
-        if add is not None or any(k in msg for k in ("remove", "enable")):
+        if add is not None or any(k in msg for k in ("remove", "enable", "where_id")):
             try:
-                return {"addons": await trips.addon_change(add, msg.get("remove"), msg.get("enable"), msg["on"])}
+                return {"addons": await trips.addon_change(add, msg.get("remove"), msg.get("enable"), msg["on"],
+                                                           msg.get("where_id"), msg.get("where"))}
             except ValueError as err:
                 raise NavigatorError(str(err)) from err
         return {"addons": trips.addons}

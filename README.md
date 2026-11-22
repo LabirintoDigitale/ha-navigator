@@ -303,6 +303,9 @@ del cortile.
   **🛰️ Installa l'esempio** installa con un tocco il meteo dal satellite. Lì ogni add-on si accende, si spegne o si toglie.
 - Sono salvati in Home Assistant: valgono per **tutti i dispositivi**, anche lo schermo dell'auto.
 - La finestra si **sposta tenendola premuta**, come gli altri riquadri; la posizione resta.
+- Per ogni add-on si sceglie **dove compare**: in guida e in pianificazione, solo in guida o solo in pianificazione.
+- In guida gli add-on si attaccano alle barre (in verticale sotto la barra verde, in orizzontale a sinistra sopra la
+  barra in basso), uno alla volta: ▲▼ sull'immagine per passare al successivo, ⟳ per cambiare formato.
 - Un add-on è **solo una descrizione** (`addon.json`): **nessun codice viene eseguito**, quindi uno zip trovato in giro
   non può fare niente di nascosto.
 

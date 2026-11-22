@@ -303,6 +303,8 @@ def clean_addon(a: dict) -> dict:
         "description": str(a.get("description") or "")[:300],
         "author": str(a.get("author") or "")[:60],
         "enabled": a.get("enabled") is not False,
+        # dove compare: "both" (in guida e in pianificazione), "guida" (solo in navigazione), "plan" (solo pianificazione)
+        "where": a.get("where") if a.get("where") in ("both", "guida", "plan") else "both",
         "window": {
             "title": str(w.get("title") or "")[:60],
             "image": img,
@@ -414,11 +416,15 @@ class Trips:
         self._store.async_delay_save(lambda: {"garage": self.garage, "selected": self.selected, "layouts": self.layouts}, 5)
 
     async def addon_change(self, add: dict | None = None, remove: str | None = None, enable: str | None = None,
-                           on: bool = True) -> list[dict]:
+                           on: bool = True, where_id: str | None = None, where: str | None = None) -> list[dict]:
         """Aggiunge (o aggiorna, stesso id) un add-on, lo toglie, oppure lo attiva/disattiva."""
         addons = list(self.addons)
         if add is not None:
             c = clean_addon(add)
+            old = next((x for x in addons if x["id"] == c["id"]), None)
+            if old:  # aggiornamento: restano le scelte fatte (acceso/spento, dove compare)
+                c["enabled"] = old.get("enabled", True)
+                c["where"] = old.get("where", "both")
             addons = [x for x in addons if x["id"] != c["id"]]
             if len(addons) >= ADDON_MAX:
                 raise ValueError(f"al massimo {ADDON_MAX} add-on: togline qualcuno")
@@ -427,6 +433,8 @@ class Trips:
             addons = [x for x in addons if x["id"] != remove]
         if enable:
             addons = [{**x, "enabled": bool(on)} if x["id"] == enable else x for x in addons]
+        if where_id and where in ("both", "guida", "plan"):
+            addons = [{**x, "where": where} if x["id"] == where_id else x for x in addons]
         self.addons = addons
         await self._addon_store.async_save({"addons": addons})
         return addons
