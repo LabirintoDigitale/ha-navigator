@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.57";
+const PANEL_VERSION = "1.13.58";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -8470,7 +8470,10 @@ class NavigatorPanel extends HTMLElement {
           ${(a.settings || []).map((st) => {
             const val = a.values?.[st.key] || "";
             if (st.type === "entity") {
-              const ents = Object.keys(this._hass?.states || {}).filter((e) => !st.domain || e.startsWith(`${st.domain}.`)).sort();
+              const plat = this._entPlat; // integrazione di ogni entità (dal registro delle entità), se letta
+              const ents = Object.keys(this._hass?.states || {}).filter((e) => (!st.domain || e.startsWith(`${st.domain}.`))
+                && (!st.integration || !plat || plat[e] === st.integration || e === val)).sort();
+              if (st.integration && !plat) this._loadEntPlat(); // la prima volta: si legge e si riapre
               return `<label class="note" style="display:block;margin-top:4px">${esc(st.label)}<select data-addon-set="${esc(a.id)}" data-k="${esc(st.key)}" style="display:block;max-width:100%">
                 <option value="">— scegli —</option>${ents.map((e) => `<option value="${esc(e)}" ${e === val ? "selected" : ""}>${esc(this._hass.states[e].attributes.friendly_name || e)}</option>`).join("")}</select></label>`;
             }
@@ -8671,7 +8674,9 @@ class NavigatorPanel extends HTMLElement {
           const cap = el.querySelector(".acap");
           if (cap) {
             const t = [st?.attributes?.media_title, st?.attributes?.media_artist].filter(Boolean).join(" — ");
-            cap.textContent = st ? (t || (st.state === "off" ? "Spento" : st.state === "idle" ? "In attesa" : "")) : "Scegli il lettore nelle impostazioni dell'add-on";
+            cap.textContent = !st ? "Scegli il lettore nelle impostazioni dell'add-on"
+              : st.state === "unavailable" ? "Lettore non disponibile: scegline un altro nelle impostazioni"
+                : t || (st.state === "off" ? "Spento" : st.state === "idle" ? "In attesa" : st.state === "paused" ? "In pausa" : "");
             cap.hidden = !cap.textContent;
           }
           return;
@@ -8981,6 +8986,19 @@ class NavigatorPanel extends HTMLElement {
   // dati per i segnaposto: posizione e percorso più le impostazioni scelte per l'add-on (es. {player})
   _addonVarsA(a) {
     return { ...this._addonVars(a.window), ...(a.values || {}) };
+  }
+
+  // integrazione di ogni entità (registro delle entità, versione "per la visualizzazione": basta un utente normale)
+  async _loadEntPlat() {
+    if (this._entPlatBusy) return;
+    this._entPlatBusy = true;
+    try {
+      const r = await this._hass.callWS({ type: "config/entity_registry/list_for_display" });
+      const m = {};
+      for (const e of r?.entities || []) if (e.ei) m[e.ei] = e.pl;
+      this._entPlat = m;
+      if (!this.$("setwrap")?.hidden) this._openSettings();
+    } catch (e) { this._entPlat = {}; } finally { this._entPlatBusy = false; }
   }
 
   _addonFillDeep(obj, v) {

@@ -172,7 +172,8 @@ voce dopo (o prima) di quell'elenco, a giro; altrimenti chiama il suo servizio c
 ]
 ```
 
-`"type": "entity"` mostra l'elenco delle entità (di quel `domain`), `"type": "text"` un campo da scrivere. Il valore
+`"type": "entity"` mostra l'elenco delle entità (di quel `domain`; con `"integration": "music_assistant"` solo quelle di
+quell'integrazione), `"type": "text"` un campo da scrivere. Il valore
 scelto si usa ovunque come `{player}`: nei `data` dei tasti, nel `browse`, negli indirizzi. Le scelte restano anche
 reinstallando l'add-on.
 

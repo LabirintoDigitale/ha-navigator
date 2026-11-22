@@ -1,7 +1,7 @@
 {
   "id": "music-assistant",
   "name": "Music Assistant",
-  "version": "1.2",
+  "version": "1.3",
   "author": "Navigator",
   "description": "Musica da Music Assistant (o da un altro lettore di Home Assistant): copertina e titolo del brano, play, stop, brano successivo e l'elenco da cui scegliere una playlist o una radio; con una radio il tasto successivo passa alla radio dopo. Il lettore si sceglie qui sotto.",
   "settings": [
@@ -9,7 +9,8 @@
       "key": "player",
       "label": "Lettore (Music Assistant)",
       "type": "entity",
-      "domain": "media_player"
+      "domain": "media_player",
+      "integration": "music_assistant"
     }
   ],
   "window": {

@@ -280,7 +280,9 @@ def _addon_settings(lst: Any) -> list[dict]:
         if isinstance(st, dict) and isinstance(st.get("key"), str) and _KEY.match(st["key"]):
             out.append({"key": st["key"], "label": str(st.get("label") or st["key"])[:40],
                         "type": "entity" if st.get("type") == "entity" else "text",
-                        "domain": str(st.get("domain") or "")[:30]})
+                        "domain": str(st.get("domain") or "")[:30],
+                        # solo le entità di un'integrazione (es. "music_assistant"): niente lettori che non c'entrano
+                        "integration": str(st.get("integration") or "")[:40]})
     return out
 
 
