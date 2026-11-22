@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.52";
+const PANEL_VERSION = "1.13.53";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1679,6 +1679,22 @@ const STYLE = `
   .addock .addwin.botmode { padding: 0; background: none; }
   .addwin.botmode .at, .addwin.botmode .abtns { display: none; }
   .addwin.botmode .aimg img { border-radius: 10px; }
+  .addwin .acap { position: absolute; left: 0; right: 0; top: 0; padding: 4px 8px; color: #fff; font: 600 12px sans-serif;
+    background: linear-gradient(rgba(0,0,0,.7), transparent); border-radius: 8px 8px 0 0; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; pointer-events: none; }
+  .addwin .abar { position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); display: flex; gap: 6px; }
+  .addwin .abar button { border: none; border-radius: 10px; background: rgba(0,0,0,.6); color: #fff; font-size: 18px;
+    min-width: 40px; height: 36px; padding: 0 8px; cursor: pointer; }
+  .addwin .alp { position: absolute; inset: 0; background: rgba(18,18,18,.96); border-radius: 8px; display: flex;
+    flex-direction: column; z-index: 2; }
+  .addwin .alh { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; color: #fff; font: 600 13px sans-serif; }
+  .addwin .alh button { border: none; background: rgba(255,255,255,.14); color: #fff; border-radius: 8px; width: 32px; height: 28px; cursor: pointer; }
+  .addwin .all { flex: 1; overflow-y: auto; padding: 0 6px 6px; color: #ccc; font: 12px sans-serif; touch-action: pan-y;
+    -webkit-overflow-scrolling: touch; }
+  .addwin .all button { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: none;
+    background: rgba(255,255,255,.07); color: #fff; border-radius: 8px; padding: 6px; margin-bottom: 4px; font: 13px sans-serif; cursor: pointer; }
+  .addwin .all img { width: 32px; height: 32px; border-radius: 4px; object-fit: cover; flex: none; position: static; }
+  .addwin .all i { width: 32px; text-align: center; font-style: normal; flex: none; }
   .addwin .aov button { position: absolute; border: none; border-radius: 8px; background: rgba(0,0,0,.55); color: #fff;
     font: 600 13px sans-serif; padding: 4px 8px; cursor: pointer; line-height: 1.2; }
   .addwin .aov .fmt { left: 4px; top: 4px; font-size: 15px; }
@@ -1857,6 +1873,7 @@ class NavigatorPanel extends HTMLElement {
     this._hass = hass;
     if (this._menuBtn) this._menuBtn.hass = hass;
     if (this._nav && this._nav.source !== "gps") this._entityFix();
+    if (this._addons?.length) this._addonHass();
     const sun = hass.states?.["sun.sun"]?.state;
     if (sun !== this._sunState) { this._sunState = sun; if (this._map) this._applyNight(); }
     // tasti all'arrivo visibili (prova o dopo il Ferma automatico): mostrano lo stato vero delle entità
@@ -8413,6 +8430,15 @@ class NavigatorPanel extends HTMLElement {
         <div class="ai"><b>${esc(a.name)}</b>${a.version ? ` <span class="note">v${esc(a.version)}</span>` : ""}
           ${a.description ? `<div class="note">${esc(a.description)}</div>` : ""}
           <div class="note">Mappa ${a.window.views.map((v) => v.toUpperCase()).join(" e ")}${a.author ? ` · di ${esc(a.author)}` : ""}</div>
+          ${(a.settings || []).map((st) => {
+            const val = a.values?.[st.key] || "";
+            if (st.type === "entity") {
+              const ents = Object.keys(this._hass?.states || {}).filter((e) => !st.domain || e.startsWith(`${st.domain}.`)).sort();
+              return `<label class="note" style="display:block;margin-top:4px">${esc(st.label)}<select data-addon-set="${esc(a.id)}" data-k="${esc(st.key)}" style="display:block;max-width:100%">
+                <option value="">— scegli —</option>${ents.map((e) => `<option value="${esc(e)}" ${e === val ? "selected" : ""}>${esc(this._hass.states[e].attributes.friendly_name || e)}</option>`).join("")}</select></label>`;
+            }
+            return `<label class="note" style="display:block;margin-top:4px">${esc(st.label)}<input data-addon-set="${esc(a.id)}" data-k="${esc(st.key)}" value="${esc(val)}" style="display:block;max-width:100%"></label>`;
+          }).join("")}
           <select data-addon-where="${esc(a.id)}" style="margin-top:4px;max-width:100%">${[["both", "In guida e in pianificazione"],
             ["guida", "Solo in guida"], ["plan", "Solo in pianificazione"]].map(([v, t]) =>
             `<option value="${v}" ${(a.where || "both") === v ? "selected" : ""}>${t}</option>`).join("")}</select>
@@ -8426,7 +8452,8 @@ class NavigatorPanel extends HTMLElement {
         <button data-addon-urlgo>Installa</button></div>
       <div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap">
         <button data-addon-example="meteo-satellite">🛰️ Esempio: meteo dal satellite</button>
-        <button data-addon-example="satellite-zona">📍 Esempio: satellite sulla tua zona</button></div>
+        <button data-addon-example="satellite-zona">📍 Esempio: satellite sulla tua zona</button>
+        <button data-addon-example="music-assistant">🎵 Esempio: Music Assistant</button></div>
       <details class="addinfo"><summary>ℹ️ Come si crea un add-on</summary>
         <ol>
           <li>Crea una cartella e dentro scrivi il file <b>addon.json</b> (esempio qui sotto).</li>
@@ -8458,6 +8485,11 @@ class NavigatorPanel extends HTMLElement {
           (la tua posizione), <code>{bbox}</code> (zona intorno a te di <b>area_km</b> km, per i servizi WMS), <code>{zoom}</code>,
           <code>{speed}</code>, <code>{dest_lat}</code> <code>{dest_lon}</code>, <code>{left_km}</code>…: l'immagine si ricarica quando ti
           sposti (con <code>"follow": false</code> solo al ricaricamento); <code>"marker": true</code> mette un pallino al centro (tu sei qui).</div>
+        <div class="note"><b>Tasti</b> sull'immagine: <code>"buttons": [{"icon": "⏭", "service": "media_player.media_next_track",
+          "data": {"entity_id": "{player}"}}, {"icon": "📃", "list": {"browse": "{player}", "path": ["Playlists"]}}]</code> (servizio di
+          Home Assistant, oppure elenco dei contenuti di un lettore da cui scegliere) · <b>settings</b>: scelte fatte qui (es. il lettore,
+          poi usato come <code>{player}</code>) · <code>"image": "entity:{player}"</code> mostra la copertina del brano,
+          <code>"caption": "media"</code> titolo e artista.</div>
         <div class="note">Nessun codice viene eseguito: un add-on è solo questa descrizione.</div>
         <div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap">
           <a href="https://github.com/LabirintoDigitale/ha-navigator/raw/main/addons/meteo-satellite.zip" target="_blank" rel="noopener">⬇ Scarica l'esempio (meteo dal satellite)</a>
@@ -8507,6 +8539,10 @@ class NavigatorPanel extends HTMLElement {
       try { await this._addonCall({ enable: el.dataset.addonOn, on: el.checked }); } catch (err) { this._msg(err.message || String(err)); }
       this._openSettings();
     }));
+    wrap.querySelectorAll("[data-addon-set]").forEach((el) => el.addEventListener("change", async () => {
+      try { await this._addonCall({ where_id: el.dataset.addonSet, values: { [el.dataset.k]: el.value } }); }
+      catch (err) { this._msg(err.message || String(err)); }
+    }));
     wrap.querySelectorAll("[data-addon-where]").forEach((el) => el.addEventListener("change", async () => {
       try { await this._addonCall({ where_id: el.dataset.addonWhere, where: el.value }); } catch (err) { this._msg(err.message || String(err)); }
     }));
@@ -8545,7 +8581,7 @@ class NavigatorPanel extends HTMLElement {
     a.files = {};
     const all = [a.window?.image, ...(Array.isArray(a.window?.images) ? a.window.images.map((i) => i?.image) : [])];
     for (const img of all) {
-      if (!img || /^https?:/.test(img)) continue;
+      if (!img || /^(https?|entity):/.test(img)) continue;
       if (!imgs[img]) throw new Error(`l'immagine "${img}" non è nello zip`);
       a.files[img] = imgs[img];
     }
@@ -8580,7 +8616,8 @@ class NavigatorPanel extends HTMLElement {
       let sel = 0;
       try { sel = Math.max(0, Math.min((alts?.length || 1) - 1, +localStorage.getItem(selKey) || 0)); } catch (e) { /* niente */ }
       el.innerHTML = `${w.title ? `<div class="at">${esc(w.title)}</div>` : ""}<div class="aimg"><img alt="" style="width:${w.width}px;height:${w.height}px">${
-        w.marker ? `<i class="ame" title="Tu sei qui"></i>` : ""}</div>${
+        w.marker ? `<i class="ame" title="Tu sei qui"></i>` : ""}${w.caption ? `<div class="acap"></div>` : ""}${
+        w.buttons?.length ? `<div class="abar">${w.buttons.map((b, i) => `<button data-b="${i}" title="${esc(b.label || "")}">${esc(b.icon || b.label)}</button>`).join("")}</div>` : ""}</div>${
         alts ? `<div class="abtns" style="max-width:${w.width}px">${alts.map((it, k) => `<button data-k="${k}" class="${k === sel ? "on" : ""}">${esc(it.label)}</button>`).join("")}</div>` : ""}`;
       const img = el.querySelector("img");
       const cur = () => (alts ? alts[sel].image : w.image);
@@ -8588,7 +8625,20 @@ class NavigatorPanel extends HTMLElement {
       const load = () => {
         const u0 = cur(), local = a.files?.[u0];
         if (local) { img.src = local; return; }
-        const v = this._addonVars(w);
+        if (u0.startsWith("entity:")) { // copertina (e titolo) presi da un'entità, es. il lettore della musica
+          const st = this._hass?.states?.[this._addonFill(u0.slice(7), this._addonVarsA(a))];
+          const pic = st?.attributes?.entity_picture || "";
+          if (pic && img.dataset.pic !== pic) { img.dataset.pic = pic; img.src = pic; img.style.display = ""; el.querySelector(".aerr")?.remove(); }
+          if (!pic) { img.dataset.pic = ""; img.removeAttribute("src"); img.style.visibility = "hidden"; } else img.style.visibility = "";
+          const cap = el.querySelector(".acap");
+          if (cap) {
+            const t = [st?.attributes?.media_title, st?.attributes?.media_artist].filter(Boolean).join(" — ");
+            cap.textContent = st ? (t || (st.state === "off" ? "Spento" : st.state === "idle" ? "In attesa" : "")) : "Scegli il lettore nelle impostazioni dell'add-on";
+            cap.hidden = !cap.textContent;
+          }
+          return;
+        }
+        const v = this._addonVarsA(a);
         at = v._pos;
         // immagine con area fissa: il pallino va dove sei (fuori dall'area: nascosto)
         const me = el.querySelector(".ame"), bb = w.marker_bbox;
@@ -8608,6 +8658,12 @@ class NavigatorPanel extends HTMLElement {
         el._onFmt?.();
       };
       el._fmtLabel = () => (alts ? alts[sel].label : "");
+      el._entityTick = cur().startsWith("entity:") ? load : null; // aggiornata quando cambia lo stato di Home Assistant
+      el.querySelectorAll(".abar button").forEach((b) => b.addEventListener("click", (e) => {
+        e.stopPropagation(); // il tasto fa la sua azione, non è un tocco sulla finestra
+        if (Date.now() - (this._longAt || 0) < 500) return;
+        this._addonButton(a, el, w.buttons[+b.dataset.b]);
+      }));
       el._fmtNext = () => { if (alts) pick((sel + 1) % alts.length); };
       el._title = w.title || a.name;
       el.querySelectorAll(".abtns button").forEach((b) => b.addEventListener("click", (e) => {
@@ -8727,7 +8783,7 @@ class NavigatorPanel extends HTMLElement {
       const go = (d) => { this._dockIdx = (this._dockIdx || 0) + d; this._syncDock(); };
       const list0 = dock.querySelector(".alist");
       let y0 = null;
-      list0.addEventListener("pointerdown", (e) => { y0 = e.clientY; });
+      list0.addEventListener("pointerdown", (e) => { y0 = e.target.closest?.(".alp") ? null : e.clientY; }); // nell'elenco si scorre
       list0.addEventListener("pointerup", (e) => {
         if (y0 != null && Math.abs(e.clientY - y0) > 40) { this._dockSwiped = Date.now(); go(e.clientY < y0 ? 1 : -1); }
         y0 = null;
@@ -8882,6 +8938,81 @@ class NavigatorPanel extends HTMLElement {
       v.left_min = Math.round((rt.summary.time * left) / Math.max(1, tot) / 60);
     } else { v.left_km = ""; v.left_min = ""; }
     return v;
+  }
+
+  // dati per i segnaposto: posizione e percorso più le impostazioni scelte per l'add-on (es. {player})
+  _addonVarsA(a) {
+    return { ...this._addonVars(a.window), ...(a.values || {}) };
+  }
+
+  _addonFillDeep(obj, v) {
+    return JSON.parse(JSON.stringify(obj || {}), (k, x) => (typeof x === "string" ? this._addonFill(x, v) : x));
+  }
+
+  async _addonButton(a, el, b) {
+    if (!b) return;
+    const v = this._addonVarsA(a);
+    if (b.list) { this._addonList(a, el, b); return; }
+    if (b.service) {
+      const [dom, svc] = b.service.split(".");
+      try { await this._hass.callService(dom, svc, this._addonFillDeep(b.data, v)); }
+      catch (err) { this._msg(`${a.name}: ${err.message || err}`); }
+    }
+  }
+
+  // elenco dentro l'add-on: contenuti di un lettore sfogliati come nel pannello Media di Home Assistant (es. le
+  // playlist di Music Assistant); una voce che si può riprodurre parte sul lettore, una cartella si apre
+  async _addonList(a, el, b, at = null) {
+    const box = el.querySelector(".aimg");
+    if (!box) return;
+    const v = this._addonVarsA(a);
+    const ent = this._addonFill(b.list.browse, v);
+    let pane = box.querySelector(".alp");
+    if (!pane) { pane = document.createElement("div"); pane.className = "alp"; box.appendChild(pane); }
+    pane.innerHTML = `<div class="alh"><span>${esc(b.label || "Elenco")}</span><button data-x title="Chiudi">✕</button></div><div class="all">Carico…</div>`;
+    pane.addEventListener("click", (e) => e.stopPropagation()); // dentro l'elenco il tocco non chiude l'add-on
+    pane.querySelector("[data-x]").addEventListener("click", () => pane.remove());
+    const list = pane.querySelector(".all");
+    try {
+      if (!this._hass.states?.[ent]) throw new Error("scegli il lettore nelle impostazioni dell'add-on (⚙ → Add-on)");
+      const browse = (node) => this._hass.callWS({ type: "media_player/browse_media", entity_id: ent,
+        ...(node ? { media_content_id: node.media_content_id, media_content_type: node.media_content_type } : {}) });
+      let node = await browse(at);
+      if (!at) {
+        for (const want of b.list.path || []) { // es. ["Playlists"]: si entra nelle cartelle con quel nome
+          const w = want.toLowerCase();
+          const next = (node.children || []).find((c) => (c.title || "").toLowerCase() === w)
+            || (node.children || []).find((c) => (c.title || "").toLowerCase().includes(w));
+          if (!next) throw new Error(`"${want}" non trovato nel lettore`);
+          node = await browse(next);
+        }
+      }
+      const items = node.children || [];
+      if (!items.length) { list.textContent = "Vuoto"; return; }
+      list.innerHTML = items.map((c, i) => `<button data-i="${i}">${c.thumbnail ? `<img src="${esc(c.thumbnail)}" alt="">` : "<i>🎵</i>"}<span>${esc(c.title || "")}</span></button>`).join("");
+      list.querySelectorAll("[data-i]").forEach((btn) => btn.addEventListener("click", async () => {
+        const c = items[+btn.dataset.i];
+        if (c.can_play) {
+          try {
+            await this._hass.callService("media_player", "play_media", { entity_id: ent, media_content_id: c.media_content_id, media_content_type: c.media_content_type });
+            pane.remove();
+          } catch (err) { this._msg(`${a.name}: ${err.message || err}`); }
+        } else if (c.can_expand) {
+          this._addonList(a, el, { ...b, label: c.title }, c);
+        }
+      }));
+    } catch (err) {
+      list.textContent = `Non disponibile: ${err.message || err}`;
+    }
+  }
+
+  // stato di Home Assistant cambiato: aggiorna gli add-on che mostrano un'entità (copertina e titolo del brano)
+  _addonHass() {
+    if (this._addonHassT) return;
+    this._addonHassT = setTimeout(() => {
+      this._addonHassT = null;
+      this.$?.("mapwrap")?.querySelectorAll(".addwin").forEach((el) => el._entityTick?.());
+    }, 400);
   }
 
   _addonFill(u, v) {

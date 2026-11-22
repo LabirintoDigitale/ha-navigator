@@ -480,6 +480,7 @@ async def ws_layout(hass: HomeAssistant, connection: websocket_api.ActiveConnect
     vol.Optional("on", default=True): bool,
     vol.Optional("where_id"): str,
     vol.Optional("where"): vol.In(["both", "guida", "plan"]),
+    vol.Optional("values"): dict,
 })
 @websocket_api.async_response
 async def ws_addons(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
@@ -493,7 +494,7 @@ async def ws_addons(hass: HomeAssistant, connection: websocket_api.ActiveConnect
         if add is not None or any(k in msg for k in ("remove", "enable", "where_id")):
             try:
                 return {"addons": await trips.addon_change(add, msg.get("remove"), msg.get("enable"), msg["on"],
-                                                           msg.get("where_id"), msg.get("where"))}
+                                                           msg.get("where_id"), msg.get("where"), msg.get("values"))}
             except ValueError as err:
                 raise NavigatorError(str(err)) from err
         return {"addons": trips.addons}

@@ -235,6 +235,43 @@ _ADDON_ID = re.compile(r"[^a-z0-9_-]+")
 _DATA_IMG = re.compile(r"^data:image/(png|jpeg|gif|webp|svg\+xml);base64,[A-Za-z0-9+/=]+$")
 _URL = re.compile(r"^https?://[^\s\"'<>]+$")
 _SERVICE = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
+# immagine presa da un'entità (es. la copertina del brano di un lettore): "entity:media_player.x" o "entity:{player}"
+_ENTIMG = re.compile(r"^entity:(\{[a-z0-9_]+\}|[a-z0-9_]+\.[a-z0-9_]+)$")
+_KEY = re.compile(r"^[a-z0-9_]{1,30}$")
+
+
+def _addon_buttons(lst: Any) -> list[dict]:
+    """Tasti sull'immagine: {"icon", "label", "service", "data"} oppure {"icon", "label", "list": {"browse", "path"}}
+    (elenco dei contenuti di un lettore, sfogliato come nel pannello Media di Home Assistant)."""
+    out = []
+    for b in (lst if isinstance(lst, list) else [])[:8]:
+        if not isinstance(b, dict):
+            continue
+        item = {"icon": str(b.get("icon") or "")[:4], "label": str(b.get("label") or "")[:24]}
+        if isinstance(b.get("service"), str) and _SERVICE.match(b["service"]):
+            data = b.get("data") if isinstance(b.get("data"), dict) else {}
+            if len(json.dumps(data)) > 2000:
+                continue
+            item.update(service=b["service"], data=data)
+        elif isinstance(b.get("list"), dict) and isinstance(b["list"].get("browse"), str):
+            path = [str(p)[:60] for p in (b["list"].get("path") or []) if isinstance(p, str)][:5]
+            item["list"] = {"browse": b["list"]["browse"][:120], "path": path}
+        else:
+            continue
+        if item["icon"] or item["label"]:
+            out.append(item)
+    return out
+
+
+def _addon_settings(lst: Any) -> list[dict]:
+    """Impostazioni scelte da chi usa l'add-on (es. quale lettore): {"key", "label", "type": "entity"|"text", "domain"}."""
+    out = []
+    for st in (lst if isinstance(lst, list) else [])[:6]:
+        if isinstance(st, dict) and isinstance(st.get("key"), str) and _KEY.match(st["key"]):
+            out.append({"key": st["key"], "label": str(st.get("label") or st["key"])[:40],
+                        "type": "entity" if st.get("type") == "entity" else "text",
+                        "domain": str(st.get("domain") or "")[:30]})
+    return out
 
 
 def _addon_click(c: Any) -> Any:
@@ -286,7 +323,7 @@ def clean_addon(a: dict) -> dict:
             if _URL.match(u) or u in files:
                 images.append({"label": str(it.get("label") or "")[:14] or str(len(images) + 1), "image": u})
     img = str(w.get("image") or (images[0]["image"] if images else ""))[:500]
-    if not (_URL.match(img) or img in files):
+    if not (_URL.match(img) or img in files or _ENTIMG.match(img)):
         raise ValueError("la finestra dell'add-on non ha un'immagine valida (indirizzo http/https o file dello zip)")
     views = [v for v in (w.get("views") or ["2d", "3d"]) if v in ("2d", "3d")] or ["2d", "3d"]
 
@@ -322,7 +359,12 @@ def clean_addon(a: dict) -> dict:
             "views": views,
             "click": _addon_click(w.get("click", "close")),
             "images": images,
+            "buttons": _addon_buttons(w.get("buttons")),
+            "caption": w.get("caption") == "media",  # titolo e artista del brano, sopra l'immagine (con "entity:")
         },
+        "settings": _addon_settings(a.get("settings")),
+        "values": {k: str(v)[:200] for k, v in (a.get("values") or {}).items() if isinstance(k, str) and _KEY.match(k)}
+        if isinstance(a.get("values"), dict) else {},
         "files": files,
     }
 
@@ -352,7 +394,7 @@ def addon_from_zip(raw: bytes) -> dict:
     wanted = [str(win.get("image") or "")] + [str(i.get("image") or "") for i in (win.get("images") or []) if isinstance(i, dict)]
     a["files"] = {}
     for img in dict.fromkeys(w for w in wanted if w):
-        if img.startswith(("http://", "https://")):
+        if img.startswith(("http://", "https://", "entity:")):
             continue
         mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif", "webp": "image/webp",
                 "svg": "image/svg+xml"}.get(img.rsplit(".", 1)[-1].lower())
@@ -416,7 +458,8 @@ class Trips:
         self._store.async_delay_save(lambda: {"garage": self.garage, "selected": self.selected, "layouts": self.layouts}, 5)
 
     async def addon_change(self, add: dict | None = None, remove: str | None = None, enable: str | None = None,
-                           on: bool = True, where_id: str | None = None, where: str | None = None) -> list[dict]:
+                           on: bool = True, where_id: str | None = None, where: str | None = None,
+                           values: dict | None = None) -> list[dict]:
         """Aggiunge (o aggiorna, stesso id) un add-on, lo toglie, oppure lo attiva/disattiva."""
         addons = list(self.addons)
         if add is not None:
@@ -425,6 +468,7 @@ class Trips:
             if old:  # aggiornamento: restano le scelte fatte (acceso/spento, dove compare)
                 c["enabled"] = old.get("enabled", True)
                 c["where"] = old.get("where", "both")
+                c["values"] = {**c.get("values", {}), **old.get("values", {})}
             addons = [x for x in addons if x["id"] != c["id"]]
             if len(addons) >= ADDON_MAX:
                 raise ValueError(f"al massimo {ADDON_MAX} add-on: togline qualcuno")
@@ -435,6 +479,9 @@ class Trips:
             addons = [{**x, "enabled": bool(on)} if x["id"] == enable else x for x in addons]
         if where_id and where in ("both", "guida", "plan"):
             addons = [{**x, "where": where} if x["id"] == where_id else x for x in addons]
+        if where_id and isinstance(values, dict):  # impostazioni dell'add-on scelte da chi lo usa
+            clean = {k: str(v)[:200] for k, v in values.items() if isinstance(k, str) and _KEY.match(k)}
+            addons = [{**x, "values": {**x.get("values", {}), **clean}} if x["id"] == where_id else x for x in addons]
         self.addons = addons
         await self._addon_store.async_save({"addons": addons})
         return addons

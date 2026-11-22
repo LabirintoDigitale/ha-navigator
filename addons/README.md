@@ -79,6 +79,27 @@ copre: `"marker_bbox": [lat_min, lon_min, lat_max, lon_max]` (la stessa del `bbo
 L'esempio [`satellite-zona`](satellite-zona) mostra il satellite solo intorno a te:
 `"image": "https://view.eumetsat.int/geoserver/ows?…&bbox={bbox}&width=480&height=340"`.
 
+## Tasti, elenchi e impostazioni (es. la musica)
+
+Una finestra può avere dei **tasti sopra l'immagine** (`window.buttons`, al massimo 8). Ogni tasto ha un'`icon` (e una
+`label`, che compare tenendoci il dito sopra) e fa una di queste cose:
+
+- `"service": "dominio.servizio", "data": {…}`: chiama un servizio di Home Assistant (es. `media_player.media_play`);
+- `"list": {"browse": "media_player.x", "path": ["Playlists"]}`: apre **dentro l'add-on** l'elenco dei contenuti di un
+  lettore, sfogliato come nel pannello *Media* di Home Assistant (`path` = cartelle in cui entrare); toccando una voce
+  parte su quel lettore, toccando una cartella si apre.
+
+Con `"settings"` l'add-on chiede delle **scelte** a chi lo usa, in ⚙ → 🧩 Add-on: per esempio
+`{"key": "player", "label": "Lettore", "type": "entity", "domain": "media_player"}` mostra l'elenco dei lettori;
+il valore scelto si usa ovunque come `{player}` (nei `data` dei tasti, nel `browse`, nell'immagine). Le scelte restano anche
+reinstallando l'add-on.
+
+Con `"image": "entity:{player}"` l'immagine è la **copertina** di quello che il lettore sta suonando (si aggiorna da sola)
+e con `"caption": "media"` sopra compaiono **titolo e artista**. Con `"click": "none"` il tocco sull'immagine non chiude.
+
+L'esempio [`music-assistant`](music-assistant) mostra la musica di Music Assistant: copertina, ▶ play, ⏹ stop, ⏭ brano successivo e
+📃 l'elenco delle playlist da scegliere, sempre sul lettore scelto nelle impostazioni dell'add-on.
+
 ## Esempio
 
 La cartella [`meteo-satellite`](meteo-satellite) è l'add-on del meteo dal satellite (immagine Meteosat a infrarossi di EUMETSAT,
