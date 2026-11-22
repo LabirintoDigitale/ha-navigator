@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.68";
+const PANEL_VERSION = "1.13.69";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -2164,6 +2164,7 @@ class NavigatorPanel extends HTMLElement {
       if (verTaps >= 20) {
         this._debug = true;
         this._msg("🐞 Debug attivo fino al riavvio: Impostazioni → Debug");
+        this._bgRetry(); // le pagine in sottofondo si riaprono, così il registro vede tutto dall'inizio
       } else if (verTaps >= 15) this._msg(`Ancora ${20 - verTaps} tocchi per il debug`);
     });
     $("layerbox").title = `Mappa: ${LAYERS[this._layer]?.[0] || ""} (tocca per cambiare)`;
@@ -7483,6 +7484,7 @@ class NavigatorPanel extends HTMLElement {
         <div class="note">Cosa fanno gli add-on (pagine in sottofondo, lettori, comandi, errori), ultime 150 righe.</div>
         <pre id="alogbox" style="max-height:260px;overflow:auto;white-space:pre-wrap;font-size:11px;background:rgba(127,127,127,.15);border-radius:8px;padding:8px;margin:6px 0">${esc((this._alogLines || []).join("\n")) || "(vuoto)"}</pre>
         <div class="row" style="gap:8px;flex-wrap:wrap"><button data-dbg="alogcopy">📋 Copia</button><button data-dbg="alogclear">🗑 Svuota il registro</button>
+          <button data-dbg="bgretry">🔄 Riapri la pagina in sottofondo</button>
           <button data-dbg="bgshow">👁 ${this._bgShown ? "Nascondi" : "Mostra"} la pagina in sottofondo</button></div>
       </div>` : ""}
       <div class="grp note">Le impostazioni valgono per questo dispositivo.</div>
@@ -7552,6 +7554,7 @@ class NavigatorPanel extends HTMLElement {
       }
     });
     wrap.querySelector('[data-dbg="bgshow"]')?.addEventListener("click", () => this._bgToggle());
+    wrap.querySelector('[data-dbg="bgretry"]')?.addEventListener("click", async () => { await this._bgRetry(); this._openSettings(); });
     const alb = wrap.querySelector("#alogbox"); if (alb) alb.scrollTop = alb.scrollHeight;
     this._bindAddonSettings(wrap);
     wrap.querySelector("[data-tileclear]")?.addEventListener("click", async () => {
@@ -9124,6 +9127,19 @@ class NavigatorPanel extends HTMLElement {
       this._alog(`Music Assistant: accesso alla pagina non riuscito: ${e.message || e.code || e}`);
       return null;
     } finally { this._maIngBusy = false; }
+  }
+
+  // si chiudono e si riaprono le pagine in sottofondo (Music Assistant: anche la richiesta di accesso), col registro
+  async _bgRetry() {
+    const box = this.shadowRoot?.getElementById("addbg");
+    box?.querySelectorAll("iframe").forEach((f) => f.remove());
+    this._maIng = null;
+    const n = (this._addons || []).filter((a) => a.enabled && a.background).length;
+    this._alog(`riapro le pagine in sottofondo: ${n} add-on con una pagina in sottofondo${this._hass?.user ? ` · utente ${this._hass.user.name}${this._hass.user.is_admin ? " (amministratore)" : " (NON amministratore)"}` : ""}`);
+    await this._addonBackground();
+    const fs = [...(this.shadowRoot?.querySelectorAll("#addbg iframe") || [])];
+    this._alog(`pagine in sottofondo aperte: ${fs.length ? fs.map((f) => `${f.dataset.a} → ${f.dataset.u}`).join(" | ") : "nessuna"}`);
+    if (this._bgShown) { this._bgShown = false; this._bgToggle(); } // se era visibile resta visibile
   }
 
   // debug: la pagina in sottofondo (es. Music Assistant) diventa visibile in un riquadro, per vedere cosa mostra e toccarla
