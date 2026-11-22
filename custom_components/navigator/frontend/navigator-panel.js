@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.38";
+const PANEL_VERSION = "1.13.39";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -8430,7 +8430,7 @@ class NavigatorPanel extends HTMLElement {
         <div class="note"><b>Posizione e percorso</b>: negli indirizzi si possono scrivere <code>{lat}</code> <code>{lon}</code>
           (la tua posizione), <code>{bbox}</code> (zona intorno a te di <b>area_km</b> km, per i servizi WMS), <code>{zoom}</code>,
           <code>{speed}</code>, <code>{dest_lat}</code> <code>{dest_lon}</code>, <code>{left_km}</code>…: l'immagine si ricarica quando ti
-          sposti; <code>"marker": true</code> mette un pallino al centro (tu sei qui).</div>
+          sposti (con <code>"follow": false</code> solo al ricaricamento); <code>"marker": true</code> mette un pallino al centro (tu sei qui).</div>
         <div class="note">Nessun codice viene eseguito: un add-on è solo questa descrizione.</div>
         <div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap">
           <a href="https://github.com/LabirintoDigitale/ha-navigator/raw/main/addons/meteo-satellite.zip" target="_blank" rel="noopener">⬇ Scarica l'esempio (meteo dal satellite)</a>
@@ -8579,7 +8579,7 @@ class NavigatorPanel extends HTMLElement {
       load();
       if (w.refresh) el._timer = setInterval(() => { if (!a.files?.[cur()]) load(); }, w.refresh * 1000);
       // indirizzi con la posizione: nuova immagine quando ti sei spostato di un buon tratto (controllo ogni 10 s)
-      if ([w.image, ...(w.images || []).map((i) => i.image)].some((u) => /\{(lat|lon|bbox|lat_min|lat_max|lon_min|lon_max|bbox_xy|zoom)\}/.test(u))) {
+      if (w.follow !== false && [w.image, ...(w.images || []).map((i) => i.image)].some((u) => /\{(lat|lon|bbox|lat_min|lat_max|lon_min|lon_max|bbox_xy|zoom)\}/.test(u))) {
         const chk = setInterval(() => {
           if (!el.isConnected) { clearInterval(chk); return; }
           const p = this._addonVars(w)._pos;

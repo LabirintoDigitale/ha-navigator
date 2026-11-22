@@ -300,6 +300,8 @@ def clean_addon(a: dict) -> dict:
             # zona intorno a te per i segnaposto {bbox}… degli indirizzi: metà altezza in km (0 = 100 km)
             "area_km": num(w.get("area_km"), 0, 2000, 0),
             "marker": w.get("marker") is True,  # pallino al centro dell'immagine: "tu sei qui" (con {bbox})
+            # con la posizione negli indirizzi: false = si aggiorna solo al ricaricamento (refresh), non quando ti sposti
+            "follow": w.get("follow") is not False,
             "width": num(w.get("width"), 80, 800, 240),
             "height": num(w.get("height"), 60, 800, 160),
             "views": views,

@@ -72,6 +72,8 @@ zona, controllo ogni 10 secondi). L'add-on non riceve altro: nessun codice, solo
 
 La zona è grande `window.area_km` km dal centro in su e in giù (predefinito 100), larga secondo la forma dell'immagine;
 con `"marker": true` al centro dell'immagine compare un pallino rosso (*tu sei qui*).
+Con `"follow": false` la posizione si aggiorna solo quando l'immagine si ricarica (`refresh`), non mentre ti sposti:
+basta per immagini molto ampie.
 L'esempio [`satellite-zona`](satellite-zona) mostra il satellite solo intorno a te:
 `"image": "https://view.eumetsat.int/geoserver/ows?…&bbox={bbox}&width=480&height=340"`.
 
