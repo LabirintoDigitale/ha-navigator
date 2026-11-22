@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.70";
+const PANEL_VERSION = "1.13.71";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -9223,9 +9223,30 @@ class NavigatorPanel extends HTMLElement {
     if (b.service) {
       const [dom, svc] = b.service.split(".");
       const data = this._addonFillDeep(b.data, v);
+      const ent = typeof data.entity_id === "string" ? data.entity_id : null;
+      const stNow = ent ? this._hass.states?.[ent]?.state : null;
+      if (ent) this._alog(`${a.id}: ${ent} prima del comando: ${stNow ?? "assente"}`);
+      // ▶ col lettore fermo (niente da riprendere): riparte l'ultima playlist o radio scelta dall'elenco
+      if (/\.media_play$/.test(b.service) && ent && ["idle", "off", "standby", "on"].includes(stNow)) {
+        let last = el._last;
+        if (!last) {
+          try {
+            const j = JSON.parse(localStorage.getItem(`${STORE_KEY}-alast-${a.id}`) || "null");
+            if (j?.uri) last = { title: j.title, play: () => this._hass.callService("music_assistant", "play_media", { entity_id: ent, media_id: j.uri, media_type: j.mt || undefined }) };
+            else if (j?.id) last = { title: j.title, play: () => this._hass.callService("media_player", "play_media", { entity_id: ent, media_content_id: j.id, media_content_type: j.type }) };
+          } catch (e) { /* niente */ }
+        }
+        if (last) {
+          this._alog(`${a.id}: lettore fermo → riparte l'ultima scelta "${last.title}"`);
+          try { await last.play(); this._msg(`▶ ${last.title}`); } catch (err) { this._alog(`${a.id}: ripartenza ERRORE ${err.message || err.code || err}`); this._msg(`${a.name}: ${err.message || err}`); }
+          if (ent) setTimeout(() => this._alog(`${a.id}: ${ent} 3 s dopo: ${this._hass.states?.[ent]?.state ?? "assente"}`), 3000);
+          return;
+        }
+      }
       this._alog(`${a.id}: tasto ${b.icon || b.label} → ${b.service} ${JSON.stringify(data)}`);
       try { await this._hass.callService(dom, svc, data); this._alog(`${a.id}: ${b.service} inviato`); }
       catch (err) { this._alog(`${a.id}: ${b.service} ERRORE ${err.message || err.code || err}`); this._msg(`${a.name}: ${err.message || err}`); }
+      finally { if (ent) setTimeout(() => this._alog(`${a.id}: ${ent} 3 s dopo: ${this._hass.states?.[ent]?.state ?? "assente"}`), 3000); }
     }
   }
 
@@ -9267,6 +9288,9 @@ class NavigatorPanel extends HTMLElement {
       const play = async (c) => {
         await play0(c);
         el._cyc = cycle ? { items: playable, idx: playable.indexOf(c), play: play0 } : null;
+        // l'ultima voce partita: ▶ col lettore fermo la fa ripartire (anche dopo un riavvio)
+        el._last = { title: c.title, play: () => play0(c) };
+        try { localStorage.setItem(`${STORE_KEY}-alast-${a.id}`, JSON.stringify({ title: c.title, uri: c.uri || "", mt: c.mt || "", id: c.media_content_id || "", type: c.media_content_type || "" })); } catch (e) { /* niente */ }
       };
       list.innerHTML = items.map((c, i) => `<button data-i="${i}">${c.thumbnail ? `<img data-src="${esc(c.thumbnail)}" alt="">` : "<i>🎵</i>"}<span>${esc(c.title || "")}</span></button>`).join("");
       // copertine: quelle interne di Home Assistant (/api/…) si aprono solo con la firma, come nel pannello Media; quelle
@@ -9286,7 +9310,8 @@ class NavigatorPanel extends HTMLElement {
       list.querySelectorAll("[data-i]").forEach((btn) => btn.addEventListener("click", async () => {
         const c = items[+btn.dataset.i];
         if (c.can_play) {
-          this._alog(`${a.id}: scelto "${c.title}" (${c.uri || c.media_content_id || ""}) su ${ent}`);
+          this._alog(`${a.id}: scelto "${c.title}" (${c.uri || c.media_content_id || ""}) su ${ent}, che ora è ${this._hass.states?.[ent]?.state ?? "assente"}`);
+          setTimeout(() => this._alog(`${a.id}: ${ent} 3 s dopo: ${this._hass.states?.[ent]?.state ?? "assente"}${this._hass.states?.[ent]?.attributes?.media_title ? ` · "${this._hass.states[ent].attributes.media_title}"` : ""}`), 3000);
           try { await play(c); this._alog(`${a.id}: avvio inviato`); pane.remove(); }
           catch (err) { this._alog(`${a.id}: avvio ERRORE ${err.message || err.code || err}`); this._msg(`${a.name}: ${err.message || err}`); }
         } else if (c.can_expand && open) open(c);
