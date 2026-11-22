@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.37";
+const PANEL_VERSION = "1.13.38";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1671,9 +1671,12 @@ const STYLE = `
   .addock .alist { flex: 1; min-width: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;
     -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
   .addock .addwin { position: static; right: auto; left: auto; top: auto; box-shadow: none; background: rgba(255,255,255,.06);
-    touch-action: pan-y; }
+    touch-action: none; } /* la strisciata su/giù passa all'add-on successivo */
   .addock .addwin img { max-width: 100%; height: auto !important; }
-  .addock .across { flex: none; }
+  .addock .across { flex: none; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .addock .dknav { display: flex; align-items: center; gap: 8px; color: #ddd; font: 600 12px sans-serif; }
+  .addock .dknav button { border: none; border-radius: 8px; background: rgba(255,255,255,.14); color: #fff; font-size: 16px;
+    width: 40px; height: 34px; cursor: pointer; }
   .addock .pitchctl { position: static !important; left: auto !important; top: auto !important; right: auto !important; }
   .addwin .at { color: #fff; font: 600 12px sans-serif; padding: 2px 6px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .addwin img { display: block; border-radius: 8px; object-fit: cover; background: #333; pointer-events: none; }
@@ -8639,7 +8642,8 @@ class NavigatorPanel extends HTMLElement {
     if (!wrap || !top || !pc) return;
     let dock = this.$("addock");
     const wins = [...wrap.querySelectorAll(".addwin")];
-    const want = !!(this._nav && this._isGuida() && !top.hidden && wins.length);
+    // solo in verticale: in orizzontale lo spazio c'è e restano finestre staccate, come fuori dalla guida
+    const want = !!(this._nav && this._isGuida() && !top.hidden && wins.length && window.innerHeight > window.innerWidth);
     if (want) {
       if (!dock) {
         dock = document.createElement("div");
@@ -8647,10 +8651,32 @@ class NavigatorPanel extends HTMLElement {
         dock.innerHTML = `<div class="alist"></div><div class="across"></div>`;
         wrap.appendChild(dock);
         this._pcHome = { parent: pc.parentNode, next: pc.nextSibling };
+        // un add-on alla volta: frecce ▲▼ o strisciata su/giù per passare al successivo, in giro (dopo l'ultimo il primo)
+        const go = (d) => { this._dockIdx = (this._dockIdx || 0) + d; this._syncDock(); };
+        const list0 = dock.querySelector(".alist");
+        let y0 = null;
+        list0.addEventListener("pointerdown", (e) => { y0 = e.clientY; });
+        list0.addEventListener("pointerup", (e) => {
+          if (y0 != null && Math.abs(e.clientY - y0) > 40) { this._dockSwiped = Date.now(); go(e.clientY < y0 ? 1 : -1); }
+          y0 = null;
+        });
+        list0.addEventListener("click", (e) => { if (Date.now() - (this._dockSwiped || 0) < 400) e.stopPropagation(); }, true);
+        dock.addEventListener("click", (e) => {
+          const b = e.target.closest?.("[data-dk]");
+          if (b) { e.stopPropagation(); go(+b.dataset.dk); }
+        });
       }
       const list = dock.querySelector(".alist"), cr = dock.querySelector(".across");
       for (const w of wins) if (w.parentNode !== list) list.appendChild(w);
       if (pc.parentNode !== cr) cr.appendChild(pc);
+      const n = wins.length, k = (((this._dockIdx || 0) % n) + n) % n;
+      wins.forEach((w, i) => { w.style.display = i === k ? "" : "none"; });
+      let nav = cr.querySelector(".dknav");
+      if (n > 1) {
+        if (!nav) { nav = document.createElement("div"); nav.className = "dknav"; cr.appendChild(nav); }
+        const html = `<button data-dk="-1" title="Add-on precedente">▲</button><span>${k + 1}/${n}</span><button data-dk="1" title="Add-on successivo">▼</button>`;
+        if (nav.innerHTML !== html) nav.innerHTML = html;
+      } else nav?.remove();
       top.classList.add("docked");
       const y = top.offsetTop + top.offsetHeight;
       dock.style.top = `${y}px`; dock.style.left = `${top.offsetLeft}px`; dock.style.width = `${top.offsetWidth}px`;
@@ -8658,7 +8684,7 @@ class NavigatorPanel extends HTMLElement {
       const lim = (bot && !bot.hidden ? bot.offsetTop : wrap.clientHeight) - 8;
       list.style.maxHeight = `${Math.max(140, Math.round((lim - y) * 0.75) - 16)}px`;
     } else if (dock) {
-      for (const w of wins) wrap.appendChild(w);
+      for (const w of wins) { w.style.display = ""; wrap.appendChild(w); }
       const h = this._pcHome;
       if (h?.parent) h.parent.insertBefore(pc, h.next && h.next.parentNode === h.parent ? h.next : null);
       dock.remove();
