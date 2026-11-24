@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.78";
+const PANEL_VERSION = "1.13.79";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -8933,7 +8933,12 @@ class NavigatorPanel extends HTMLElement {
         img.insertAdjacentHTML("afterend", `<div class="aerr" style="width:${w.width}px;height:${w.height}px">Immagine non disponibile</div>`);
         img.style.display = "none";
       };
-      img.onload = () => { el.querySelector(".aerr")?.remove(); img.style.display = ""; };
+      img.onload = () => {
+        el.querySelector(".aerr")?.remove(); img.style.display = "";
+        // alla nascita, appena si conosce la grandezza vera dell'immagine: la finestra si rimette dentro lo schermo
+        // (una posizione salvata su uno schermo più grande la lasciava fuori, invisibile). Solo questa volta.
+        if (!el._placed) { el._placed = true; if (!el.closest(".addock")) this._addonInside(el); }
+      };
       load();
       if (w.refresh) el._timer = setInterval(() => { if (!a.files?.[cur()]) load(); }, w.refresh * 1000);
       // indirizzi con la posizione: nuova immagine quando ti sei spostato di un buon tratto (controllo ogni 10 s)
@@ -8960,6 +8965,7 @@ class NavigatorPanel extends HTMLElement {
       wrap.appendChild(el);
       this._bindFloatDrag(id, `addon:${a.id}`);
       this._applyFloat(id, `addon:${a.id}`);
+      requestAnimationFrame(() => this._addonInside(el)); // appena creata: dentro lo schermo
     });
     this._syncDock();
     if (this._nav) this._placePitchCtl();
@@ -9232,6 +9238,20 @@ class NavigatorPanel extends HTMLElement {
       delete im.dataset.w; delete im.dataset.h;
     }
     w.style.width = "";
+  }
+
+  // finestra di un add-on tutta dentro la mappa: se sporge, la si sposta dentro (e la posizione si salva così)
+  _addonInside(el) {
+    const wrap = this.$("mapwrap");
+    if (!wrap || !el.isConnected) return;
+    const W = wrap.clientWidth, H = wrap.clientHeight, w = el.offsetWidth, h = el.offsetHeight;
+    const x0 = el.offsetLeft, y0 = el.offsetTop;
+    const x = Math.max(4, Math.min(W - w - 4, x0)), y = Math.max(4, Math.min(H - h - 4, y0));
+    if (x === x0 && y === y0) return;
+    el.classList.add("moved"); el.style.right = "auto";
+    el.style.left = `${x}px`; el.style.top = `${y}px`;
+    const key = `addon:${el.id.slice(6)}`;
+    if (this._layout?.[key]) { this._layout[key] = { x: x / W, y: y / H }; this._saveLayout(); }
   }
 
   _placeAddons() {
