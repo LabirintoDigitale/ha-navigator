@@ -213,6 +213,21 @@ quello che dice `window.click` (se non c'è, o è `"none"`, la finestra si chiud
 | `{"open": "https://…"}` | apre un indirizzo (anche con i segnaposto) |
 | `{"service": "light.toggle", "data": {"entity_id": "light.cortile"}}` | chiama un servizio di Home Assistant |
 
+### Finestra Telefono (`"kind": "phone"`)
+
+Con `"window": {"kind": "phone", …}` la finestra non mostra un'immagine ma le telefonate del telefono, **solo nell'app
+NaviHA** (Android, anche sullo schermo di Android Auto; nel browser dice che serve l'app):
+
+- **chiamata in arrivo**: nome di chi chiama, cornetta **verde** (rispondi) e **rossa** (rifiuta); la finestra compare da
+  sola anche se l'avevi chiusa e, nel blocco della guida, diventa quella mostrata;
+- **in chiamata**: nome, durata e cornetta rossa per chiudere;
+- **nessuna chiamata**: i preferiti, da chiamare con un tocco. Si scrivono nell'impostazione di testo `preferiti`:
+  `Mamma=+39 333 1234567, Ufficio=0437 123456` (separati da virgola, punto e virgola o a capo; al massimo 8).
+
+L'app chiede i permessi *Telefono* (menu ⋮ → *Permessi per le chiamate*). Per vedere il **nome** di chi chiama (Android lo
+dà solo all'app del telefono) NaviHA legge l'avviso della chiamata: la finestra mostra il tasto *Mostra i nomi di chi
+chiama* che apre *Accesso alle notifiche*; NaviHA legge solo gli avvisi delle chiamate e non salva niente.
+
 ---
 
 ## Esempi
@@ -222,6 +237,7 @@ quello che dice `window.click` (se non c'è, o è `"none"`, la finestra si chiud
 | [`meteo-satellite`](meteo-satellite) | nuvole dal satellite Meteosat (EUMETSAT, gratuito) su tutta l'Europa, col pallino dove sei; IR, colori, visibile, vapore, masse d'aria, pioggia | [meteo-satellite.zip](meteo-satellite.zip) |
 | [`satellite-zona`](satellite-zona) | il satellite per 150 km intorno a te, con regioni e città, ti segue mentre guidi | [satellite-zona.zip](satellite-zona.zip) |
 | [`music-assistant`](music-assistant) | musica da Music Assistant: copertina, titolo, ▶ ⏹ ⏭ e l'elenco di playlist e radio (con una radio ⏭ passa alla radio dopo), sul lettore scelto | [music-assistant.zip](music-assistant.zip) |
+| [`telefono`](telefono) | telefonate nell'app NaviHA: cornetta verde e rossa, nome di chi chiama, preferiti da chiamare con un tocco | [telefono.zip](telefono.zip) |
 
 Le immagini del satellite vengono dal servizio gratuito EUMETView di EUMETSAT (WMS). Per avere i nomi di città e stati
 più grandi l'immagine si chiede a 640×453 pixel con `format_options=dpi:190`: con immagini più piccole il servizio toglie

@@ -393,7 +393,11 @@ def clean_addon(a: dict) -> dict:
             if _URL.match(u) or u in files:
                 images.append({"label": str(it.get("label") or "")[:14] or str(len(images) + 1), "image": u})
     img = str(w.get("image") or (images[0]["image"] if images else ""))[:500]
-    if not (_URL.match(img) or img in files or _ENTIMG.match(img)):
+    # finestra "phone": telefonate dell'app NaviHA (cornetta verde/rossa, chi chiama, preferiti), senza immagine
+    kind = "phone" if w.get("kind") == "phone" else "image"
+    if kind == "phone":
+        img = ""
+    elif not (_URL.match(img) or img in files or _ENTIMG.match(img)):
         raise ValueError("la finestra dell'add-on non ha un'immagine valida (indirizzo http/https o file dello zip)")
     views = [v for v in (w.get("views") or ["2d", "3d"]) if v in ("2d", "3d")] or ["2d", "3d"]
 
@@ -414,6 +418,7 @@ def clean_addon(a: dict) -> dict:
         "where": a.get("where") if a.get("where") in ("both", "guida", "plan") else "both",
         "window": {
             "title": str(w.get("title") or "")[:60],
+            "kind": kind,
             "image": img,
             "refresh": num(w.get("refresh"), 0, 86400, 0),
             # zona intorno a te per i segnaposto {bbox}… degli indirizzi: metà altezza in km (0 = 100 km)
@@ -436,7 +441,7 @@ def clean_addon(a: dict) -> dict:
         # pagina tenuta aperta in sottofondo (invisibile) mentre Navigator è aperto, es. il lettore web di Music Assistant
         # su questo dispositivo: indirizzo https://… o percorso di Home Assistant /…, anche con i segnaposto {…}
         "background": _bg(a.get("background")),
-        "values": {k: str(v)[:200] for k, v in (a.get("values") or {}).items() if isinstance(k, str) and _KEY.match(k)}
+        "values": {k: str(v)[:600] for k, v in (a.get("values") or {}).items() if isinstance(k, str) and _KEY.match(k)}
         if isinstance(a.get("values"), dict) else {},
         "files": files,
     }

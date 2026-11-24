@@ -1,0 +1,19 @@
+{
+  "id": "telefono",
+  "name": "Telefono",
+  "version": "1.0",
+  "author": "Navigator",
+  "description": "Solo nell'app NaviHA (Android, anche in Android Auto): cornetta verde per rispondere e rossa per chiudere, nome di chi chiama e preferiti da chiamare con un tocco. Quando squilla la finestra compare da sola. I preferiti si scrivono nelle impostazioni: Nome=numero, separati da virgole.",
+  "where": "both",
+  "window": {
+    "kind": "phone",
+    "title": "📞 Telefono",
+    "width": 240,
+    "height": 120,
+    "views": ["2d", "3d"],
+    "click": "close"
+  },
+  "settings": [
+    {"key": "preferiti", "label": "Preferiti (Nome=numero, …)", "type": "text"}
+  ]
+}

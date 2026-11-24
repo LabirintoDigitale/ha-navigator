@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.85";
+const PANEL_VERSION = "1.13.86";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1726,6 +1726,33 @@ const STYLE = `
   .addock .addwin.botmode { padding: 0; background: none; }
   .addwin.botmode .at, .addwin.botmode .abtns { display: none; }
   .addwin.botmode .aimg img { border-radius: 10px; }
+  .addwin .aph { box-sizing: border-box; padding: 8px; display: flex; flex-direction: column; gap: 8px; justify-content: center;
+    color: #fff; font: 600 14px sans-serif; text-align: center; }
+  .addock .addwin.phwin .aph { width: auto !important; min-width: 220px; }
+  .aph .phst { opacity: .85; font-size: 13px; }
+  .aph .phst.ring { color: #7ee08a; animation: phbl 1s infinite; }
+  .aph .phst.on { color: #7ee08a; }
+  @keyframes phbl { 50% { opacity: .35; } }
+  .aph .phwho { font: 700 22px sans-serif; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; display: -webkit-box;
+    -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word; }
+  .aph .phbig { display: flex; justify-content: center; gap: 28px; }
+  .aph .phbig button { width: 64px; height: 64px; border-radius: 50%; border: none; color: #fff; display: flex; align-items: center;
+    justify-content: center; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.4); }
+  .aph .phg { background: #1e9e3a; animation: phpu 1.2s infinite; }
+  .aph .phr { background: #d93025; }
+  @keyframes phpu { 50% { box-shadow: 0 0 0 10px rgba(30,158,58,.25); } }
+  .aph .phfav { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; }
+  .aph .phfav button { border: none; border-radius: 12px; background: rgba(255,255,255,.1); color: #fff; font: 600 14px sans-serif;
+    padding: 8px 6px; display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; overflow: hidden;
+    text-overflow: ellipsis; }
+  .aph .phfav button span { width: 36px; height: 36px; border-radius: 50%; background: #1e9e3a; display: flex; align-items: center;
+    justify-content: center; }
+  .aph .phfav button span svg { width: 20px; height: 20px; }
+  .aph .phset { border: 1px solid rgba(255,255,255,.35); border-radius: 10px; background: none; color: #fff; padding: 6px 10px;
+    font: 600 13px sans-serif; cursor: pointer; }
+  .aph button.ko { outline: 2px solid #d93025; }
+  :host(.carscr) .aph .phbig button { width: 80px; height: 80px; }
+  :host(.carscr) .aph .phfav button { font-size: 17px; padding: 10px 6px; }
   .addwin .anopic { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 6px; padding: 30px 12px 50px; text-align: center; color: #fff; pointer-events: none;
     background: radial-gradient(circle at 50% 40%, #2b3a55, #141821); border-radius: 8px; }
@@ -1956,6 +1983,10 @@ class NavigatorPanel extends HTMLElement {
   }
 
   connectedCallback() {
+    // telefonate dall'app NaviHA (add-on Telefono)
+    window.__navihaPhone = () => this._phoneUpdate();
+    clearInterval(this._phoneTick);
+    this._phoneTick = setInterval(() => { if (this._phoneLast === "offhook") this._phoneUpdate(); }, 1000);
     if (this._hass && !this._started) this._init();
     else if (this._map) {
       this._ro?.observe(this.$("mapwrap"));
@@ -1971,6 +2002,7 @@ class NavigatorPanel extends HTMLElement {
   set panel(p) { this._panel = p; }
 
   disconnectedCallback() {
+    clearInterval(this._phoneTick);
     this._ro?.disconnect();
   }
 
@@ -9018,6 +9050,7 @@ class NavigatorPanel extends HTMLElement {
       el.className = "addwin"; el.id = id; el._sig = sig;
       el.title = `${a.name} (tieni premuto per spostarla)`;
       el.style.top = `${120 + i * 30}px`;
+      if (w.kind === "phone") { this._phoneWin(a, el); this._addonMount(wrap, el, a, id, () => {}); return; }
       const alts = Array.isArray(w.images) && w.images.length > 1 ? w.images : null;
       const selKey = `${STORE_KEY}-addon-${a.id}`;
       let sel = 0;
@@ -9119,27 +9152,126 @@ class NavigatorPanel extends HTMLElement {
           if (at && p && distM(at, p) > Math.max(300, (w.area_km || 100) * 1000 * 0.15)) load();
         }, 10000);
       }
-      // tenuto premuto (per spostarlo) o trascinato: al rilascio non si chiude, è uno spostamento e non un tocco
-      let downAt = 0, dx0 = 0, dy0 = 0, moved = false;
-      el.addEventListener("pointerdown", (e) => { downAt = Date.now(); dx0 = e.clientX; dy0 = e.clientY; moved = false; }, true);
-      el.addEventListener("pointermove", (e) => { if (downAt && Math.hypot(e.clientX - dx0, e.clientY - dy0) > 10) moved = true; }, true);
-      el.addEventListener("click", (e) => {
-        if (Date.now() - (this._longAt || 0) < 800) return; // fine di uno spostamento: non è un tocco
-        if (moved || (downAt && Date.now() - downAt > 400)) { downAt = 0; return; }
-        downAt = 0;
-        // un tasto (o l'elenco aperto) fa la sua cosa; il tocco su tutto il resto del riquadro lo chiude, per ogni
-        // add-on: lo decide Navigator, non l'add-on
-        if (e.target.closest?.("button, a, select, input, .alp")) return;
-        this._addonClick(a, el, load);
-      });
-      wrap.appendChild(el);
-      this._bindFloatDrag(id, `addon:${a.id}`);
-      this._applyFloat(id, `addon:${a.id}`);
-      requestAnimationFrame(() => this._addonInside(el)); // appena creata: dentro lo schermo
+      this._addonMount(wrap, el, a, id, load);
     });
     this._syncDock();
     if (this._nav) this._placePitchCtl();
     this._addonBackground();
+  }
+
+  // tocchi della finestra di un add-on (chiusura, spostamento) e aggiunta alla mappa: uguale per ogni tipo di finestra
+  _addonMount(wrap, el, a, id, load) {
+    // tenuto premuto (per spostarlo) o trascinato: al rilascio non si chiude, è uno spostamento e non un tocco
+    let downAt = 0, dx0 = 0, dy0 = 0, moved = false;
+    el.addEventListener("pointerdown", (e) => { downAt = Date.now(); dx0 = e.clientX; dy0 = e.clientY; moved = false; }, true);
+    el.addEventListener("pointermove", (e) => { if (downAt && Math.hypot(e.clientX - dx0, e.clientY - dy0) > 10) moved = true; }, true);
+    el.addEventListener("click", (e) => {
+      if (Date.now() - (this._longAt || 0) < 800) return; // fine di uno spostamento: non è un tocco
+      if (moved || (downAt && Date.now() - downAt > 400)) { downAt = 0; return; }
+      downAt = 0;
+      // un tasto (o l'elenco aperto) fa la sua cosa; il tocco su tutto il resto del riquadro lo chiude, per ogni
+      // add-on: lo decide Navigator, non l'add-on
+      if (e.target.closest?.("button, a, select, input, .alp")) return;
+      this._addonClick(a, el, load);
+    });
+    wrap.appendChild(el);
+    this._bindFloatDrag(id, `addon:${a.id}`);
+    this._applyFloat(id, `addon:${a.id}`);
+    requestAnimationFrame(() => this._addonInside(el)); // appena creata: dentro lo schermo
+  }
+
+  // ---------------------------------------------------------------- add-on Telefono (solo nell'app NaviHA)
+  // cornetta verde (rispondi) e rossa (chiudi), chi chiama, preferiti per chiamare con un tocco. Lo stato arriva
+  // dall'app (window.__navihaPhone), le azioni vanno all'app (NaviHAApp.phoneAction).
+  _phoneOk() { try { return typeof window.NaviHAApp?.phoneState === "function"; } catch (e) { return false; } }
+
+  _phoneGet() {
+    if (!this._phoneOk()) return null;
+    try { return JSON.parse(window.NaviHAApp.phoneState()); } catch (e) { return null; }
+  }
+
+  // preferiti dall'impostazione "preferiti": "Mamma=+39 333 1234567, Ufficio=0437 123456" (anche ; o a capo)
+  _phoneFavs(a) {
+    return String(a.values?.preferiti || "").split(/[,;\n]+/).map((x) => {
+      const m = x.split("=");
+      const num = (m.length > 1 ? m.slice(1).join("=") : m[0]).replace(/[^0-9+*#]/g, "");
+      return num ? { name: (m.length > 1 ? m[0] : "").trim() || num, num } : null;
+    }).filter(Boolean).slice(0, 8);
+  }
+
+  _phoneWin(a, el) {
+    const w = a.window;
+    el.classList.add("phwin");
+    el.innerHTML = `${w.title ? `<div class="at">${esc(w.title)}</div>` : ""}<div class="aimg"><div class="aph" style="width:${w.width}px;min-height:${w.height}px"></div></div>`;
+    const box = el.querySelector(".aph");
+    el._phone = () => this._phoneDraw(a, el, box);
+    el._title = w.title || a.name;
+    box.addEventListener("click", (e) => {
+      const b = e.target.closest?.("button");
+      if (!b) return;
+      e.stopPropagation();
+      if (Date.now() - (this._longAt || 0) < 500) return;
+      let ok = false;
+      try {
+        if (b.dataset.set) { window.NaviHAApp.phoneSettings(b.dataset.set); return; }
+        ok = window.NaviHAApp.phoneAction(b.dataset.ph, b.dataset.num || "");
+      } catch (err) { ok = false; }
+      this._alog(`${a.id}: ${b.dataset.ph}${b.dataset.num ? ` ${b.dataset.num}` : ""} → ${ok ? "ok" : "non riuscito"}`);
+      if (!ok) {
+        b.classList.add("ko"); setTimeout(() => b.classList.remove("ko"), 1200);
+        if (b.dataset.ph !== "call") this._msg("Serve il permesso «Telefono» per NaviHA (menu ⋮ → Permessi per le chiamate)");
+      }
+    });
+    el._phone();
+  }
+
+  _phoneDraw(a, el, box) {
+    const P = '<path d="M6.6 3.5h2.8l1.4 4.2-2 1.4a11.5 11.5 0 0 0 6.1 6.1l1.4-2 4.2 1.4v2.8a2 2 0 0 1-2.2 2A16.5 16.5 0 0 1 4.6 5.7a2 2 0 0 1 2-2.2z"/>';
+    const ic = (rot) => `<svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor"${rot ? ' style="transform:rotate(135deg)"' : ""}>${P}</svg>`;
+    let html;
+    if (!this._phoneOk()) {
+      html = `<div class="phst">📞 Le chiamate funzionano solo nell'app NaviHA (Android)</div>`;
+    } else {
+      const st = this._phoneGet() || { state: "idle" };
+      const who = st.name || st.number || "";
+      if (st.state !== this._phoneLast) {
+        if (st.state === "offhook" && this._phoneLast !== "offhook") this._phoneSince = Date.now();
+        this._phoneLast = st.state;
+      }
+      const perm = st.perm === false ? `<button class="phset" data-set="app">Permessi del telefono</button>` : "";
+      const names = st.names === false && st.state !== "idle" ? `<button class="phset" data-set="names">Mostra i nomi di chi chiama</button>` : "";
+      if (st.state === "ringing") {
+        html = `<div class="phst ring">Chiamata in arrivo</div><div class="phwho">${esc(who || "Numero sconosciuto")}</div>
+          <div class="phbig"><button class="phg" data-ph="answer" title="Rispondi">${ic(false)}</button><button class="phr" data-ph="end" title="Rifiuta">${ic(true)}</button></div>${names}`;
+      } else if (st.state === "offhook") {
+        const sec = Math.max(0, Math.floor((Date.now() - (this._phoneSince || Date.now())) / 1000));
+        html = `<div class="phst on">In chiamata · <span class="phtm">${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}</span></div>
+          <div class="phwho">${esc(who)}</div><div class="phbig"><button class="phr" data-ph="end" title="Chiudi">${ic(true)}</button></div>${names}`;
+      } else {
+        const favs = this._phoneFavs(a);
+        html = `${favs.length ? `<div class="phfav">${favs.map((f) => `<button data-ph="call" data-num="${esc(f.num)}" title="${esc(f.num)}"><span>${ic(false)}</span>${esc(f.name)}</button>`).join("")}</div>`
+          : `<div class="phst">Nessun preferito: scrivili nelle impostazioni dell'add-on (Nome=numero, …)</div>`}${perm}`;
+      }
+    }
+    if (box.dataset.h !== html) { box.dataset.h = html; box.innerHTML = html; }
+  }
+
+  // aggiornamento dall'app: ridisegna le finestre Telefono; quando squilla la finestra ricompare (anche se chiusa) e,
+  // nel blocco della guida, diventa quella mostrata
+  _phoneUpdate() {
+    const st = this._phoneGet();
+    const ph = (this._addons || []).filter((a) => a.enabled && a.window?.kind === "phone");
+    if (!ph.length) return;
+    if (st?.state === "ringing" && this._phoneRang !== true) {
+      this._phoneRang = true;
+      let re = false;
+      for (const a of ph) if (this._addonClosed?.delete(a.id)) re = true;
+      if (re) this._renderAddons();
+      const wins = [...(this.$?.("mapwrap")?.querySelectorAll(".addwin") || [])];
+      const k = wins.findIndex((x) => x.classList.contains("phwin"));
+      if (k >= 0 && this.$("addock")) { this._dockIdx = k; this._syncDock(); }
+    } else if (st?.state !== "ringing") this._phoneRang = false;
+    this.$?.("mapwrap")?.querySelectorAll(".addwin.phwin").forEach((el) => el._phone?.());
   }
 
   // pagine tenute aperte in sottofondo dagli add-on attivi (es. il lettore web di Music Assistant su questo dispositivo:
