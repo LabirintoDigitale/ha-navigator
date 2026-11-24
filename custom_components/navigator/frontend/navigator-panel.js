@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.77";
+const PANEL_VERSION = "1.13.78";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1709,8 +1709,8 @@ const STYLE = `
     font: 600 16px sans-serif; box-shadow: 0 2px 12px rgba(0,0,0,.4); white-space: nowrap; }
   .editbar button { border: none; border-radius: 10px; background: #fff; color: #1a73e8; font: 700 16px sans-serif; padding: 10px 16px; cursor: pointer; }
   /* nascondi automatico: dopo 10 s senza tocchi */
-  .mapwrap .navbot, .mapwrap .pitchctl, .mapwrap .addwin, .mapwrap .addock { transition: opacity .4s; }
-  .mapwrap.autohid .navbot, .mapwrap.autohid .pitchctl, .mapwrap.autohid .addwin, .mapwrap.autohid .addock { opacity: 0; pointer-events: none; } /* spostata: solo left/top (prima con right restava tirata per tutta la larghezza) */
+  .mapwrap .navbot, .mapwrap .pitchctl, .mapwrap .spdbox, .mapwrap .navtop, .mapwrap .addwin, .mapwrap .addock { transition: opacity .4s; }
+  .mapwrap.autohid .ahsel { opacity: 0 !important; pointer-events: none !important; } /* spostata: solo left/top (prima con right restava tirata per tutta la larghezza) */
   /* blocco della guida: barra verde in alto, sotto gli add-on (scorrono) con la croce a fianco */
   .navtop.docked { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
   .navbot.docked { }
@@ -6997,13 +6997,34 @@ class NavigatorPanel extends HTMLElement {
 
   // ------------------------------------------------------------------ nascondi automatico (opzione)
   // add-on, barra in basso e croce spariscono dopo 10 s senza tocchi; il primo tocco li fa ricomparire (e basta)
+  // cosa si può nascondere: [chiave, nome]; di base tutto tranne barra verde e velocità (scelte "skip" = da non nascondere)
+  _autoHideItems() {
+    return [["navbot", "Barra in basso"], ["pitchctl", "Croce (ora e zoom)"], ["spdbox", "Velocità"], ["navtop", "Barra verde"],
+      ...(this._addons || []).map((a) => [`addon:${a.id}`, `Add-on: ${a.name}`])];
+  }
+
+  _autoHideMark() {
+    const wrap = this.$("mapwrap");
+    if (!wrap) return;
+    const skip = new Set(this._settings.autoHideSkip ?? ["spdbox", "navtop"]);
+    for (const id of ["navbot", "pitchctl", "spdbox", "navtop"]) this.$(id)?.classList.toggle("ahsel", !skip.has(id));
+    wrap.querySelectorAll(".addwin").forEach((w) => w.classList.toggle("ahsel", !skip.has(`addon:${w.id.slice(6)}`)));
+    const dock = this.$("addock");
+    if (dock) {
+      const wins = [...dock.querySelectorAll(".addwin")];
+      dock.classList.toggle("ahsel", wins.length > 0 && wins.every((w) => w.classList.contains("ahsel")));
+    }
+  }
+
   _bindAutoHide() {
     const wrap = this.$("mapwrap");
     if (!wrap) return;
     const arm = () => {
       clearTimeout(this._ahT);
       if (this._settings.autoHide !== true || this._editing) return;
-      this._ahT = setTimeout(() => { if (this._settings.autoHide === true && !this._editing && !this._dragging) wrap.classList.add("autohid"); }, 10000);
+      this._ahT = setTimeout(() => {
+        if (this._settings.autoHide === true && !this._editing && !this._dragging) { this._autoHideMark(); wrap.classList.add("autohid"); }
+      }, 10000);
     };
     this._autoHideArm = arm;
     // nascosti: solo un tocco breve li fa ricomparire; trascinare o pizzicare la mappa no (e i riquadri nascosti non
@@ -7528,7 +7549,9 @@ class NavigatorPanel extends HTMLElement {
       </div>
       <div class="grp"><h3>Mappa</h3>
         ${sw("clickSnd", "Suono alla pressione dei pulsanti", "Un \"tic\" leggero a ogni tasto premuto, anche sullo schermo dell'auto")}
-        ${sw("autoHide", "Nascondi automaticamente", "Add-on, barra in basso e croce spariscono dopo 10 secondi che non tocchi lo schermo; un tocco li fa ricomparire")}
+        ${sw("autoHide", "Nascondi automaticamente", "Quello che scegli qui sotto sparisce dopo 10 secondi che non tocchi lo schermo; un tocco breve lo fa ricomparire")}
+        ${s.autoHide ? `<div class="chips" style="margin:-2px 0 8px">${this._autoHideItems().map(([k, n]) =>
+          `<span class="chip ${(s.autoHideSkip ?? ["spdbox", "navtop"]).includes(k) ? "" : "on"}" data-ahk="${esc(k)}">${esc(n)}</span>`).join("")}</div>` : ""}
         ${sw("autoZoom", "Zoom automatico in base alla velocità (mappa 2D)", "In guida: più vicino in città, più largo in autostrada. Dopo + o − resta il tuo zoom per 20 secondi")}
         ${sw("autoZoom3d", "Zoom automatico in base alla velocità (vista 3D)", "In guida la distanza dalla macchina cambia con la velocità, partendo da quella che hai scelto. Spento: la distanza resta sempre quella scelta")}
         <label class="line"><span>Modalità notte</span><select data-s="nightMode">${NIGHT_MODES.map(([v, n]) => `<option value="${v}" ${(s.nightMode || "auto") === v ? "selected" : ""}>${n}</option>`).join("")}</select></label>
@@ -7633,7 +7656,7 @@ class NavigatorPanel extends HTMLElement {
       if (el.dataset.s === "autoDest") { this._idleWatchSync(); if (!el.checked) this._autoDestHide(); }
       if (el.dataset.s === "clouds3d") { this._cloudKey = null; this._scheduleClouds(true); }
       if (el.dataset.s === "wx3d") { this._rainDrops = null; this._snowFlakes = null; this._scheduleCloudDraw?.(); }
-      if (el.dataset.s === "autoHide") { this.$("mapwrap")?.classList.remove("autohid"); this._autoHideArm?.(); }
+      if (el.dataset.s === "autoHide") { this.$("mapwrap")?.classList.remove("autohid"); this._autoHideArm?.(); this._openSettings(); }
       if (el.dataset.s === "names3d") { this._apply3dSettings(); this._g3?.triggerRepaint(); }
       if (el.dataset.s === "b3d") { this._apply3dSettings(); this._openSettings(); } // compare o sparisce lo stile degli edifici
       if (el.dataset.s === "autoZoom3d") { this._g3key = null; this._sync3d(); }
@@ -7728,6 +7751,13 @@ class NavigatorPanel extends HTMLElement {
       s.fuelBrands = s.fuelBrands.includes(b) ? s.fuelBrands.filter((x) => x !== b) : [...s.fuelBrands, b];
       this._saveSettings();
       el.classList.toggle("on");
+    }));
+    wrap.querySelectorAll("[data-ahk]").forEach((el) => el.addEventListener("click", () => {
+      const k = el.dataset.ahk, skip = new Set(s.autoHideSkip ?? ["spdbox", "navtop"]);
+      if (skip.has(k)) skip.delete(k); else skip.add(k);
+      s.autoHideSkip = [...skip];
+      this._saveSettings();
+      el.classList.toggle("on", !skip.has(k));
     }));
     wrap.querySelectorAll("[data-fkind]").forEach((el) => el.addEventListener("click", () => {
       s.fuelKind = el.dataset.fkind;
