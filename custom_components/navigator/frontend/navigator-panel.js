@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.75";
+const PANEL_VERSION = "1.13.76";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1699,7 +1699,18 @@ const STYLE = `
   /* finestre degli add-on sulla mappa (spostabili tenendo premuto, come gli altri riquadri) */
   .addwin { position: absolute; z-index: 1002; right: 70px; top: 120px; background: rgba(24,24,24,.88); border-radius: 12px;
     padding: 4px; box-shadow: 0 2px 10px rgba(0,0,0,.45); touch-action: none; user-select: none; -webkit-user-select: none; cursor: pointer; }
-  .addwin.moved { right: auto; } /* spostata: solo left/top (prima con right restava tirata per tutta la larghezza) */
+  .addwin.moved { right: auto; }
+  /* modalità spostamento (auto): riquadro scelto svuotato come la sagoma del trascinamento sul telefono */
+  .mapwrap.editing .pitchctl, .mapwrap.editing .spdbox, .mapwrap.editing .addwin:not(.addock .addwin) { outline: 2px dashed rgba(255,255,255,.7); outline-offset: 2px; }
+  .mapwrap.editing .editsel { outline: 3px solid #1a73e8; background: rgba(26,115,232,.22) !important; }
+  .mapwrap.editing .editsel > * { visibility: hidden; }
+  .editbar { position: absolute; z-index: 1100; left: 50%; bottom: calc(12px + var(--nvb, 0px)); transform: translateX(-50%); display: flex;
+    align-items: center; gap: 12px; background: #1a73e8; color: #fff; border-radius: 14px; padding: 8px 10px 8px 16px;
+    font: 600 16px sans-serif; box-shadow: 0 2px 12px rgba(0,0,0,.4); white-space: nowrap; }
+  .editbar button { border: none; border-radius: 10px; background: #fff; color: #1a73e8; font: 700 16px sans-serif; padding: 10px 16px; cursor: pointer; }
+  /* nascondi automatico: dopo 10 s senza tocchi */
+  .mapwrap .navbot, .mapwrap .pitchctl, .mapwrap .addwin, .mapwrap .addock { transition: opacity .4s; }
+  .mapwrap.autohid .navbot, .mapwrap.autohid .pitchctl, .mapwrap.autohid .addwin, .mapwrap.autohid .addock { opacity: 0; } /* spostata: solo left/top (prima con right restava tirata per tutta la larghezza) */
   /* blocco della guida: barra verde in alto, sotto gli add-on (scorrono) con la croce a fianco */
   .navtop.docked { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
   .navbot.docked { }
@@ -2069,6 +2080,7 @@ class NavigatorPanel extends HTMLElement {
             <button id="locate" title="La mia posizione">◎</button>
             <button id="fit" title="Mostra tutto il percorso">⤢</button>
             <button id="b3dbtn" class="b3d" title="Vista 3D con rilievo ed edifici">3D</button>
+            <button id="editbtn" title="Sposta i riquadri (tocca un riquadro, poi trascina)" hidden>✥</button>
             <button id="fullbtn" title="Schermo intero">${FS_ON}</button>
           </div>
         </div>
@@ -2180,6 +2192,9 @@ class NavigatorPanel extends HTMLElement {
     $("layerbox").title = `Mappa: ${LAYERS[this._layer]?.[0] || ""} (tocca per cambiare)`;
     $("sidebtn").addEventListener("click", () => this._carSide(!this.classList.contains("sideopen")));
     $("b3dbtn").addEventListener("click", () => this._toggle3d());
+    $("editbtn").addEventListener("click", () => this._editMode(!this._editing));
+    this._bindEditMode();
+    this._bindAutoHide();
     const tapOk = () => Date.now() - (this._longAt || 0) > 500; // subito dopo uno spostamento il tocco non vale
     $("pitchctl").querySelectorAll("[data-p]").forEach((b) => b.addEventListener("click", () => { if (tapOk()) this._setPitch3d(+b.dataset.p); }));
     $("nightbtn").addEventListener("click", () => { if (tapOk()) this._toggleNight(); });
@@ -4044,6 +4059,8 @@ class NavigatorPanel extends HTMLElement {
     if (b) { b.hidden = !car || !!this._nav; b.classList.toggle("attn", this.classList.contains("sideopen")); }
     const fb = this.$("fullbtn");
     if (fb && car) fb.hidden = true; // in auto lo schermo intero è fisso
+    const eb = this.$("editbtn");
+    if (eb) eb.hidden = !car; // sull'auto il tocco prolungato non arriva: i riquadri si spostano con questo tasto
     setTimeout(() => this._relayout(), 150);
   }
 
@@ -6903,6 +6920,102 @@ class NavigatorPanel extends HTMLElement {
     this._applyNavTopPos(); this._placePitchCtl(); this._applyFloat("spdbox"); this._placeAddons();
   }
 
+  // ------------------------------------------------------------------ modalità spostamento (schermo dell'auto)
+  // Android Auto non passa all'app né il tocco prolungato né il punto dove comincia un trascinamento: col tasto ✥ si
+  // entra in una modalità in cui la mappa sta ferma, si tocca un riquadro (croce, velocità, add-on) per sceglierlo
+  // (si svuota, come quando lo si sposta sul telefono) e il trascinamento, ovunque cominci, sposta lui. ✓ per finire.
+  _editMode(on) {
+    this._editing = !!on;
+    const wrap = this.$("mapwrap");
+    wrap?.classList.toggle("editing", this._editing);
+    this.$("editbtn")?.classList.toggle("attn", this._editing);
+    if (!this._editing) {
+      this._editSel?.classList.remove("editsel");
+      this._editSel = null;
+      this.$("editbar")?.remove();
+      return;
+    }
+    let bar = this.$("editbar");
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.id = "editbar"; bar.className = "editbar";
+      wrap.appendChild(bar);
+    }
+    bar.innerHTML = `<span>✥ Tocca un riquadro, poi trascina dove vuoi</span><button data-done>✓ Fine</button>`;
+    bar.querySelector("[data-done]").addEventListener("click", (e) => { e.stopPropagation(); this._editMode(false); });
+  }
+
+  _editPick(el) {
+    this._editSel?.classList.remove("editsel");
+    this._editSel = el;
+    if (!el) return;
+    el.classList.add("editsel", "moved");
+    el.style.right = "auto";
+    el.style.left = `${el.offsetLeft}px`; el.style.top = `${el.offsetTop}px`;
+  }
+
+  _bindEditMode() {
+    const wrap = this.$("mapwrap");
+    if (!wrap) return;
+    let down = null;
+    const movable = (t) => t.closest?.("#pitchctl, #spdbox, .addwin");
+    const stop = (e) => { if (!this._editing || e.target.closest?.("#editbar")) return false; e.stopPropagation(); if (e.cancelable) e.preventDefault(); return true; };
+    wrap.addEventListener("pointerdown", (e) => {
+      if (!stop(e)) return;
+      const m = movable(e.target);
+      if (m && !m.closest(".addock")) this._editPick(m);
+      const el = this._editSel;
+      down = el ? { x: e.clientX, y: e.clientY, l: el.offsetLeft, t: el.offsetTop } : null;
+      if (down) this._dragging = true; // durante lo spostamento niente ricollocazioni automatiche
+      if (down) try { wrap.setPointerCapture(e.pointerId); } catch (err) { /* puntatore simulato */ }
+    }, true);
+    wrap.addEventListener("pointermove", (e) => {
+      if (!stop(e) || !down || !this._editSel) return;
+      const el = this._editSel;
+      const x = Math.max(4, Math.min(wrap.clientWidth - el.offsetWidth - 4, down.l + e.clientX - down.x));
+      const y = Math.max(4, Math.min(wrap.clientHeight - el.offsetHeight - 4, down.t + e.clientY - down.y));
+      el.style.left = `${x}px`; el.style.top = `${y}px`;
+    }, true);
+    const up = (e) => {
+      if (!stop(e) || !down) return;
+      down = null;
+      this._dragging = false;
+      const el = this._editSel;
+      if (!el) return;
+      const key = el.id.startsWith("addon-") ? `addon:${el.id.slice(6)}` : el.id;
+      (this._layout ||= {})[key] = { x: el.offsetLeft / wrap.clientWidth, y: el.offsetTop / wrap.clientHeight };
+      this._saveLayout();
+    };
+    wrap.addEventListener("pointerup", up, true);
+    wrap.addEventListener("pointercancel", up, true);
+    // la mappa (Leaflet, MapLibre) sente anche tocchi, mouse, clic e rotella: in modalità spostamento niente
+    for (const t of ["touchstart", "touchmove", "touchend", "mousedown", "mousemove", "mouseup", "click", "dblclick", "wheel", "contextmenu"]) {
+      wrap.addEventListener(t, (e) => { stop(e); }, { capture: true, passive: false });
+    }
+  }
+
+  // ------------------------------------------------------------------ nascondi automatico (opzione)
+  // add-on, barra in basso e croce spariscono dopo 10 s senza tocchi; il primo tocco li fa ricomparire (e basta)
+  _bindAutoHide() {
+    const wrap = this.$("mapwrap");
+    if (!wrap) return;
+    const arm = () => {
+      clearTimeout(this._ahT);
+      if (this._settings.autoHide !== true || this._editing) return;
+      this._ahT = setTimeout(() => { if (this._settings.autoHide === true && !this._editing && !this._dragging) wrap.classList.add("autohid"); }, 10000);
+    };
+    this._autoHideArm = arm;
+    wrap.addEventListener("pointerdown", (e) => {
+      if (wrap.classList.contains("autohid")) {
+        wrap.classList.remove("autohid");
+        // il tocco che le fa ricomparire non preme niente sotto
+        if (e.target.closest?.(".navbot, .pitchctl, .addwin, .addock")) { e.stopPropagation(); e.preventDefault(); }
+      }
+      arm();
+    }, true);
+    arm();
+  }
+
   _saveLayout() {
     const lay = this._layout || {};
     if (this._isCarScreen()) {
@@ -7406,6 +7519,7 @@ class NavigatorPanel extends HTMLElement {
       </div>
       <div class="grp"><h3>Mappa</h3>
         ${sw("clickSnd", "Suono alla pressione dei pulsanti", "Un \"tic\" leggero a ogni tasto premuto, anche sullo schermo dell'auto")}
+        ${sw("autoHide", "Nascondi automaticamente", "Add-on, barra in basso e croce spariscono dopo 10 secondi che non tocchi lo schermo; un tocco li fa ricomparire")}
         ${sw("autoZoom", "Zoom automatico in base alla velocità (mappa 2D)", "In guida: più vicino in città, più largo in autostrada. Dopo + o − resta il tuo zoom per 20 secondi")}
         ${sw("autoZoom3d", "Zoom automatico in base alla velocità (vista 3D)", "In guida la distanza dalla macchina cambia con la velocità, partendo da quella che hai scelto. Spento: la distanza resta sempre quella scelta")}
         <label class="line"><span>Modalità notte</span><select data-s="nightMode">${NIGHT_MODES.map(([v, n]) => `<option value="${v}" ${(s.nightMode || "auto") === v ? "selected" : ""}>${n}</option>`).join("")}</select></label>
@@ -7510,6 +7624,7 @@ class NavigatorPanel extends HTMLElement {
       if (el.dataset.s === "autoDest") { this._idleWatchSync(); if (!el.checked) this._autoDestHide(); }
       if (el.dataset.s === "clouds3d") { this._cloudKey = null; this._scheduleClouds(true); }
       if (el.dataset.s === "wx3d") { this._rainDrops = null; this._snowFlakes = null; this._scheduleCloudDraw?.(); }
+      if (el.dataset.s === "autoHide") { this.$("mapwrap")?.classList.remove("autohid"); this._autoHideArm?.(); }
       if (el.dataset.s === "names3d") { this._apply3dSettings(); this._g3?.triggerRepaint(); }
       if (el.dataset.s === "b3d") { this._apply3dSettings(); this._openSettings(); } // compare o sparisce lo stile degli edifici
       if (el.dataset.s === "autoZoom3d") { this._g3key = null; this._sync3d(); }
