@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.83";
+const PANEL_VERSION = "1.13.84";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -2127,8 +2127,8 @@ class NavigatorPanel extends HTMLElement {
     this._loadGarage();
     this._loadAddons();
     this._renderPlanSel();
-    // nell'app NaviHA restano solo Viaggio: Live e Archivio sono nascosti
-    if (this._isNaviHA()) {
+    // nell'app NaviHA restano solo Viaggio: Live e Archivio sono nascosti; altrove li vedono solo gli amministratori
+    if (this._isNaviHA() || !this._hass?.user?.is_admin) {
       for (const t of ["live", "archivio"]) $("sidetabs").querySelector(`[data-tab="${t}"]`)?.remove();
       $("sidetabs").classList.add("solo");
     }

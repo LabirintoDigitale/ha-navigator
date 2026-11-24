@@ -271,6 +271,12 @@ async def ws_poi_tile(hass: HomeAssistant, connection: websocket_api.ActiveConne
     await _run(connection, msg["id"], go())
 
 
+def _admin(connection) -> None:
+    """Live e tracce dei giorni: solo per gli amministratori di Home Assistant."""
+    if not (connection.user and connection.user.is_admin):
+        raise NavigatorError("Riservato agli amministratori")
+
+
 def _user(connection) -> tuple[str, str]:
     user = connection.user
     if user is None:
@@ -322,6 +328,7 @@ async def ws_live_all(hass: HomeAssistant, connection: websocket_api.ActiveConne
     """Guide in corso di tutti gli utenti (scheda Live): posizione, arrivo, veicolo e traccia percorsa finora."""
     async def go():
         uid, _name = _user(connection)
+        _admin(connection)
         data = _data(hass)
         out = []
         for user_id, st in data.live.active().items():
@@ -377,6 +384,7 @@ async def ws_days(hass: HomeAssistant, connection: websocket_api.ActiveConnectio
     """Tracce del giorno salvate (tutti gli utenti): giorno, utente, km, prima e ultima ora."""
     async def go():
         uid, _name = _user(connection)
+        _admin(connection)
         data = _data(hass)
         days = await data.trips.days()
         for d in days:
@@ -392,6 +400,7 @@ async def ws_days(hass: HomeAssistant, connection: websocket_api.ActiveConnectio
 async def ws_day(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
     async def go():
         _user(connection)
+        _admin(connection)
         return {"track": await _data(hass).trips.day_points(msg["user_id"], msg["day"][:10])}
 
     await _run(connection, msg["id"], go())
@@ -402,9 +411,8 @@ async def ws_day(hass: HomeAssistant, connection: websocket_api.ActiveConnection
 async def ws_day_delete(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
     """Cancella una traccia del giorno: la propria, o qualsiasi per un amministratore."""
     async def go():
-        uid, _name = _user(connection)
-        if msg["user_id"] != uid and not (connection.user and connection.user.is_admin):
-            raise NavigatorError("Puoi cancellare solo le tue tracce")
+        _user(connection)
+        _admin(connection)
         await _data(hass).trips.day_delete(msg["user_id"], msg["day"][:10])
         return {"ok": True}
 
