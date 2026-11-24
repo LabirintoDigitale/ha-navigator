@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.72";
+const PANEL_VERSION = "1.13.73";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -9008,7 +9008,11 @@ class NavigatorPanel extends HTMLElement {
       bot.classList.add("docked");
       // tutta l'altezza a sinistra: da sotto la barra verde fino al fondo della barra in basso; le scritte della barra
       // in basso cominciano a destra dell'add-on
-      const y0 = top.offsetTop + top.offsetHeight + 8, y1 = bot.offsetTop + bot.offsetHeight;
+      // sotto la barra verde e, se sta lì a sinistra, sotto il riquadro della velocità (sullo schermo dell'auto lo copriva)
+      let y0 = top.offsetTop + top.offsetHeight + 8;
+      const sb = this.$("spdbox");
+      if (sb && !sb.hidden && sb.offsetLeft < bot.offsetLeft + 300 && sb.offsetTop + sb.offsetHeight > y0 - 8) y0 = sb.offsetTop + sb.offsetHeight + 8;
+      const y1 = bot.offsetTop + bot.offsetHeight;
       Object.assign(dock.style, { top: `${y0}px`, bottom: "", left: `${bot.offsetLeft}px`, width: "", maxHeight: "" });
       list.style.maxHeight = "";
       const H = Math.max(80, y1 - y0 - 8); // altezza dell'immagine (dentro i bordi del riquadro)
