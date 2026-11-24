@@ -228,6 +228,12 @@ L'app chiede i permessi *Telefono* (menu ⋮ → *Permessi per le chiamate*). Pe
 dà solo all'app del telefono) NaviHA legge l'avviso della chiamata: la finestra mostra il tasto *Mostra i nomi di chi
 chiama* che apre *Accesso alle notifiche*; NaviHA legge solo gli avvisi delle chiamate e non salva niente.
 
+**Dove va l'audio** (🔊): durante una chiamata la finestra mostra l'uscita in uso (auto, auricolari, telefono, vivavoce);
+toccandola si sceglie un'altra uscita, per esempio gli auricolari anche se si è collegata l'auto. Serve Android 12 o più
+recente e, una volta sola, l'**abbinamento** di NaviHA come app compagna (tasto *🔊 Audio delle chiamate: abbina* nella
+finestra o menu ⋮ → *Audio delle chiamate*): Android chiede di scegliere un dispositivo Bluetooth qualunque. Le chiamate
+restano dell'app del telefono.
+
 ---
 
 ## Esempi

@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.87";
+const PANEL_VERSION = "1.13.88";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1751,6 +1751,14 @@ const STYLE = `
   .aph .phset { border: 1px solid rgba(255,255,255,.35); border-radius: 10px; background: none; color: #fff; padding: 6px 10px;
     font: 600 13px sans-serif; cursor: pointer; }
   .aph button.ko { outline: 2px solid #d93025; }
+  .aph .phau { align-self: center; border: none; border-radius: 12px; background: rgba(255,255,255,.14); color: #fff;
+    font: 600 15px sans-serif; padding: 8px 14px; cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .aph .phau.on { background: rgba(26,115,232,.5); }
+  .aph .phrt { display: flex; flex-direction: column; gap: 4px; }
+  .aph .phrt button { border: none; border-radius: 10px; background: rgba(255,255,255,.08); color: #fff; font: 600 15px sans-serif;
+    padding: 9px 10px; text-align: left; cursor: pointer; }
+  .aph .phrt button.on { background: #1a73e8; }
+  :host(.carscr) .aph .phau, :host(.carscr) .aph .phrt button { font-size: 18px; padding: 12px 14px; }
   :host(.carscr) .aph .phbig button { width: 80px; height: 80px; }
   :host(.carscr) .aph .phfav button { font-size: 17px; padding: 10px 6px; }
   .addwin .anopic { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -9260,9 +9268,11 @@ class NavigatorPanel extends HTMLElement {
       if (!b) return;
       e.stopPropagation();
       if (Date.now() - (this._longAt || 0) < 500) return;
+      if (b.dataset.au) { el._phOpen = !el._phOpen; el._phone(); return; } // 🔊: apre/chiude l'elenco delle uscite audio
       let ok = false;
       try {
         if (b.dataset.set) { window.NaviHAApp.phoneSettings(b.dataset.set); return; }
+        if (b.dataset.ph === "route") { el._phOpen = false; setTimeout(() => el._phone?.(), 50); }
         ok = window.NaviHAApp.phoneAction(b.dataset.ph, b.dataset.num || "");
       } catch (err) { ok = false; }
       this._alog(`${a.id}: ${b.dataset.ph}${b.dataset.num ? ` ${b.dataset.num}` : ""} → ${ok ? "ok" : "non riuscito"}`);
@@ -9288,18 +9298,29 @@ class NavigatorPanel extends HTMLElement {
         this._phoneLast = st.state;
       }
       const perm = st.perm === false ? `<button class="phset" data-set="app">Permessi del telefono</button>` : "";
-      const names = st.names === false && st.state !== "idle" ? `<button class="phset" data-set="names">Mostra i nomi di chi chiama</button>` : "";
+      // il nome arriva dal servizio compagno; senza, dall'avviso della chiamata (serve l'accesso alle notifiche)
+      const names = st.names === false && !st.svc && st.state !== "idle" ? `<button class="phset" data-set="names">Mostra i nomi di chi chiama</button>` : "";
+      // audio della chiamata: 🔊 con l'uscita in uso, toccato mostra le altre (telefono, vivavoce, auto, auricolari…)
+      const routes = Array.isArray(st.routes) ? st.routes : [];
+      const RI = { earpiece: "📱", speaker: "🔈", bluetooth: "🎧", wired: "🎧", streaming: "📡" };
+      const rIc = (r) => (r.type === "bluetooth" && /auto|car|vw|fiat|ford|bmw|audi|mercedes|toyota|renault|peugeot|opel|skoda|seat|kia|hyundai|volvo|mazda|nissan|tesla|sync|uconnect|mylink|media|ottocast/i.test(r.name) ? "🚗" : RI[r.type] || "🔊");
+      const curR = routes.find((r) => r.on);
+      const audio = routes.length ? `<button class="phau${el._phOpen ? " on" : ""}" data-au="1" title="Dove va l'audio">🔊 ${esc(curR ? curR.name : "Audio")} ▾</button>${
+        el._phOpen ? `<div class="phrt">${routes.map((r) => `<button data-ph="route" data-num="${esc(r.id)}" class="${r.on ? "on" : ""}">${rIc(r)} ${esc(r.name)}</button>`).join("")}</div>` : ""}`
+        : st.canCompanion && !st.companion && st.state !== "idle" ? `<button class="phset" data-set="companion">🔊 Scegliere l'audio: abbina NaviHA</button>` : "";
+      const pair = st.canCompanion && !st.companion ? `<button class="phset" data-set="companion">🔊 Audio delle chiamate: abbina</button>` : "";
       if (st.state === "ringing") {
         html = `<div class="phst ring">Chiamata in arrivo</div><div class="phwho">${esc(who || "Numero sconosciuto")}</div>
-          <div class="phbig"><button class="phg" data-ph="answer" title="Rispondi">${ic(false)}</button><button class="phr" data-ph="end" title="Rifiuta">${ic(true)}</button></div>${names}`;
+          <div class="phbig"><button class="phg" data-ph="answer" title="Rispondi">${ic(false)}</button><button class="phr" data-ph="end" title="Rifiuta">${ic(true)}</button></div>${audio}${names}`;
       } else if (st.state === "offhook") {
         const sec = Math.max(0, Math.floor((Date.now() - (this._phoneSince || Date.now())) / 1000));
         html = `<div class="phst on">In chiamata · <span class="phtm">${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}</span></div>
-          <div class="phwho">${esc(who)}</div><div class="phbig"><button class="phr" data-ph="end" title="Chiudi">${ic(true)}</button></div>${names}`;
+          <div class="phwho">${esc(who)}</div><div class="phbig"><button class="phr" data-ph="end" title="Chiudi">${ic(true)}</button></div>${audio}${names}`;
       } else {
         const favs = this._phoneFavs(a);
         html = `${favs.length ? `<div class="phfav">${favs.map((f) => `<button data-ph="call" data-num="${esc(f.num)}" title="${esc(f.num)}"><span>${ic(false)}</span>${esc(f.name)}</button>`).join("")}</div>`
-          : `<div class="phst">Nessun preferito: scrivili nelle impostazioni dell'add-on (Nome=numero, …)</div>`}${perm}`;
+          : `<div class="phst">Nessun preferito: scrivili nelle impostazioni dell'add-on (Nome=numero, …)</div>`}${perm}${pair}`;
+        el._phOpen = false;
       }
     }
     if (box.dataset.h !== html) { box.dataset.h = html; box.innerHTML = html; }
