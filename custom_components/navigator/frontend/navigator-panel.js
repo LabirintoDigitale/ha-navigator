@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.73";
+const PANEL_VERSION = "1.13.74";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -8781,8 +8781,14 @@ class NavigatorPanel extends HTMLElement {
           if (at && p && distM(at, p) > Math.max(300, (w.area_km || 100) * 1000 * 0.15)) load();
         }, 10000);
       }
+      // tenuto premuto (per spostarlo) o trascinato: al rilascio non si chiude, è uno spostamento e non un tocco
+      let downAt = 0, dx0 = 0, dy0 = 0, moved = false;
+      el.addEventListener("pointerdown", (e) => { downAt = Date.now(); dx0 = e.clientX; dy0 = e.clientY; moved = false; }, true);
+      el.addEventListener("pointermove", (e) => { if (downAt && Math.hypot(e.clientX - dx0, e.clientY - dy0) > 10) moved = true; }, true);
       el.addEventListener("click", (e) => {
-        if (Date.now() - (this._longAt || 0) < 500) return; // fine di uno spostamento: non è un tocco
+        if (Date.now() - (this._longAt || 0) < 800) return; // fine di uno spostamento: non è un tocco
+        if (moved || (downAt && Date.now() - downAt > 400)) { downAt = 0; return; }
+        downAt = 0;
         // un tasto (o l'elenco aperto) fa la sua cosa; il tocco su tutto il resto del riquadro lo chiude, per ogni
         // add-on: lo decide Navigator, non l'add-on
         if (e.target.closest?.("button, a, select, input, .alp")) return;
