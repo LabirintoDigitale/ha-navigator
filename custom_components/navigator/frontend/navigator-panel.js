@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.76";
+const PANEL_VERSION = "1.13.77";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1710,7 +1710,7 @@ const STYLE = `
   .editbar button { border: none; border-radius: 10px; background: #fff; color: #1a73e8; font: 700 16px sans-serif; padding: 10px 16px; cursor: pointer; }
   /* nascondi automatico: dopo 10 s senza tocchi */
   .mapwrap .navbot, .mapwrap .pitchctl, .mapwrap .addwin, .mapwrap .addock { transition: opacity .4s; }
-  .mapwrap.autohid .navbot, .mapwrap.autohid .pitchctl, .mapwrap.autohid .addwin, .mapwrap.autohid .addock { opacity: 0; } /* spostata: solo left/top (prima con right restava tirata per tutta la larghezza) */
+  .mapwrap.autohid .navbot, .mapwrap.autohid .pitchctl, .mapwrap.autohid .addwin, .mapwrap.autohid .addock { opacity: 0; pointer-events: none; } /* spostata: solo left/top (prima con right restava tirata per tutta la larghezza) */
   /* blocco della guida: barra verde in alto, sotto gli add-on (scorrono) con la croce a fianco */
   .navtop.docked { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
   .navbot.docked { }
@@ -6929,6 +6929,7 @@ class NavigatorPanel extends HTMLElement {
     const wrap = this.$("mapwrap");
     wrap?.classList.toggle("editing", this._editing);
     this.$("editbtn")?.classList.toggle("attn", this._editing);
+    this.$("navbot")?.querySelector('[data-n="edit"]')?.classList.toggle("attn", this._editing);
     if (!this._editing) {
       this._editSel?.classList.remove("editsel");
       this._editSel = null;
@@ -7005,14 +7006,22 @@ class NavigatorPanel extends HTMLElement {
       this._ahT = setTimeout(() => { if (this._settings.autoHide === true && !this._editing && !this._dragging) wrap.classList.add("autohid"); }, 10000);
     };
     this._autoHideArm = arm;
+    // nascosti: solo un tocco breve li fa ricomparire; trascinare o pizzicare la mappa no (e i riquadri nascosti non
+    // si possono toccare: la mappa sotto riceve tutto)
+    let t0 = 0, x0 = 0, y0 = 0, n = 0;
     wrap.addEventListener("pointerdown", (e) => {
-      if (wrap.classList.contains("autohid")) {
-        wrap.classList.remove("autohid");
-        // il tocco che le fa ricomparire non preme niente sotto
-        if (e.target.closest?.(".navbot, .pitchctl, .addwin, .addock")) { e.stopPropagation(); e.preventDefault(); }
-      }
-      arm();
+      n++;
+      if (n === 1) { t0 = Date.now(); x0 = e.clientX; y0 = e.clientY; } else t0 = 0; // due dita: pizzico
+      if (!wrap.classList.contains("autohid")) arm();
     }, true);
+    const up = (e) => {
+      n = Math.max(0, n - 1);
+      if (!wrap.classList.contains("autohid")) return;
+      if (t0 && Date.now() - t0 < 350 && Math.hypot(e.clientX - x0, e.clientY - y0) < 12) { wrap.classList.remove("autohid"); arm(); }
+      if (n === 0) t0 = 0;
+    };
+    wrap.addEventListener("pointerup", up, true);
+    wrap.addEventListener("pointercancel", (e) => { n = Math.max(0, n - 1); t0 = 0; }, true);
     arm();
   }
 
@@ -7826,6 +7835,7 @@ class NavigatorPanel extends HTMLElement {
         <button data-n="center" title="Centra sulla tua posizione">◎</button>
         <button data-n="near" title="Distributori, parcheggi e autovelox">🔎</button>
         <button data-n="3d" class="b3d" title="Vista 3D con rilievo ed edifici">3D</button>
+        ${this._isCarScreen() ? `<button data-n="edit" title="Sposta i riquadri (tocca un riquadro, poi trascina)">✥</button>` : ""}
         <button data-n="layer" class="layerbtn" title="Cambia tipo di mappa"><svg viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 12.5l9 5 9-5"/><path d="M3 16.5l9 5 9-5"/></svg></button>
         <button class="stop" data-n="stop" title="Ferma la navigazione">■ Ferma</button>
       </div>`;
@@ -7834,6 +7844,7 @@ class NavigatorPanel extends HTMLElement {
     bot.querySelector('[data-n="near"]').addEventListener("click", () => this._openNearby(this._nearCat || "fuel"));
     bot.querySelector('[data-n="stop"]').addEventListener("click", () => this._stopNav());
     bot.querySelector('[data-n="3d"]').addEventListener("click", () => this._toggle3d());
+    bot.querySelector('[data-n="edit"]')?.addEventListener("click", () => this._editMode(!this._editing));
     this._sync3dBtns();
   }
 
