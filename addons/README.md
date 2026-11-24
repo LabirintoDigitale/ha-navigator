@@ -202,13 +202,14 @@ installato come componente aggiuntivo (la trova da solo nella barra laterale; se
 
 ### Cosa fa il tocco sull'immagine
 
-`window.click`:
+Il tocco su un **tasto** fa la sua azione; il tocco su **tutto il resto** del riquadro, per qualsiasi add-on, fa
+quello che dice `window.click` (se non c'è, o è `"none"`, la finestra si chiude):
 
 | Valore | Effetto |
 |---|---|
 | `"close"` | chiude la finestra (torna al prossimo avvio, con *Mostra di nuovo* o dal tocco sui km/h) |
 | `"refresh"` | ricarica subito l'immagine |
-| `"none"` | niente (utile con i tasti, per non chiuderla per sbaglio) |
+| `"none"` | come `"close"`: il tocco fuori dai tasti chiude sempre la finestra |
 | `{"open": "https://…"}` | apre un indirizzo (anche con i segnaposto) |
 | `{"service": "light.toggle", "data": {"entity_id": "light.cortile"}}` | chiama un servizio di Home Assistant |
 

@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.71";
+const PANEL_VERSION = "1.13.72";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1295,7 +1295,10 @@ const STYLE = `
     border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .ctl { position: absolute; z-index: 1000; display: flex; flex-direction: column; gap: 6px; }
-  .ctl.tr { top: 10px; right: 10px; } .ctl.br { bottom: 24px; right: 10px; }
+  /* --nvl/--nvt/--nvr/--nvb: margini dello schermo dell'auto coperti da Android Auto (dall'app NaviHA, 0 altrove): la
+     mappa prende tutto lo schermo, i comandi restano dentro la parte libera */
+  .ctl.tr { top: calc(10px + var(--nvt, 0px)); right: calc(10px + var(--nvr, 0px)); }
+  .ctl.br { bottom: calc(24px + var(--nvb, 0px)); right: calc(10px + var(--nvr, 0px)); }
   /* tipo di mappa (fuori dalla navigazione): riquadro scuro come la croce, solo l'icona dei livelli */
   .ctl .layerbox { width: 48px; height: 44px; padding: 0; border: none; border-radius: 12px; background: rgba(32,33,36,.85); color: #fff;
     box-shadow: 0 1px 5px rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; cursor: pointer; }
@@ -1317,7 +1320,7 @@ const STYLE = `
   /* navigazione */
   select.inp { width: 100%; font: inherit; font-size: 14px; padding: 8px; border-radius: 8px; border: 1px solid var(--divider-color);
     background: var(--secondary-background-color, #f5f5f5); color: var(--primary-text-color); }
-  .navtop { position: absolute; z-index: 1001; top: 10px; left: 10px; right: 10px; display: flex; align-items: center; gap: 10px;
+  .navtop { position: absolute; z-index: 1001; top: calc(10px + var(--nvt, 0px)); left: calc(10px + var(--nvl, 0px)); right: calc(10px + var(--nvr, 0px)); display: flex; align-items: center; gap: 10px;
     background: #0b6e3a; color: #fff; border-radius: 12px; padding: 7px 12px; box-shadow: 0 2px 10px rgba(0,0,0,.35);
     cursor: grab; touch-action: none; } /* tieni premuto per spostarlo */
   /* icona della manovra grande quanto tutta la barra verde */
@@ -1359,7 +1362,7 @@ const STYLE = `
   .steppin { position: relative; width: 36px; height: 48px; filter: drop-shadow(0 2px 3px rgba(0,0,0,.45)); }
   .steppin svg { width: 36px; height: 48px; display: block; }
   .steppin img { position: absolute; left: 9.5px; top: 8.5px; width: 17px; height: 17px; border-radius: 50%; }
-  .navbot { position: absolute; z-index: 1001; bottom: 20px; left: 10px; right: 10px; display: flex; align-items: center; gap: 8px 12px;
+  .navbot { position: absolute; z-index: 1001; bottom: calc(20px + var(--nvb, 0px)); left: calc(10px + var(--nvl, 0px)); right: calc(10px + var(--nvr, 0px)); display: flex; align-items: center; gap: 8px 12px;
     flex-wrap: wrap; background: var(--card-background-color, #fff); color: var(--primary-text-color); border-radius: 12px;
     padding: 8px 10px; box-shadow: 0 2px 10px rgba(0,0,0,.3); font-size: 14px; }
   .navbot .info { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; flex: 1 1 auto; min-width: 150px; }
@@ -1578,7 +1581,7 @@ const STYLE = `
   button.b3d { font-weight: 700; font-size: 13px; }
   /* inclinazione della vista 3D: dall'alto fino a quasi la telecamera dell'auto */
   /* comando a croce: ▲▼ inclinazione (su/giù) e −/+ zoom (sinistra/destra) attorno ai gradi; in 2D solo −/+ */
-  .pitchctl { position: absolute; z-index: 1002; right: 10px; top: 56px; display: grid;
+  .pitchctl { position: absolute; z-index: 1002; right: calc(10px + var(--nvr, 0px)); top: calc(56px + var(--nvt, 0px)); display: grid;
     grid-template-columns: 40px 40px 40px; grid-template-rows: 36px 36px 36px; place-items: center;
     background: rgba(32,33,36,.85); border-radius: 12px; padding: 2px; box-shadow: 0 1px 5px rgba(0,0,0,.35); color: #fff; }
   .pitchctl[hidden] { display: none; }
@@ -1594,7 +1597,7 @@ const STYLE = `
   /* − + e frecce color bordò */
   .pitchctl button[data-z], .pitchctl button[data-p] { color: #9b1b30 !important; }
   /* velocità attuale in cifre LCD, "km/h" piccolo dopo; oltre il limite rossa e lampeggiante */
-  .spdbox { position: absolute; z-index: 1002; left: 10px; top: 56px; display: flex; align-items: flex-end; gap: 4px; height: 58px;
+  .spdbox { position: absolute; z-index: 1002; left: calc(10px + var(--nvl, 0px)); top: calc(56px + var(--nvt, 0px)); display: flex; align-items: flex-end; gap: 4px; height: 58px;
     padding: 4px 9px 5px; background: rgba(32,33,36,.85); border-radius: 12px; box-shadow: 0 1px 5px rgba(0,0,0,.35); color: #fff;
     touch-action: none; user-select: none; -webkit-user-select: none; }
   .spdbox[hidden] { display: none; }
@@ -8778,8 +8781,11 @@ class NavigatorPanel extends HTMLElement {
           if (at && p && distM(at, p) > Math.max(300, (w.area_km || 100) * 1000 * 0.15)) load();
         }, 10000);
       }
-      el.addEventListener("click", () => {
+      el.addEventListener("click", (e) => {
         if (Date.now() - (this._longAt || 0) < 500) return; // fine di uno spostamento: non è un tocco
+        // un tasto (o l'elenco aperto) fa la sua cosa; il tocco su tutto il resto del riquadro lo chiude, per ogni
+        // add-on: lo decide Navigator, non l'add-on
+        if (e.target.closest?.("button, a, select, input, .alp")) return;
         this._addonClick(a, el, load);
       });
       wrap.appendChild(el);
@@ -9372,8 +9378,8 @@ class NavigatorPanel extends HTMLElement {
   }
 
   async _addonClick(a, el, reload) {
-    const c = a.window.click;
-    if (c === "none") return;
+    let c = a.window.click;
+    if (c === "none" || c == null) c = "close"; // il tocco fuori dai tasti chiude sempre
     if (c === "refresh") { reload(); return; }
     if (c?.open) { window.open(this._addonFill(c.open, this._addonVars(a.window)), "_blank", "noopener"); return; }
     if (c?.service) {
