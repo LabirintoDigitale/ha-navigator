@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.80";
+const PANEL_VERSION = "1.13.81";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -8836,6 +8836,10 @@ class NavigatorPanel extends HTMLElement {
     this._addonGuida = !!(this._nav && this._isGuida());
     const want = (this._addons || []).filter((a) => a.enabled && a.window.views.includes(view) && !this._addonClosed.has(a.id)
       && this._addonHere(a));
+    // registro (debug): perché un add-on c'è o non c'è
+    const why = (this._addons || []).map((a) => `${a.id}: ${!a.enabled ? "spento" : !a.window.views.includes(view) ? `non previsto in ${view}`
+      : this._addonClosed.has(a.id) ? "chiuso col tocco" : !this._addonHere(a) ? `solo ${a.where === "guida" ? "in guida" : "in pianificazione"}` : "mostrato"}`).join(" · ");
+    if (why !== this._whyLast) { this._whyLast = why; this._alog(`finestre (${view}, ${this._addonGuida ? "guida" : "pianificazione"}): ${why || "nessun add-on"}`); }
     const ids = new Set(want.map((a) => `addon-${a.id}`));
     wrap.querySelectorAll(".addwin").forEach((el) => {
       if (!ids.has(el.id)) { clearInterval(el._timer); el.remove(); }
@@ -8925,6 +8929,8 @@ class NavigatorPanel extends HTMLElement {
         if (Date.now() - (this._longAt || 0) < 500) return;
         pick(+b.dataset.k);
       }));
+      img.addEventListener("error", () => this._alog(`${a.id}: immagine non caricata (${(img.src || "").slice(0, 120)})`));
+      img.addEventListener("load", () => this._alog(`${a.id}: immagine caricata ${img.naturalWidth}×${img.naturalHeight}, finestra ${el.offsetWidth}×${el.offsetHeight} in ${el.offsetLeft},${el.offsetTop}`), { once: true });
       img.onerror = () => {
         // errore momentaneo del server: si riprova fra un minuto (non solo al prossimo aggiornamento)
         clearTimeout(el._retry);
