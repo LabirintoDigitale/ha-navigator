@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.81";
+const PANEL_VERSION = "1.13.82";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -7013,7 +7013,22 @@ class NavigatorPanel extends HTMLElement {
     if (dock) {
       const wins = [...dock.querySelectorAll(".addwin")];
       dock.classList.toggle("ahsel", wins.length > 0 && wins.every((w) => w.classList.contains("ahsel")));
+      // nel blocco della guida se ne vede uno alla volta: se quello visibile si nasconde ma un altro resta, mentre è
+      // tutto nascosto si mostra quello che resta (prima il blocco restava vuoto); al tocco torna quello di prima
+      const n = wins.length, k = n ? ((((this._dockIdx || 0) % n) + n) % n) : 0;
+      const keep = wins.findIndex((w) => !w.classList.contains("ahsel"));
+      if (n && wins[k].classList.contains("ahsel") && keep >= 0) {
+        this._dockIdxBack = this._dockIdx || 0;
+        this._dockIdx = keep;
+        this._syncDock();
+      }
     }
+  }
+
+  // ricompare tutto: nel blocco della guida torna l'add-on che si vedeva prima
+  _autoHideShow() {
+    this.$("mapwrap")?.classList.remove("autohid");
+    if (this._dockIdxBack != null) { this._dockIdx = this._dockIdxBack; this._dockIdxBack = null; this._syncDock(); }
   }
 
   _bindAutoHide() {
@@ -7038,7 +7053,7 @@ class NavigatorPanel extends HTMLElement {
     const up = (e) => {
       n = Math.max(0, n - 1);
       if (!wrap.classList.contains("autohid")) return;
-      if (t0 && Date.now() - t0 < 350 && Math.hypot(e.clientX - x0, e.clientY - y0) < 12) { wrap.classList.remove("autohid"); arm(); }
+      if (t0 && Date.now() - t0 < 350 && Math.hypot(e.clientX - x0, e.clientY - y0) < 12) { this._autoHideShow(); arm(); }
       if (n === 0) t0 = 0;
     };
     wrap.addEventListener("pointerup", up, true);
