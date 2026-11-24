@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.84";
+const PANEL_VERSION = "1.13.85";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -674,7 +674,7 @@ const SETTINGS_KEY = "navigator-panel-settings";
 const DEFAULT_SETTINGS = { voice: false, lang: "it", voiceSel: "f", out: "auto", autoZoom: true, beep: false,
   fuelBrands: [], fuelKind: "", camAlert: true, view3d: false, b3d: true, clouds3d: true, veh3d: true, terrainEx: "1.5", pitch3d: 60, tunnelFx: true, zoom3dOff: 0,
   voiceStyle: "normale", voiceRate: 1, voicePitch: 1, bldStyle: "colorati",
-  poiKinds: ["farmacia", "ospedale", "supermercato"], arrEntities: [], arrHomeOnly: true, nightMode: "auto", wxAlert: true, muteGuide: false, trafficSensor: "", autoDest: true, wx3d: true, arrDist: 500, tileAhead: 100, clickSnd: true, names3d: true, livePresence: true };
+  poiKinds: ["farmacia", "ospedale", "supermercato"], arrEntities: [], arrHomeOnly: true, nightMode: "auto", wxAlert: true, muteGuide: false, trafficSensor: "", autoDest: true, wx3d: true, arrDist: 500, tileAhead: 100, clickSnd: true, names3d: true };
 // marche dei distributori (come nell'anagrafica del MIMIT)
 const FUEL_BRANDS = ["Agip Eni", "Api-Ip", "Q8", "Esso", "Tamoil", "Shell", "Retitalia", "Beyfin", "Costantin", "Europam", "Pompe bianche"];
 const BRAND_COLORS = { "agip eni": "#f7c600", "eni": "#f7c600", "api-ip": "#0057a8", "ip": "#0057a8", "q8": "#0a3a7a", "esso": "#d71920",
@@ -1801,6 +1801,8 @@ const STYLE = `
     padding: 10px; font: 14px sans-serif; cursor: pointer; }
   .addmenu small { opacity: .6; }
   .addinfo { margin-top: 12px; }
+  .ahbox { border: 1px solid var(--divider-color, #555); border-radius: 12px; padding: 8px 10px; margin: 6px 0 10px; }
+  .ahbox select { max-width: 100%; }
   .addinfo summary { cursor: pointer; font-weight: 600; }
   .addinfo ol { margin: 6px 0; padding-left: 20px; }
   .addinfo pre { background: rgba(127,127,127,.15); border-radius: 8px; padding: 8px; font-size: 11px; overflow-x: auto; white-space: pre; }
@@ -2512,7 +2514,6 @@ class NavigatorPanel extends HTMLElement {
   // Navigator aperto senza guida: la posizione va alla scheda Live di tutti e nella traccia del giorno (se spostato di
   // almeno 25 m o ogni minuto). Si spegne in ⚙ → Generale
   _presence(lat, lon, speed, heading) {
-    if (this._settings.livePresence === false) return;
     const P = (this._pres ||= { at: 0, ll: null });
     if (P.ll && distM(P.ll, [lat, lon]) < 25 && Date.now() - P.at < 60000) return;
     P.ll = [lat, lon]; P.at = Date.now();
@@ -7019,10 +7020,20 @@ class NavigatorPanel extends HTMLElement {
       ...(this._addons || []).map((a) => [`addon:${a.id}`, `Add-on: ${a.name}`])];
   }
 
+  // Nascondi automatico per schermo (telefono o auto) e per veicolo del garage: si usa la scelta più precisa che c'è
+  // (questo schermo e questo veicolo → questo schermo, tutti i veicoli → le impostazioni di prima, valide ovunque)
+  _ahKey(scr, veh) { return `${scr}|${veh}`; }
+
+  _ahCfg(scr = this._isCarScreen() ? "auto" : "tel", veh = this._vehSel || "base") {
+    const by = this._settings.autoHideBy || {};
+    const c = by[this._ahKey(scr, veh)] || by[this._ahKey(scr, "*")];
+    return c || { on: this._settings.autoHide === true, skip: this._settings.autoHideSkip ?? ["spdbox", "navtop"] };
+  }
+
   _autoHideMark() {
     const wrap = this.$("mapwrap");
     if (!wrap) return;
-    const skip = new Set(this._settings.autoHideSkip ?? ["spdbox", "navtop"]);
+    const skip = new Set(this._ahCfg().skip || []);
     for (const id of ["navbot", "pitchctl", "spdbox", "navtop"]) this.$(id)?.classList.toggle("ahsel", !skip.has(id));
     wrap.querySelectorAll(".addwin").forEach((w) => w.classList.toggle("ahsel", !skip.has(`addon:${w.id.slice(6)}`)));
     const dock = this.$("addock");
@@ -7052,9 +7063,9 @@ class NavigatorPanel extends HTMLElement {
     if (!wrap) return;
     const arm = () => {
       clearTimeout(this._ahT);
-      if (this._settings.autoHide !== true || this._editing) return;
+      if (!this._ahCfg().on || this._editing) return;
       this._ahT = setTimeout(() => {
-        if (this._settings.autoHide === true && !this._editing && !this._dragging) { this._autoHideMark(); wrap.classList.add("autohid"); }
+        if (this._ahCfg().on && !this._editing && !this._dragging) { this._autoHideMark(); wrap.classList.add("autohid"); }
       }, 10000);
     };
     this._autoHideArm = arm;
@@ -7580,10 +7591,21 @@ class NavigatorPanel extends HTMLElement {
       </div>
       <div class="grp"><h3>Mappa</h3>
         ${sw("clickSnd", "Suono alla pressione dei pulsanti", "Un \"tic\" leggero a ogni tasto premuto, anche sullo schermo dell'auto")}
-        ${sw("livePresence", "Mostrami nella scheda Live anche senza guida", "Con Navigator aperto la tua posizione compare nella scheda Live di tutti e si salva la traccia del giorno (si può cancellare)")}
-        ${sw("autoHide", "Nascondi automaticamente", "Quello che scegli qui sotto sparisce dopo 10 secondi che non tocchi lo schermo; un tocco breve lo fa ricomparire")}
-        ${s.autoHide ? `<div class="chips" style="margin:-2px 0 8px">${this._autoHideItems().map(([k, n]) =>
-          `<span class="chip ${(s.autoHideSkip ?? ["spdbox", "navtop"]).includes(k) ? "" : "on"}" data-ahk="${esc(k)}">${esc(n)}</span>`).join("")}</div>` : ""}
+        ${(() => { // nascondi automatico: riquadro con la scelta di schermo e veicolo
+          const E = (this._ahEdit ||= { scr: this._isCarScreen() ? "auto" : "tel", veh: this._vehSel || "base" });
+          const own = (s.autoHideBy || {})[this._ahKey(E.scr, E.veh)];
+          const c = this._ahCfg(E.scr, E.veh);
+          return `<div class="ahbox"><label class="line"><span><b>Nascondi automaticamente</b><div class="note">Quello che scegli sparisce dopo
+            10 secondi che non tocchi lo schermo; un tocco breve lo fa ricomparire. Si regola per schermo e per veicolo.</div></span>
+            <span class="sw"><input type="checkbox" data-ahon ${c.on ? "checked" : ""}><i></i></span></label>
+            <div class="row" style="gap:6px;flex-wrap:wrap;margin:4px 0 6px">
+              <select data-ahscr><option value="tel" ${E.scr === "tel" ? "selected" : ""}>📱 Telefono</option><option value="auto" ${E.scr === "auto" ? "selected" : ""}>🚗 Schermo dell'auto</option></select>
+              <select data-ahveh><option value="*" ${E.veh === "*" ? "selected" : ""}>Tutti i veicoli</option>${this._vehicles().map((v) =>
+                `<option value="${esc(v.id)}" ${E.veh === v.id ? "selected" : ""}>${v.type ? vehIcon(v.type) : "🧭"} ${esc(v.name || "Veicolo")}${v.plate ? ` · ${esc(v.plate)}` : ""}</option>`).join("")}</select></div>
+            ${own ? "" : `<div class="note" style="margin-bottom:4px">Per questa scelta valgono le impostazioni generali: cambiando qualcosa diventano sue.</div>`}
+            ${c.on ? `<div class="chips">${this._autoHideItems().map(([k, n]) =>
+              `<span class="chip ${(c.skip || []).includes(k) ? "" : "on"}" data-ahk="${esc(k)}">${esc(n)}</span>`).join("")}</div>` : ""}</div>`;
+        })()}
         ${sw("autoZoom", "Zoom automatico in base alla velocità (mappa 2D)", "In guida: più vicino in città, più largo in autostrada. Dopo + o − resta il tuo zoom per 20 secondi")}
         ${sw("autoZoom3d", "Zoom automatico in base alla velocità (vista 3D)", "In guida la distanza dalla macchina cambia con la velocità, partendo da quella che hai scelto. Spento: la distanza resta sempre quella scelta")}
         <label class="line"><span>Modalità notte</span><select data-s="nightMode">${NIGHT_MODES.map(([v, n]) => `<option value="${v}" ${(s.nightMode || "auto") === v ? "selected" : ""}>${n}</option>`).join("")}</select></label>
@@ -7688,7 +7710,6 @@ class NavigatorPanel extends HTMLElement {
       if (el.dataset.s === "autoDest") { this._idleWatchSync(); if (!el.checked) this._autoDestHide(); }
       if (el.dataset.s === "clouds3d") { this._cloudKey = null; this._scheduleClouds(true); }
       if (el.dataset.s === "wx3d") { this._rainDrops = null; this._snowFlakes = null; this._scheduleCloudDraw?.(); }
-      if (el.dataset.s === "autoHide") { this.$("mapwrap")?.classList.remove("autohid"); this._autoHideArm?.(); this._openSettings(); }
       if (el.dataset.s === "names3d") { this._apply3dSettings(); this._g3?.triggerRepaint(); }
       if (el.dataset.s === "b3d") { this._apply3dSettings(); this._openSettings(); } // compare o sparisce lo stile degli edifici
       if (el.dataset.s === "autoZoom3d") { this._g3key = null; this._sync3d(); }
@@ -7784,13 +7805,24 @@ class NavigatorPanel extends HTMLElement {
       this._saveSettings();
       el.classList.toggle("on");
     }));
-    wrap.querySelectorAll("[data-ahk]").forEach((el) => el.addEventListener("click", () => {
-      const k = el.dataset.ahk, skip = new Set(s.autoHideSkip ?? ["spdbox", "navtop"]);
-      if (skip.has(k)) skip.delete(k); else skip.add(k);
-      s.autoHideSkip = [...skip];
+    // nascondi automatico: modifica la scelta dello schermo e del veicolo indicati nel riquadro
+    const ahSet = (fn) => {
+      const E = this._ahEdit, key = this._ahKey(E.scr, E.veh);
+      const by = (s.autoHideBy ||= {});
+      const c = by[key] || { ...this._ahCfg(E.scr, E.veh), skip: [...(this._ahCfg(E.scr, E.veh).skip || [])] };
+      fn(c); by[key] = c;
       this._saveSettings();
-      el.classList.toggle("on", !skip.has(k));
-    }));
+      this.$("mapwrap")?.classList.remove("autohid"); this._autoHideArm?.();
+      this._openSettings();
+    };
+    wrap.querySelector("[data-ahon]")?.addEventListener("change", (e) => ahSet((c) => { c.on = e.target.checked; }));
+    wrap.querySelectorAll("[data-ahk]").forEach((el) => el.addEventListener("click", () => ahSet((c) => {
+      const k = el.dataset.ahk, skip = new Set(c.skip || []);
+      if (skip.has(k)) skip.delete(k); else skip.add(k);
+      c.skip = [...skip];
+    })));
+    wrap.querySelector("[data-ahscr]")?.addEventListener("change", (e) => { this._ahEdit.scr = e.target.value; this._openSettings(); });
+    wrap.querySelector("[data-ahveh]")?.addEventListener("change", (e) => { this._ahEdit.veh = e.target.value; this._openSettings(); });
     wrap.querySelectorAll("[data-fkind]").forEach((el) => el.addEventListener("click", () => {
       s.fuelKind = el.dataset.fkind;
       this._fuelKind = undefined; // nell'elenco vale di nuovo la preferenza
@@ -9810,6 +9842,7 @@ class NavigatorPanel extends HTMLElement {
 
   // veicolo scelto: con uno del garage i bottoni del mezzo spariscono e il mezzo viene dal tipo di veicolo
   _applyVehicle(recompute = false) {
+    this.$?.("mapwrap")?.classList.remove("autohid"); this._autoHideArm?.(); // nascondi automatico del nuovo veicolo
     const v = this._curVehicle();
     const modes = this.$("modes");
     if (modes) modes.hidden = !!v.type;
