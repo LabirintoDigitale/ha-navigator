@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.86";
+const PANEL_VERSION = "1.13.87";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -4649,6 +4649,8 @@ class NavigatorPanel extends HTMLElement {
       if (!this._g3ptrHooked) {
         this._g3ptrHooked = true;
         m3.addEventListener("pointerdown", (e) => {
+          // in guida un dito solo trascinato su o giù sceglie l'altezza del mezzo sullo schermo
+          if (!this._g3ptrs.size) this._g3dn = { y: e.clientY, one: true }; else if (this._g3dn) this._g3dn.one = false;
           this._g3ptrs.add(e.pointerId); this._g3downs = this._g3ptrs.size;
           this._g3lastPtr = Date.now(); this._g3interacting = true; this._g3Heavy(false);
         }, { passive: true });
@@ -4657,6 +4659,8 @@ class NavigatorPanel extends HTMLElement {
           if (e) { if (!this._g3ptrs.delete(e.pointerId)) return; } else this._g3ptrs.clear();
           this._g3downs = this._g3ptrs.size;
           if (this._g3downs === 0 && this._g3interacting) {
+            const dn = this._g3dn; this._g3dn = null;
+            if (e && dn?.one && this._nav?.fix && this._nav.follow && this._isGuida() && this._3d) this._carDragged(e.clientY - dn.y);
             this._g3interacting = false;
             this._g3Heavy(true);
             // appena si mollano le dita, in guida la vista torna subito sul mezzo (sempre centrato)
@@ -6098,11 +6102,33 @@ class NavigatorPanel extends HTMLElement {
   // in guida la posizione sta nel terzo basso dello schermo, ma mai sotto la barra in basso:
   // il veicolo (centro della vista) resta sempre un po' sopra la barra della guida.
   // Si usa sia il margine in alto sia quello in basso, così anche con una barra alta il veicolo si solleva quanto basta.
-  _guidaPad() {
+  // altezza del mezzo sullo schermo in guida (pixel dall'alto): quella predefinita (def, frazione dell'altezza) più lo
+  // spostamento scelto trascinando la mappa su o giù; mai sotto la barra in basso. ◎ torna a quella predefinita.
+  // Ricordata a parte per telefono/auto e verticale/orizzontale.
+  _carKey() { return `${this.classList.contains("carscr") ? "auto" : "tel"}-${window.innerHeight > window.innerWidth ? "v" : "o"}`; }
+
+  _carYpx(def) {
     const H = this.$("mapwrap")?.clientHeight || 0;
     const bot = this.$("navbot");
     const barZone = bot && !bot.hidden ? bot.offsetHeight + 20 + 14 : 0; // altezza della barra (bottom:20px) + margine
-    const wantY = Math.min(H * 0.62, H - barZone); // posizione del veicolo sullo schermo (62%: più centrato, con strada davanti)
+    const f = Math.max(0.25, Math.min(0.92, def + (+(this._settings.carYOff?.[this._carKey()]) || 0)));
+    return Math.max(H * 0.25, Math.min(H * f, H - barZone));
+  }
+
+  // trascinata la mappa in guida di dy pixel in verticale: il mezzo resta a quella nuova altezza (si continua a seguire)
+  _carDragged(dy) {
+    const H = this.$("mapwrap")?.clientHeight || 0;
+    if (!H || Math.abs(dy) < 20) return false;
+    const def = this._3d ? 0.62 : 0.75;
+    const f = Math.max(0.25, Math.min(0.92, this._carYpx(def) / H + dy / H));
+    this._settings.carYOff = { ...(this._settings.carYOff || {}), [this._carKey()]: Math.round((f - def) * 1000) / 1000 };
+    this._saveSettings();
+    return true;
+  }
+
+  _guidaPad() {
+    const H = this.$("mapwrap")?.clientHeight || 0;
+    const wantY = this._carYpx(0.62); // posizione del veicolo sullo schermo (62%: più centrato, con strada davanti)
     const delta = 2 * wantY - H;                    // centro Y = (top + H − bottom) / 2 = wantY
     return { top: Math.max(0, delta), bottom: Math.max(0, -delta), left: 0, right: 0 };
   }
@@ -6239,6 +6265,7 @@ class NavigatorPanel extends HTMLElement {
   // centra la mappa sulla posizione; in guida la posizione sta nel terzo basso dello schermo, con la strada davanti
   _followView(animate = true) {
     const nav = this._nav;
+    if (this.$("map")?.classList.contains("moving")) return; // dita sulla mappa: si riprende al rilascio
     const f = this._navPos() || nav.fix;
     // al primo aggancio almeno zoom 16, poi resta quello scelto con + e −
     let z = nav.zoomed ? this._map.getZoom() : Math.max(this._map.getZoom(), 16);
@@ -6251,7 +6278,7 @@ class NavigatorPanel extends HTMLElement {
     nav.zoomed = true;
     let ll = L.latLng(f.lat, f.lon);
     if (this._isGuida() && nav.dir != null) {
-      const d = this.$("mapwrap").clientHeight * 0.25;
+      const d = this._carYpx(0.75) - this.$("mapwrap").clientHeight / 2; // predefinito: a 3/4 dello schermo
       const rad = (nav.dir * Math.PI) / 180;
       ll = this._map.unproject(this._map.project(ll, z).add(L.point(Math.sin(rad) * d, -Math.cos(rad) * d)), z);
     }
@@ -6271,6 +6298,11 @@ class NavigatorPanel extends HTMLElement {
       far3d = true;
     }
     this._lastCenter = Date.now();
+    if (this._isGuida() && +(this._settings.carYOff?.[this._carKey()])) { // ◎: il mezzo torna all'altezza predefinita
+      delete this._settings.carYOff[this._carKey()];
+      this._saveSettings();
+      this._msg("Posizione dell'auto: predefinita");
+    }
     nav.follow = true;
     nav.userFrame = false; // ◎: riprende a seguire e ricentra, anche se avevi tenuto una tua inquadratura
     nav.manualZoomUntil = 0;
@@ -6352,6 +6384,8 @@ class NavigatorPanel extends HTMLElement {
     const guidaTwist = () => this._isGuida() && !this._3d && !!this._nav;
     let twisting = false;
     let rotBase = 0;
+    // in guida, un dito solo: il trascinamento su o giù sposta il mezzo sullo schermo e si continua a seguire
+    let carDrag = false, carDy = 0;
     const state = () => {
       const a = [...pts.values()];
       const c = a.length >= 2 ? { x: (a[0].x + a[1].x) / 2, y: (a[0].y + a[1].y) / 2 } : { x: a[0].x, y: a[0].y };
@@ -6365,7 +6399,7 @@ class NavigatorPanel extends HTMLElement {
       if (mine()) { try { el.setPointerCapture(e.pointerId); } catch (err) { /* puntatore simulato */ } }
       pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       prev = state();
-      if (pts.size === 1) moved = false;
+      if (pts.size === 1) { moved = false; carDrag = false; carDy = 0; }
       pinch0 = pts.size >= 2 ? { d: prev.d, zoom: prev.zoom } : null;
       twist0 = pts.size >= 2 ? prev.ang : null;
       twisting = false;
@@ -6411,7 +6445,17 @@ class NavigatorPanel extends HTMLElement {
         if (Math.hypot(dx, dy) < 4 && !(pinch && Math.abs(now.d - pinch0.d) > 4)) return;
         moved = true;
         el.classList.add("moving");
-        this._userMoved();
+        if (now.n === 1 && this._isGuida() && this._nav?.fix && this._nav.follow) carDrag = true;
+        else this._userMoved();
+      }
+      if (carDrag) { // solo in verticale sullo schermo: il mezzo scende o sale col dito
+        if (now.n === 1) {
+          carDy += dy;
+          const r0 = ((this._rot || 0) * Math.PI) / 180;
+          this._map.panBy([dy * Math.sin(r0), -dy * Math.cos(r0)], { animate: false });
+        }
+        prev = now;
+        return;
       }
       if (pinch) {
         const m = this._map;
@@ -6439,6 +6483,11 @@ class NavigatorPanel extends HTMLElement {
           this._rotUserT = setTimeout(() => { this._rotUser = 0; if (this._nav) this._applyRotation(); }, 1500);
         }
         if (moved) this._gestEnd = Date.now();
+        if (carDrag) {
+          carDrag = false;
+          this._carDragged(carDy);
+          if (this._nav?.fix && this._nav.follow) this._followView();
+        }
         // girata fino quasi al nord: si raddrizza da sola
         if (this._freeRot && !this._isGuida()) {
           const r = ((((this._rot || 0) % 360) + 540) % 360) - 180;
