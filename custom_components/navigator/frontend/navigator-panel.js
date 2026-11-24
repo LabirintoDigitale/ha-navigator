@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.74";
+const PANEL_VERSION = "1.13.75";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1447,6 +1447,12 @@ const STYLE = `
   .main.guida #map.moving { cursor: grabbing; }
   .ctl button.mode { width: auto; height: 42px; padding: 0 12px; font-size: 14px; font-weight: 600; white-space: nowrap; }
   .ctl button.mode.go { background: #0b6e3a; color: #fff; }
+  /* schermo dell'auto: tasti a destra più grandi, da toccare guidando */
+  :host(.carscr) .ctl { gap: 10px; }
+  :host(.carscr) .ctl button { width: 58px; height: 58px; font-size: 26px; border-radius: 14px; }
+  :host(.carscr) .ctl button svg { width: 30px; height: 30px; }
+  :host(.carscr) .ctl button.mode { width: auto; height: 58px; padding: 0 18px; font-size: 20px; }
+  :host(.carscr) .ctl .layerbox { width: 64px; height: 58px; }
   .ctl button.attn { background: var(--primary-color, #03a9f4); color: var(--text-primary-color, #fff); }
   .gattr { position: absolute; z-index: 1000; bottom: 2px; right: 6px; font-size: 10px; color: #333; padding: 0 4px;
     background: rgba(255,255,255,.75); border-radius: 3px; max-width: 70%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -2069,6 +2075,7 @@ class NavigatorPanel extends HTMLElement {
       </div>`;
     const $ = (id) => root.getElementById(id);
     this.$ = $;
+    this.classList.toggle("carscr", this._isCarScreen()); // schermo dell'auto: tasti più grandi
     // "tic" dolce alla pressione dei pulsanti (anche sullo schermo dell'auto); la mappa e i campi di testo no
     root.addEventListener("click", (e) => {
       if (this._settings.clickSnd === false) return;
