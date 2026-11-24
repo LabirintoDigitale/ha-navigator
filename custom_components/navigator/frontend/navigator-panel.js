@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.82";
+const PANEL_VERSION = "1.13.83";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -674,7 +674,7 @@ const SETTINGS_KEY = "navigator-panel-settings";
 const DEFAULT_SETTINGS = { voice: false, lang: "it", voiceSel: "f", out: "auto", autoZoom: true, beep: false,
   fuelBrands: [], fuelKind: "", camAlert: true, view3d: false, b3d: true, clouds3d: true, veh3d: true, terrainEx: "1.5", pitch3d: 60, tunnelFx: true, zoom3dOff: 0,
   voiceStyle: "normale", voiceRate: 1, voicePitch: 1, bldStyle: "colorati",
-  poiKinds: ["farmacia", "ospedale", "supermercato"], arrEntities: [], arrHomeOnly: true, nightMode: "auto", wxAlert: true, muteGuide: false, trafficSensor: "", autoDest: true, wx3d: true, arrDist: 500, tileAhead: 100, clickSnd: true, names3d: true };
+  poiKinds: ["farmacia", "ospedale", "supermercato"], arrEntities: [], arrHomeOnly: true, nightMode: "auto", wxAlert: true, muteGuide: false, trafficSensor: "", autoDest: true, wx3d: true, arrDist: 500, tileAhead: 100, clickSnd: true, names3d: true, livePresence: true };
 // marche dei distributori (come nell'anagrafica del MIMIT)
 const FUEL_BRANDS = ["Agip Eni", "Api-Ip", "Q8", "Esso", "Tamoil", "Shell", "Retitalia", "Beyfin", "Costantin", "Europam", "Pompe bianche"];
 const BRAND_COLORS = { "agip eni": "#f7c600", "eni": "#f7c600", "api-ip": "#0057a8", "ip": "#0057a8", "q8": "#0a3a7a", "esso": "#d71920",
@@ -2509,9 +2509,25 @@ class NavigatorPanel extends HTMLElement {
     }
   }
 
+  // Navigator aperto senza guida: la posizione va alla scheda Live di tutti e nella traccia del giorno (se spostato di
+  // almeno 25 m o ogni minuto). Si spegne in ⚙ → Generale
+  _presence(lat, lon, speed, heading) {
+    if (this._settings.livePresence === false) return;
+    const P = (this._pres ||= { at: 0, ll: null });
+    if (P.ll && distM(P.ll, [lat, lon]) < 25 && Date.now() - P.at < 60000) return;
+    P.ll = [lat, lon]; P.at = Date.now();
+    const v = this._vehicles?.().find((x) => x.id === this._vehSel);
+    this._hass.callWS({ type: "navigator/presence", plat: lat, plon: lon,
+      ...(typeof heading === "number" && heading >= 0 ? { dir: heading } : {}),
+      ...(typeof speed === "number" && speed >= 0 ? { speed: speed * 3.6 } : {}),
+      ...(v && v.id !== "base" ? { vehicle: { name: v.name || "", plate: v.plate || "", type: v.type || "" } } : {}),
+    }).catch(() => { /* integrazione vecchia */ });
+  }
+
   // senza guida: velocità dal GPS e limite della strada attuale (chiesto ogni tanto: >150 m o 20 s)
   async _idleSpeed(lat, lon, speed, heading) {
     if (this._nav) return;
+    this._presence(lat, lon, speed, heading);
     const kmh = typeof speed === "number" && speed >= 0 ? Math.round(speed * 3.6) : null;
     const L = (this._idleLim ||= { at: 0, ll: null, limit: null });
     if (kmh != null && kmh >= 5 && (!L.ll || distM(L.ll, [lat, lon]) > 150 || Date.now() - L.at > 20000) && !L.busy) {
@@ -7564,6 +7580,7 @@ class NavigatorPanel extends HTMLElement {
       </div>
       <div class="grp"><h3>Mappa</h3>
         ${sw("clickSnd", "Suono alla pressione dei pulsanti", "Un \"tic\" leggero a ogni tasto premuto, anche sullo schermo dell'auto")}
+        ${sw("livePresence", "Mostrami nella scheda Live anche senza guida", "Con Navigator aperto la tua posizione compare nella scheda Live di tutti e si salva la traccia del giorno (si può cancellare)")}
         ${sw("autoHide", "Nascondi automaticamente", "Quello che scegli qui sotto sparisce dopo 10 secondi che non tocchi lo schermo; un tocco breve lo fa ricomparire")}
         ${s.autoHide ? `<div class="chips" style="margin:-2px 0 8px">${this._autoHideItems().map(([k, n]) =>
           `<span class="chip ${(s.autoHideSkip ?? ["spdbox", "navtop"]).includes(k) ? "" : "on"}" data-ahk="${esc(k)}">${esc(n)}</span>`).join("")}</div>` : ""}
@@ -8444,6 +8461,7 @@ class NavigatorPanel extends HTMLElement {
     clearInterval(this._liveTimer);
     this._liveTimer = null;
     if (tab === "live") {
+      this._loadDays();
       this._loadLive(true);
       this._liveTimer = setInterval(() => this._loadLive(), 10000);
     }
@@ -8485,8 +8503,8 @@ class NavigatorPanel extends HTMLElement {
     }
     let html = `<h3>Live <span class="muted" style="text-transform:none">aggiornata ogni 10 s</span></h3>`;
     if (!list.length) {
-      html += `<div class="muted">Nessuno sta guidando adesso. Qui compaiono le guide in corso di tutti gli utenti di Home Assistant
-        (da quando premono Parti a quando escono), con la posizione sulla mappa.</div>`;
+      html += `<div class="muted">Nessuno adesso. Qui compaiono le guide in corso di tutti gli utenti di Home Assistant e chi ha
+        Navigator aperto anche senza guida, con la posizione e la traccia sulla mappa.</div>`;
     }
     const now = Date.now() / 1000;
     list.forEach((x, k) => {
@@ -8496,14 +8514,16 @@ class NavigatorPanel extends HTMLElement {
       const vico = v.type ? vehIcon(v.type) : (MODES.find((m) => m[0] === x.mode) || MODES[0])[1];
       const ago = Math.max(0, Math.round(now - (x.updated || now)));
       const agoTxt = ago < 60 ? `${ago} s fa` : `${Math.round(ago / 60)} min fa`;
-      const eta = x.arrived ? "✅ arrivato" : x.eta ? `arrivo ${fmtClock(x.eta)} · ${fmtTime((x.minutes || 0) * 60)} · ${fmtKm(x.km || 0)}` : "";
+      const eta = x.online ? "📍 senza guida" : x.arrived ? "✅ arrivato" : x.eta ? `arrivo ${fmtClock(x.eta)} · ${fmtTime((x.minutes || 0) * 60)} · ${fmtKm(x.km || 0)}` : "";
       html += `<div class="trip live"><input type="checkbox" data-lc="${k}" ${on ? "checked" : ""} title="Mostra sulla mappa">
         <span class="sw" style="background:${col}"></span>
         <div class="nm" data-lv="${k}"><b>${esc(x.name || "Utente")}${x.me ? " (tu)" : ""}</b> · ${vico} ${esc(v.name || "")}${v.plate ? ` ${esc(v.plate)}` : ""}
-          <div>${x.from ? `${esc(x.from)} → ` : "→ "}${esc(x.dest || "?")}</div>
+          <div>${x.online ? "Navigator aperto · traccia di oggi" : `${x.from ? `${esc(x.from)} → ` : "→ "}${esc(x.dest || "?")}`}</div>
           <small>${eta}${x.speed != null && !x.arrived ? ` · ${Math.round(x.speed)} km/h` : ""} · aggiornato ${agoTxt}${ago > 120 ? " ⚠" : ""}</small></div></div>`;
     });
+    html += `<div id="daysec" style="margin-top:14px">${this._daysHtml()}</div>`;
     box.innerHTML = html;
+    this._bindDays(box.querySelector("#daysec"));
     box.querySelectorAll("[data-lc]").forEach((el) => el.addEventListener("change", () => {
       const x = list[+el.dataset.lc];
       if (el.checked) this._liveOff.delete(x.user_id); else this._liveOff.add(x.user_id);
@@ -8518,6 +8538,103 @@ class NavigatorPanel extends HTMLElement {
       const p = x.track?.[x.track.length - 1];
       if (p) this._map.setView(p, Math.max(this._map.getZoom(), 15));
     }));
+  }
+
+  // ----------------------------------------------------------------- tracce dei giorni (Live)
+  // Ogni utente con Navigator aperto lascia la sua traccia del giorno (anche senza guida); qui per anno, mese e giorno,
+  // da mostrare sulla mappa o cancellare (le proprie; un amministratore tutte)
+  async _loadDays() {
+    try {
+      const r = await this._hass.callWS({ type: "navigator/days" });
+      this._days = r.days || []; this._daysAdmin = !!r.admin;
+    } catch (e) { this._days = null; }
+    const el = this.$("daysec");
+    if (el) { el.innerHTML = this._daysHtml(); this._bindDays(el); }
+  }
+
+  _daysHtml() {
+    const days = this._days;
+    if (days == null) return "";
+    let html = `<h3>Tracce dei giorni</h3>`;
+    if (!days.length) return html + `<div class="muted">Ancora nessuna traccia: si registrano da sole quando Navigator è aperto.</div>`;
+    this._dayOpen ??= new Set([days[0].day.slice(0, 4), days[0].day.slice(0, 7), days[0].day]);
+    this._daySel ??= new Map(); // "utente|giorno" -> colore
+    const tot = (l) => `${fmtKm(l.reduce((a, x) => a + (x.km || 0), 0))}`;
+    let y = "", m = "", dd = "";
+    days.forEach((d, k) => {
+      const Y = d.day.slice(0, 4), M = d.day.slice(0, 7), D = d.day;
+      if (Y !== y) { y = Y; m = ""; html += `<div class="tyear${this._dayOpen.has(Y) ? " open" : ""}" data-dg="${Y}"><b><span class="car">▸</span> ${Y}</b><span>${tot(days.filter((x) => x.day.startsWith(Y)))}</span></div>`; }
+      if (!this._dayOpen.has(Y)) return;
+      if (M !== m) {
+        m = M; dd = "";
+        const nm = new Date(`${M}-01T12:00:00`).toLocaleDateString("it-IT", { month: "long" });
+        html += `<div class="month${this._dayOpen.has(M) ? " open" : ""}" data-dg="${M}"><b><span class="car">▸</span> ${nm.charAt(0).toUpperCase() + nm.slice(1)}</b><span>${tot(days.filter((x) => x.day.startsWith(M)))}</span></div>`;
+      }
+      if (!this._dayOpen.has(M)) return;
+      if (D !== dd) {
+        dd = D;
+        const nm = new Date(`${D}T12:00:00`).toLocaleDateString("it-IT", { weekday: "long", day: "numeric" });
+        html += `<div class="month${this._dayOpen.has(D) ? " open" : ""}" data-dg="${D}" style="padding-left:18px"><b><span class="car">▸</span> ${nm}</b><span>${tot(days.filter((x) => x.day === D))}</span></div>`;
+      }
+      if (!this._dayOpen.has(D)) return;
+      const key = `${d.user_id}|${d.day}`, col = this._daySel.get(key);
+      const hh = (t) => new Date(t * 1000).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
+      html += `<div class="trip" style="padding-left:18px"><input type="checkbox" data-dc="${k}" ${col ? "checked" : ""} title="Mostra sulla mappa">
+        ${col ? `<span class="sw" style="background:${col}"></span>` : ""}
+        <div class="nm" data-dv="${k}"><b>${esc(d.name || "Utente")}${d.me ? " (tu)" : ""}</b>
+          <small>${hh(d.start)}–${hh(d.end)} · ${fmtKm(d.km || 0)} · ${d.points} punti</small></div>
+        ${d.me || this._daysAdmin ? `<button class="icon" data-dd="${k}" title="Cancella questa traccia">🗑</button>` : ""}</div>`;
+    });
+    return html;
+  }
+
+  _bindDays(el) {
+    if (!el) return;
+    const days = this._days || [];
+    const cols = ["#7b1fa2", "#00838f", "#ef6c00", "#2e7d32", "#c62828", "#283593", "#6d4c41"];
+    el.querySelectorAll("[data-dg]").forEach((b) => b.addEventListener("click", () => {
+      const g = b.dataset.dg;
+      if (this._dayOpen.has(g)) this._dayOpen.delete(g); else this._dayOpen.add(g);
+      el.innerHTML = this._daysHtml(); this._bindDays(el);
+    }));
+    const show = async (d, on) => {
+      const key = `${d.user_id}|${d.day}`;
+      if (!on) { this._daySel.delete(key); this._drawDays(); el.innerHTML = this._daysHtml(); this._bindDays(el); return; }
+      const used = [...this._daySel.values()];
+      this._daySel.set(key, cols.find((c) => !used.includes(c)) || cols[this._daySel.size % cols.length]);
+      try { (this._dayTracks ||= new Map()).set(key, (await this._hass.callWS({ type: "navigator/day", user_id: d.user_id, day: d.day })).track || []); }
+      catch (e) { this._msg(`Traccia non disponibile: ${e.message || e}`); }
+      this._drawDays(key); el.innerHTML = this._daysHtml(); this._bindDays(el);
+    };
+    el.querySelectorAll("[data-dc]").forEach((b) => b.addEventListener("change", () => show(days[+b.dataset.dc], b.checked)));
+    el.querySelectorAll("[data-dv]").forEach((b) => b.addEventListener("click", () => {
+      const d = days[+b.dataset.dv];
+      show(d, true);
+    }));
+    el.querySelectorAll("[data-dd]").forEach((b) => b.addEventListener("click", async () => {
+      const d = days[+b.dataset.dd];
+      if (!confirm(`Cancellare la traccia di ${d.name || "questo utente"} del ${new Date(`${d.day}T12:00:00`).toLocaleDateString("it-IT")}?`)) return;
+      try {
+        await this._hass.callWS({ type: "navigator/day_delete", user_id: d.user_id, day: d.day });
+        this._daySel.delete(`${d.user_id}|${d.day}`); this._drawDays();
+        await this._loadDays();
+      } catch (e) { this._msg(e.message || String(e)); }
+    }));
+  }
+
+  _drawDays(focus) {
+    if (!this._map) return;
+    const lay = (this._dayLayer ||= L.layerGroup().addTo(this._map));
+    lay.clearLayers();
+    for (const [key, col] of this._daySel || []) {
+      const tr = this._dayTracks?.get(key) || [];
+      if (tr.length > 1) {
+        L.polyline(tr, { color: "#fff", weight: 7, opacity: 0.8, interactive: false }).addTo(lay);
+        const pl = L.polyline(tr, { color: col, weight: 4, opacity: 1, interactive: false }).addTo(lay);
+        if (key === focus) this._map.fitBounds(pl.getBounds(), { padding: [30, 30] });
+      }
+    }
+    this._schedule3d?.();
   }
 
   _drawLive() {

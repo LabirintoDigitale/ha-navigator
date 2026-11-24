@@ -34,7 +34,7 @@ def async_setup(hass: HomeAssistant) -> None:
         return
     for handler in (ws_info, ws_search, ws_reverse, ws_route, ws_place_save, ws_place_delete, ws_recent_clear, ws_nearby,
                     ws_poi_tile, ws_live, ws_weather, ws_trip_save, ws_trips, ws_trip, ws_trip_delete, ws_garage,
-                    ws_garage_save, ws_trip_start, ws_trip_append, ws_trip_finish, ws_poi_tiles, ws_poi_info, ws_live_all, ws_garage_select, ws_cameras_area, ws_imagery, ws_layout, ws_speed_limit, ws_addons):
+                    ws_garage_save, ws_trip_start, ws_trip_append, ws_trip_finish, ws_poi_tiles, ws_poi_info, ws_live_all, ws_garage_select, ws_cameras_area, ws_imagery, ws_layout, ws_speed_limit, ws_addons, ws_presence, ws_days, ws_day, ws_day_delete):
         websocket_api.async_register_command(hass, handler)
     hass.data[DATA_WS_REGISTERED] = True
 
@@ -309,6 +309,8 @@ async def ws_live(hass: HomeAssistant, connection: websocket_api.ActiveConnectio
         v = msg.get("vehicle") or {}
         data["vehicle"] = {k: str(v.get(k) or "")[:40] for k in ("name", "plate", "type", "icon", "color")}
         await _data(hass).live.update(uid, name, data)
+        if data.get("plat") is not None and data.get("plon") is not None:  # anche la traccia del giorno
+            await _data(hass).trips.day_add(uid, data["plat"], data["plon"])
         return {"ok": True}
 
     await _run(connection, msg["id"], go())
@@ -332,7 +334,79 @@ async def ws_live_all(hass: HomeAssistant, connection: websocket_api.ActiveConne
             out.append({**{k: v for k, v in st.items() if k != "trip_id"}, "user_id": user_id,
                         "name": data.live.users.get(user_id, ""), "me": user_id == uid, "track": track})
         out.sort(key=lambda x: x.get("eta") or 0)
+        # utenti con Navigator aperto ma senza guida: dove sono e la loro traccia di oggi
+        from homeassistant.util import dt as dt_util
+        today = dt_util.now().strftime("%Y-%m-%d")
+        for user_id, st in data.live.online().items():
+            track = await data.trips.day_points(user_id, today, last=600)
+            if st.get("plat") is not None:
+                track.append([round(st["plat"], 5), round(st["plon"], 5)])
+            out.append({**st, "active": False, "online": True, "user_id": user_id, "name": data.live.users.get(user_id, ""),
+                        "me": user_id == uid, "track": track})
         return {"live": out}
+
+    await _run(connection, msg["id"], go())
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "navigator/presence",
+    vol.Required("plat"): vol.Coerce(float),
+    vol.Required("plon"): vol.Coerce(float),
+    vol.Optional("dir"): vol.Coerce(float),
+    vol.Optional("speed"): vol.Coerce(float),
+    vol.Optional("vehicle"): dict,
+})
+@websocket_api.async_response
+async def ws_presence(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Navigator aperto senza guida: posizione per la scheda Live e punto della traccia del giorno."""
+    async def go():
+        uid, name = _user(connection)
+        data = _data(hass)
+        v = msg.get("vehicle") or {}
+        data.live.set_presence(uid, name, {"plat": msg["plat"], "plon": msg["plon"], "dir": msg.get("dir"), "speed": msg.get("speed"),
+                                           "vehicle": {k: str(v.get(k) or "")[:40] for k in ("name", "plate", "type", "icon", "color")}})
+        await data.trips.day_add(uid, msg["plat"], msg["plon"])
+        return {"ok": True}
+
+    await _run(connection, msg["id"], go())
+
+
+@websocket_api.websocket_command({vol.Required("type"): "navigator/days"})
+@websocket_api.async_response
+async def ws_days(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Tracce del giorno salvate (tutti gli utenti): giorno, utente, km, prima e ultima ora."""
+    async def go():
+        uid, _name = _user(connection)
+        data = _data(hass)
+        days = await data.trips.days()
+        for d in days:
+            d["name"] = data.live.users.get(d["user_id"], "")
+            d["me"] = d["user_id"] == uid
+        return {"days": days, "admin": bool(connection.user and connection.user.is_admin)}
+
+    await _run(connection, msg["id"], go())
+
+
+@websocket_api.websocket_command({vol.Required("type"): "navigator/day", vol.Required("user_id"): str, vol.Required("day"): str})
+@websocket_api.async_response
+async def ws_day(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    async def go():
+        _user(connection)
+        return {"track": await _data(hass).trips.day_points(msg["user_id"], msg["day"][:10])}
+
+    await _run(connection, msg["id"], go())
+
+
+@websocket_api.websocket_command({vol.Required("type"): "navigator/day_delete", vol.Required("user_id"): str, vol.Required("day"): str})
+@websocket_api.async_response
+async def ws_day_delete(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Cancella una traccia del giorno: la propria, o qualsiasi per un amministratore."""
+    async def go():
+        uid, _name = _user(connection)
+        if msg["user_id"] != uid and not (connection.user and connection.user.is_admin):
+            raise NavigatorError("Puoi cancellare solo le tue tracce")
+        await _data(hass).trips.day_delete(msg["user_id"], msg["day"][:10])
+        return {"ok": True}
 
     await _run(connection, msg["id"], go())
 

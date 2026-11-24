@@ -50,7 +50,26 @@ CREATE TABLE IF NOT EXISTS points (
     lon REAL NOT NULL,
     PRIMARY KEY (trip_id, seq)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS daypath (
+    user_id TEXT NOT NULL,
+    day TEXT NOT NULL,
+    ts REAL NOT NULL,
+    lat REAL NOT NULL,
+    lon REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS daypath_ud ON daypath (user_id, day, ts);
 """
+
+
+def _km(pts: list) -> float:
+    """Lunghezza di una traccia [[lat, lon], …] in km."""
+    import math
+    tot = 0.0
+    for a, b in zip(pts, pts[1:]):
+        la1, lo1, la2, lo2 = map(math.radians, (a[0], a[1], b[0], b[1]))
+        h = math.sin((la2 - la1) / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin((lo2 - lo1) / 2) ** 2
+        tot += 12742 * math.asin(min(1, math.sqrt(h)))
+    return tot
 
 
 def _thin(track: list, n: int) -> list:
@@ -74,6 +93,36 @@ class TripDb:
     def close(self) -> None:
         with self._lock:
             self._con.close()
+
+    # ---- tracce del giorno: dove è passato ogni utente con Navigator aperto (anche senza guida), giorno per giorno
+    def day_add(self, user_id: str, day: str, ts: float, lat: float, lon: float) -> None:
+        with self._lock:
+            self._con.execute("INSERT INTO daypath (user_id, day, ts, lat, lon) VALUES (?,?,?,?,?)",
+                              (user_id, day, ts, round(lat, 6), round(lon, 6)))
+
+    def day_points(self, user_id: str, day: str, last: int | None = None) -> list:
+        with self._lock:
+            if last:
+                rows = self._con.execute("SELECT lat, lon FROM (SELECT lat, lon, ts FROM daypath WHERE user_id = ? AND day = ? "
+                                         "ORDER BY ts DESC LIMIT ?) ORDER BY ts", (user_id, day, last)).fetchall()
+            else:
+                rows = self._con.execute("SELECT lat, lon FROM daypath WHERE user_id = ? AND day = ? ORDER BY ts",
+                                         (user_id, day)).fetchall()
+        return [[r[0], r[1]] for r in rows]
+
+    def days(self) -> list[dict]:
+        with self._lock:
+            rows = self._con.execute("SELECT user_id, day, COUNT(*), MIN(ts), MAX(ts) FROM daypath GROUP BY user_id, day "
+                                     "ORDER BY day DESC").fetchall()
+        out = []
+        for uid, day, n, t0, t1 in rows:
+            out.append({"user_id": uid, "day": day, "points": n, "start": t0, "end": t1,
+                        "km": round(_km(self.day_points(uid, day)), 2)})
+        return out
+
+    def day_delete(self, user_id: str, day: str) -> None:
+        with self._lock:
+            self._con.execute("DELETE FROM daypath WHERE user_id = ? AND day = ?", (user_id, day))
 
     @staticmethod
     def _row(r: tuple) -> dict:
@@ -440,6 +489,7 @@ class Trips:
         self.selected: dict[str, str] = {}  # utente -> veicolo scelto l'ultima volta ("base" o id del garage)
         self.layouts: dict[str, dict] = {}
         self._addon_store: Store[dict] = Store(hass, 1, f"{DOMAIN}.addons")
+        self._day_last: dict[str, tuple] = {}  # ultimo punto salvato della traccia del giorno, per utente
         self.addons: list[dict] = []
 
     async def _run(self, fn, *args):
@@ -609,6 +659,33 @@ class Trips:
         if t is not None and not last:
             t["track"] = _thin(t["track"], MAX_TRACK)
         return t
+
+    # ---- tracce del giorno
+    async def day_add(self, user_id: str, lat: float, lon: float) -> None:
+        """Punto della traccia del giorno: solo se ci si è spostati di almeno 25 m dall'ultimo (o è passata mezz'ora)."""
+        from homeassistant.util import dt as dt_util
+        now = time.time()
+        last = self._day_last.get(user_id)
+        if last:
+            d = _km([[last[0], last[1]], [lat, lon]]) * 1000
+            if d < 25 and now - last[2] < 1800:
+                return
+            if d > 200_000:  # salto impossibile (posizione sbagliata): si ignora
+                return
+        self._day_last[user_id] = (lat, lon, now)
+        day = dt_util.now().strftime("%Y-%m-%d")
+        await self._run(self._db.day_add, user_id, day, now, lat, lon)
+
+    async def day_points(self, user_id: str, day: str, last: int | None = None) -> list:
+        pts = await self._run(self._db.day_points, user_id, day, last)
+        return pts if last else _thin(pts, MAX_TRACK)
+
+    async def days(self) -> list[dict]:
+        return await self._run(self._db.days)
+
+    async def day_delete(self, user_id: str, day: str) -> None:
+        self._day_last.pop(user_id, None)
+        await self._run(self._db.day_delete, user_id, day)
 
     async def delete(self, user_id: str, trip_id: str) -> None:
         await self._run(self._db.delete, user_id, trip_id)

@@ -27,6 +27,8 @@ class Live:
         self._store: Store[dict] = Store(hass, 1, f"{DOMAIN}.users")
         self.users: dict[str, str] = {}  # user_id -> nome
         self.state: dict[str, dict[str, Any]] = {}
+        # Navigator aperto senza guida: ultima posizione di ogni utente (scheda Live), non salvata
+        self.presence: dict[str, dict[str, Any]] = {}
         self.add_entities: Callable | None = None
         self._made: set[str] = set()
         self._unsub = None
@@ -64,6 +66,18 @@ class Live:
         if st.get("active") and time.time() - st.get("updated", 0) > STALE_S:
             return {**st, "active": False}
         return st
+
+    def set_presence(self, user_id: str, name: str, data: dict[str, Any]) -> None:
+        if self.users.get(user_id) != name:
+            self.users[user_id] = name
+            self._store.async_delay_save(lambda: {"users": self.users}, 1)
+        self.presence[user_id] = {**data, "updated": time.time()}
+
+    def online(self, max_age: float = 600) -> dict[str, dict[str, Any]]:
+        """Utenti con Navigator aperto (posizione arrivata negli ultimi 10 minuti) che non stanno guidando."""
+        now = time.time()
+        act = self.active()
+        return {uid: st for uid, st in self.presence.items() if uid not in act and now - st.get("updated", 0) <= max_age}
 
     def active(self) -> dict[str, dict[str, Any]]:
         """Guide in corso adesso (non concluse, aggiornate negli ultimi 15 minuti)."""
