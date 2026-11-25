@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.3";
+const PANEL_VERSION = "1.14.4";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -8939,10 +8939,13 @@ class NavigatorPanel extends HTMLElement {
             if (st.type === "entity") {
               const plat = this._entPlat; // integrazione di ogni entità (dal registro delle entità), se letta
               const ents = Object.keys(this._hass?.states || {}).filter((e) => (!st.domain || e.startsWith(`${st.domain}.`))
-                && (!st.integration || !plat || plat[e] === st.integration || e === val)).sort();
+                && (!st.integration || !plat || plat[e] === st.integration || e === val))
+                // prima quelli disponibili; quelli spenti o rimasti da prove vecchie in fondo, segnati
+                .sort((x, y) => ((this._hass.states[x]?.state === "unavailable") - (this._hass.states[y]?.state === "unavailable")) || x.localeCompare(y));
               if (st.integration && !plat) this._loadEntPlat(); // la prima volta: si legge e si riapre
               return `<label class="note" style="display:block;margin-top:4px">${esc(st.label)}<select data-addon-set="${esc(a.id)}" data-k="${esc(st.key)}" style="display:block;max-width:100%">
-                <option value="">— scegli —</option>${ents.map((e) => `<option value="${esc(e)}" ${e === val ? "selected" : ""}>${esc(this._hass.states[e].attributes.friendly_name || e)}</option>`).join("")}</select></label>`;
+                <option value="">— scegli —</option>${ents.map((e) => `<option value="${esc(e)}" ${e === val ? "selected" : ""}>${esc(this._hass.states[e].attributes.friendly_name || e)}${
+                  this._hass.states[e].state === "unavailable" ? " — non disponibile" : ""}</option>`).join("")}</select></label>`;
             }
             if (st.type === "contacts") { // nome e numero affiancati, + per aggiungerne (fino a max), 🗑 per toglierne uno
               const rows = this._phoneFavs(a).slice(0, st.max || 4);
