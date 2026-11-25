@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.95";
+const PANEL_VERSION = "1.13.96";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1810,6 +1810,9 @@ const STYLE = `
   .addwin .aov .fmt small { font-size: 11px; opacity: .85; }
   .addwin .aov .up { right: 4px; top: 4px; }
   .addwin .aov .dn { right: 4px; bottom: 4px; }
+  :host(.carscr) .addwin .aov .up, :host(.carscr) .addwin .aov .dn { font-size: 30px; padding: 10px 18px; border-radius: 12px; }
+  :host(.carscr) .addwin .aov .fmt { font-size: 24px; padding: 8px 14px; border-radius: 12px; }
+  :host(.carscr) .addwin .aov .cnt { font-size: 16px; padding: 4px 8px; }
   .addwin .aov .cnt { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); color: #fff; font: 600 11px sans-serif;
     background: rgba(0,0,0,.55); border-radius: 6px; padding: 2px 5px; }
   .addwin .dkover button { position: absolute; left: 50%; transform: translateX(-50%); border: none; border-radius: 8px;
@@ -7498,11 +7501,10 @@ class NavigatorPanel extends HTMLElement {
   }
 
   // dove si sente la voce: browser (computer, iPhone) o app Companion (Android, la cui pagina non sa parlare)
+  // (la scelta "Riproduci su" è stata tolta: la voce esce sempre dal dispositivo in uso; solo l'app Companion per
+  // Android, che non sa parlare, passa dalla sua notifica)
   _voiceOut() {
-    const sel = this._settings.out;
     const browserOk = this._browserVoiceOk();
-    if (sel.startsWith("notify.")) return { kind: "notify", service: sel.slice(7) };
-    if (sel === "browser") return { kind: browserOk ? "browser" : "none" };
     if (browserOk) return { kind: "browser" };
     const svc = this._notifyServices()[0];
     return svc ? { kind: "notify", service: svc } : { kind: "none" };
@@ -7665,9 +7667,6 @@ class NavigatorPanel extends HTMLElement {
       `<option value="m" ${s.voiceSel === "m" ? "selected" : ""}>Uomo</option>`,
       ...voices.map((v) => `<option value="${esc(v.voiceURI)}" ${s.voiceSel === v.voiceURI ? "selected" : ""}>${esc(v.name)}</option>`)].join("");
     const browserOk = this._browserVoiceOk();
-    const outs = [`<option value="auto" ${s.out === "auto" ? "selected" : ""}>Automatico</option>`,
-      `<option value="browser" ${s.out === "browser" ? "selected" : ""} ${browserOk ? "" : "disabled"}>Questo dispositivo (browser)${browserOk ? "" : " – non disponibile"}</option>`,
-      ...this._notifyServices().map((n) => `<option value="notify.${n}" ${s.out === `notify.${n}` ? "selected" : ""}>App Companion: ${esc(n.slice(11).replace(/_/g, " "))}</option>`)].join("");
     const out = this._voiceOut();
     const outNote = out.kind === "notify"
       ? "La voce la legge il telefono con l'app Companion: lingua e voce (donna o uomo) sono quelle della sintesi vocale di Android (Impostazioni → Sistema → Lingue → Output sintesi vocale). Scrivi le indicazioni nella stessa lingua."
@@ -7686,7 +7685,7 @@ class NavigatorPanel extends HTMLElement {
           <input type="range" data-r="voiceRate" min="0.6" max="1.5" step="0.05" value="${s.voiceRate}"></label>
         <label class="line"><span>Tono <b data-rv="voicePitch">${Number(s.voicePitch).toFixed(2)}</b></span>
           <input type="range" data-r="voicePitch" min="0.5" max="1.5" step="0.05" value="${s.voicePitch}"></label>` : ""}
-        <label class="line"><span>Riproduci su</span><select data-s="out">${outs}</select></label>
+        ${this._phoneDevHtml()}
         ${outNote ? `<div class="note">${outNote}</div>` : ""}
         ${out.kind === "notify" ? `<div class="note">Stile, velocità e tono valgono per la voce del browser: nell'app Android si regolano in Impostazioni di Android →
           Sintesi vocale (velocità e tono), e con il motore Google si possono scaricare altre voci italiane.</div>` : ""}
@@ -8944,7 +8943,7 @@ class NavigatorPanel extends HTMLElement {
             }
             return `<label class="note" style="display:block;margin-top:4px">${esc(st.label)}<input data-addon-set="${esc(a.id)}" data-k="${esc(st.key)}" value="${esc(val)}" style="display:block;max-width:100%"></label>`;
           }).join("")}
-          ${a.window?.kind === "phone" ? this._phoneDevHtml() : ""}
+          ${a.window?.kind === "phone" && this._phoneOk() ? `<div class="note" style="margin-top:4px">🔊 Il Bluetooth per le chiamate si sceglie in Indicazioni vocali.</div>` : ""}
           ${a.background ? (() => {
             const u = a.background.includes("{ma_ingress}") ? (this._maIng?.url || "Music Assistant (in preparazione)")
               : this._addonFill(a.background, this._addonVarsA(a)).trim();
@@ -9058,7 +9057,13 @@ class NavigatorPanel extends HTMLElement {
       catch (err) { this._msg(err.message || String(err)); }
     }));
     wrap.querySelectorAll("[data-phone-route]").forEach((el) => el.addEventListener("change", () => {
-      try { window.NaviHAApp.phoneSetRoute(el.value); this._msg("Audio delle chiamate: " + el.selectedOptions[0].textContent.trim()); }
+      try {
+        window.NaviHAApp.phoneSetRoute(el.value);
+        const t = el.selectedOptions[0].textContent.trim();
+        const nt = el.closest(".line")?.querySelector(".note");
+        if (nt) nt.textContent = `Scelto: ${t}. Se non è collegato l'audio resta dove lo mette Android; durante la chiamata si cambia col tasto 🔊.`;
+        this._msg("Bluetooth per le chiamate: " + t);
+      }
       catch (err) { this._msg("Serve l'app NaviHA aggiornata"); }
     }));
     // elenco dei preferiti (add-on Telefono): si salva a ogni modifica come righe Nome=numero
@@ -9322,7 +9327,9 @@ class NavigatorPanel extends HTMLElement {
     try { d = typeof window.NaviHAApp?.phoneDevices === "function" ? JSON.parse(window.NaviHAApp.phoneDevices()) : null; } catch (e) { d = null; }
     if (!d) return "";
     const IC = { auto: "🔁", earpiece: "📱", speaker: "🔈", bluetooth: "🎧" };
-    return `<label class="note" style="display:block;margin-top:6px">🔊 Audio delle chiamate (su questo telefono)<select data-phone-route style="display:block;max-width:100%">${
+    const cur = d.list.find((o) => o.id === d.cur) || d.list[0];
+    return `<label class="line"><span>Bluetooth per le chiamate<div class="note">Scelto: ${esc(cur ? cur.name : "—")}. Se non è collegato
+      l'audio resta dove lo mette Android; durante la chiamata si cambia col tasto 🔊.</div></span><select data-phone-route>${
       d.list.map((o) => `<option value="${esc(o.id)}" ${o.id === d.cur ? "selected" : ""}>${IC[o.type] || ""} ${esc(o.name)}</option>`).join("")}</select></label>${
       d.bt ? "" : `<div class="note">Per vedere i dispositivi Bluetooth concedi a NaviHA il permesso «Dispositivi nelle vicinanze».</div>`}`;
   }
