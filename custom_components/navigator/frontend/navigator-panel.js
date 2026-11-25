@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.23";
+const PANEL_VERSION = "1.14.24";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1857,11 +1857,13 @@ const STYLE = `
     box-shadow: 0 4px 16px rgba(0,0,0,.5); display: flex; flex-direction: column; gap: 4px; }
   .addmenu .mt { color: #ddd; font: 600 12px sans-serif; padding: 4px 6px; }
   .addmenu button[data-nav] { font-weight: 700; margin-bottom: 4px; transition: box-shadow .3s, background .3s, color .3s; }
-  .addmenu button[data-nav].on { color: #3a2500; box-shadow: 0 0 14px 2px rgba(255,190,80,.55), 0 1px 6px rgba(0,0,0,.4);
+  .addmenu button[data-nav].on { color: #fff3dc; text-shadow: 0 1px 2px rgba(0,0,0,.45);
+    box-shadow: 0 0 10px 0 rgba(255,190,80,.22), inset 0 0 0 1px rgba(255,220,160,.18);
     background:
       url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .38 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"),
-      radial-gradient(circle at 50% 40%, #fff6d8 0, #ffd77a 25%, #f5a83a 60%, #8a5a1c 100%); }
-  .addmenu button.out { margin-top: 6px; text-align: center; background: rgba(255,255,255,.16); font-weight: 700; }
+      radial-gradient(circle at 50% 40%, rgba(255,214,140,.55) 0, rgba(214,150,70,.38) 45%, rgba(90,60,25,.45) 100%); }
+  .addmenu button.out { margin: 8px auto 0; display: block; width: auto; padding: 4px 14px; text-align: center; background: none;
+    border: 1px solid rgba(255,255,255,.25); border-radius: 999px; font: 500 13px sans-serif; color: rgba(255,255,255,.8); }
   .addmenu button[data-nav]:disabled { opacity: 1; cursor: default; }
   .addmenu button { text-align: left; background: rgba(255,255,255,.08); color: #fff; border: none; border-radius: 8px;
     padding: 10px; font: 14px sans-serif; cursor: pointer; }
@@ -4530,6 +4532,31 @@ class NavigatorPanel extends HTMLElement {
     // pronta appena c'è lo stile, senza aspettare i primi riquadri (con rete lenta il "load" arriva tardi)
     this._g3ready = new Promise((ok) => { g.once("style.load", ok); g.once("load", ok); }).then(() => { this._g3ok = true; try { this._desertVeil(); } catch (e) { /* stile non pronto */ } });
     g.on("error", (e) => console.debug("Navigator 3D:", e?.error?.message || e)); // riquadri mancanti: la vista va avanti
+    // inquadratura 3D ricordata (fuori dalla guida): centro, zoom, inclinazione e rotazione, ripresa alla riapertura
+    g.on("moveend", () => {
+      if (this._nav || !this._g3ok) return;
+      clearTimeout(this._view3T);
+      this._view3T = setTimeout(() => {
+        try {
+          const c = g.getCenter();
+          const v = JSON.parse(localStorage.getItem(`${STORE_KEY}-view`) || "{}") || {};
+          localStorage.setItem(`${STORE_KEY}-view`, JSON.stringify({ ...v, c3: [+c.lng.toFixed(6), +c.lat.toFixed(6)],
+            z3: +g.getZoom().toFixed(2), p3: Math.round(g.getPitch()), b3: Math.round(g.getBearing()) }));
+        } catch (e) { /* storage non disponibile */ }
+      }, 800);
+    });
+    if (!this._view3Done) {
+      this._view3Done = true;
+      let v = null;
+      try { v = JSON.parse(localStorage.getItem(`${STORE_KEY}-view`) || "null"); } catch (e) { v = null; }
+      if (v && Array.isArray(v.c3) && Number.isFinite(v.z3)) {
+        this._g3ready.then(() => setTimeout(() => {
+          if (this._nav || this._g3 !== g) return;
+          if (v.b3) this._freeRot = true;
+          g.jumpTo({ center: v.c3, zoom: v.z3, pitch: v.p3 ?? g.getPitch(), bearing: v.b3 || 0 });
+        }, 400));
+      }
+    }
     // movimenti fatti a mano nella vista 3D: la guida smette di seguire, Leaflet si sposta nello stesso punto
     // In guida il mezzo resta SEMPRE centrato: zoom, rotazione, inclinazione e anche il trascinamento con le dita
     // non fermano il tracciamento. Sono momentanei (mentre le dita sono sullo schermo la vista è libera) e, appena
@@ -9752,7 +9779,7 @@ class NavigatorPanel extends HTMLElement {
     menu.innerHTML = nav + (list.length
       ? `<div class="mt">🧩 Mostra sulla mappa</div>${list.map((a) => `<button data-a="${esc(a.id)}">${esc(a.window.title || a.name)}${a.enabled ? "" : " <small>(spento)</small>"}</button>`).join("")}`
       : `<div class="mt">🧩 ${(this._addons || []).length ? "Tutti gli add-on sono già sulla mappa" : "Nessun add-on: aggiungili da ⚙ → Add-on"}</div>`);
-    menu.insertAdjacentHTML("beforeend", `<button data-out class="out">✕ Esci</button>`);
+    menu.insertAdjacentHTML("beforeend", `<button data-out class="out" title="Chiudi il menu">Chiudi</button>`);
     menu.querySelector("[data-out]").addEventListener("click", (e) => { e.stopPropagation(); menu.remove(); });
     menu.querySelector("[data-nav]")?.addEventListener("click", (e) => {
       e.stopPropagation();
