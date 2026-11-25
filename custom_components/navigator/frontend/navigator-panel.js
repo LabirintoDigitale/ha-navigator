@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.22";
+const PANEL_VERSION = "1.14.23";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1858,7 +1858,9 @@ const STYLE = `
   .addmenu .mt { color: #ddd; font: 600 12px sans-serif; padding: 4px 6px; }
   .addmenu button[data-nav] { font-weight: 700; margin-bottom: 4px; transition: box-shadow .3s, background .3s, color .3s; }
   .addmenu button[data-nav].on { color: #3a2500; box-shadow: 0 0 14px 2px rgba(255,190,80,.55), 0 1px 6px rgba(0,0,0,.4);
-    background: radial-gradient(circle at 50% 40%, #fff6d8 0, #ffd77a 25%, #f5a83a 60%, #8a5a1c 100%); }
+    background:
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .38 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"),
+      radial-gradient(circle at 50% 40%, #fff6d8 0, #ffd77a 25%, #f5a83a 60%, #8a5a1c 100%); }
   .addmenu button.out { margin-top: 6px; text-align: center; background: rgba(255,255,255,.16); font-weight: 700; }
   .addmenu button[data-nav]:disabled { opacity: 1; cursor: default; }
   .addmenu button { text-align: left; background: rgba(255,255,255,.08); color: #fff; border: none; border-radius: 8px;
