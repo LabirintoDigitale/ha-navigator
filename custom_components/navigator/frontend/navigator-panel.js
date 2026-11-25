@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.26";
+const PANEL_VERSION = "1.14.27";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1856,17 +1856,17 @@ const STYLE = `
   .addmenu { position: absolute; z-index: 1008; width: 220px; background: rgba(24,24,24,.95); border-radius: 12px; padding: 6px;
     box-shadow: 0 4px 16px rgba(0,0,0,.5); display: flex; flex-direction: column; gap: 4px; }
   .addmenu .mt { color: #ddd; font: 600 12px sans-serif; padding: 4px 6px; }
-  .addmenu button[data-nav] { font-weight: 700; margin-bottom: 4px; display: flex; align-items: center; gap: 12px; }
+  .addmenu button[data-nav] { font-weight: 700; margin-bottom: 4px; display: flex; align-items: center; gap: 10px; }
   /* tondo con la lampadina: acceso (luce calda dietro un vetro smerigliato, come i tasti all'arrivo) = visibile */
-  .addmenu button[data-nav] .bulb { width: 46px; height: 46px; border-radius: 50%; flex: none; display: flex; align-items: center;
+  .addmenu button[data-nav] .bulb { width: 16px; height: 16px; border-radius: 50%; flex: none; display: flex; align-items: center;
     justify-content: center; background: rgba(255,255,255,.1); color: rgba(255,255,255,.6); transition: box-shadow .3s, background .3s; }
-  .addmenu button[data-nav] .bulb svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.8; }
-  .addmenu button[data-nav].on .bulb { color: #3a2500; box-shadow: 0 0 18px 2px rgba(255,190,80,.55), 0 1px 6px rgba(0,0,0,.4);
+  .addmenu button[data-nav] .bulb svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 2.4; }
+  .addmenu button[data-nav].on .bulb { color: #3a2500; box-shadow: 0 0 8px 1px rgba(255,190,80,.6), 0 1px 3px rgba(0,0,0,.4);
     background:
       url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .38 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"),
       radial-gradient(circle at 50% 40%, #fff6d8 0, #ffd77a 22%, #f5a83a 48%, #8a5a1c 78%, #3c2a12 100%); }
-  .addmenu button.out { margin-top: 6px; display: flex; align-items: center; justify-content: center; gap: 8px; text-align: center;
-    background: rgba(255,255,255,.16); font-weight: 700; }
+  .addmenu button.out { margin: 8px auto 0; width: 48px; height: 48px; padding: 0; border-radius: 50%; display: flex;
+    align-items: center; justify-content: center; background: #d93025; color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.4); }
   .addmenu button[data-nav]:disabled { opacity: 1; cursor: default; }
   .addmenu button { text-align: left; background: rgba(255,255,255,.08); color: #fff; border: none; border-radius: 8px;
     padding: 10px; font: 14px sans-serif; cursor: pointer; }
@@ -9810,7 +9810,7 @@ class NavigatorPanel extends HTMLElement {
       : `<div class="mt">🧩 ${(this._addons || []).length ? "Tutti gli add-on sono già sulla mappa" : "Nessun add-on: aggiungili da ⚙ → Add-on"}</div>`);
     // in fondo: esce dall'app NaviHA (come il tasto Indietro → Esci), solo nell'app
     if (window.NaviHAApp?.confirmExit || window.NaviHAApp?.exit) {
-      menu.insertAdjacentHTML("beforeend", `<button data-out class="out" title="Esci da NaviHA"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v8"/><path d="M6.6 6.6a8 8 0 1 0 10.8 0"/></svg> Esci da NaviHA</button>`);
+      menu.insertAdjacentHTML("beforeend", `<button data-out class="out" title="Esci da NaviHA"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v8"/><path d="M6.6 6.6a8 8 0 1 0 10.8 0"/></svg></button>`);
       menu.querySelector("[data-out]").addEventListener("click", (e) => {
         e.stopPropagation(); menu.remove();
         this._saveViewNow();
