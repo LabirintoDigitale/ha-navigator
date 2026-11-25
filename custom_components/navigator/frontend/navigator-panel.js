@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.31";
+const PANEL_VERSION = "1.14.32";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1611,12 +1611,13 @@ const STYLE = `
   .spdbox .v svg { height: 100%; width: auto; display: block; }
   .spdbox .u { font: 700 12px sans-serif; opacity: .85; margin-bottom: 2px; }
   /* batteria del telefono sopra "km/h": verde oltre il 50%, gialla dal 20 al 50, rossa sotto il 20 */
-  .spdbox .ucol { align-self: stretch; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start; }
-  .spdbox .bat { font: 800 11px sans-serif; color: #43d17a; margin-top: 1px; white-space: nowrap; }
+  /* (piccola e sopra "km/h" senza occupare spazio: il riquadro resta grande come prima) */
+  .spdbox .ucol { align-self: stretch; display: flex; flex-direction: column; justify-content: flex-end; position: relative; }
+  .spdbox .bat { position: absolute; left: 0; top: 1px; font: 800 9px sans-serif; line-height: 1; color: #43d17a; white-space: nowrap; }
   .spdbox .bat.mid { color: #ffd54a; }
   .spdbox .bat.low { color: #ff5252; }
   .spdbox .bat[hidden] { visibility: hidden; display: block; }
-  .spdbox.big .bat { font-size: 16px; }
+  .spdbox.big .bat { font-size: 13px; }
   /* connessione: verde se ci sono i dati e Home Assistant risponde, rossa (lampeggiante) se manca */
   .spdbox .spdside { align-self: stretch; display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; margin-left: 4px; }
   .spdbox .net { width: 18px; height: 18px; color: #43d17a; }
