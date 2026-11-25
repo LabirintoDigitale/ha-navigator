@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.27";
+const PANEL_VERSION = "1.14.28";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1865,8 +1865,7 @@ const STYLE = `
     background:
       url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .38 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"),
       radial-gradient(circle at 50% 40%, #fff6d8 0, #ffd77a 22%, #f5a83a 48%, #8a5a1c 78%, #3c2a12 100%); }
-  .addmenu button.out { margin: 8px auto 0; width: 48px; height: 48px; padding: 0; border-radius: 50%; display: flex;
-    align-items: center; justify-content: center; background: #d93025; color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.4); }
+  .addmenu button.out { margin-top: 4px; display: flex; align-items: center; justify-content: center; color: #ff4d42; }
   .addmenu button[data-nav]:disabled { opacity: 1; cursor: default; }
   .addmenu button { text-align: left; background: rgba(255,255,255,.08); color: #fff; border: none; border-radius: 8px;
     padding: 10px; font: 14px sans-serif; cursor: pointer; }
@@ -9806,7 +9805,7 @@ class NavigatorPanel extends HTMLElement {
     const nav = `<button data-nav class="${guida || !this._settings.hideCross ? "on" : ""}" ${guida ? "disabled" : ""}
       title="${guida ? "In guida è sempre visibile" : "Mostra o nascondi Navigator"}"><span class="bulb">${arrSvg("lampadina")}</span><span>Navigator</span></button>`;
     menu.innerHTML = nav + (list.length
-      ? `<div class="mt">🧩 Mostra sulla mappa</div>${list.map((a) => `<button data-a="${esc(a.id)}">${esc(a.window.title || a.name)}${a.enabled ? "" : " <small>(spento)</small>"}</button>`).join("")}`
+      ? `${list.map((a) => `<button data-a="${esc(a.id)}">${esc(a.window.title || a.name)}${a.enabled ? "" : " <small>(spento)</small>"}</button>`).join("")}`
       : `<div class="mt">🧩 ${(this._addons || []).length ? "Tutti gli add-on sono già sulla mappa" : "Nessun add-on: aggiungili da ⚙ → Add-on"}</div>`);
     // in fondo: esce dall'app NaviHA (come il tasto Indietro → Esci), solo nell'app
     if (window.NaviHAApp?.confirmExit || window.NaviHAApp?.exit) {
