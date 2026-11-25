@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.17";
+const PANEL_VERSION = "1.14.18";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1729,6 +1729,9 @@ const STYLE = `
   .addwin .aph { box-sizing: border-box; padding: 8px; display: flex; flex-direction: column; gap: 8px; justify-content: center;
     color: #fff; font: 600 14px sans-serif; text-align: center; }
   .addock .addwin.phwin .aph { min-width: 0; box-sizing: border-box; }
+  .addock .addwin.phwin .aph { justify-content: flex-start; }
+  .addock .aph .phfav button { padding: 6px 4px; gap: 2px; }
+  .addock .aph .phfav button span { width: 30px; height: 30px; }
   .aph .phst { opacity: .85; font-size: 13px; }
   .aph .phst.ring { color: #7ee08a; animation: phbl 1s infinite; }
   .aph .phst.on { color: #7ee08a; }
@@ -9808,16 +9811,25 @@ class NavigatorPanel extends HTMLElement {
       // l'immagine riempie tutta la larghezza dell'add-on (accanto alla croce), con le sue proporzioni; se sarebbe troppo
       // alta si taglia sopra e sotto
       const w = wins[k], im = w?.querySelector(".aimg img");
+      // tutti gli add-on del blocco alti uguale (passando dall'uno all'altro il blocco non cambia): l'altezza del più
+      // basso (es. il meteo) alla larghezza del blocco; gli altri si tagliano sopra e sotto, il Telefono scorre
+      const iw = Math.max(120, list.clientWidth);
+      const ars = wins.map((x) => {
+        const i = x.querySelector(".aimg img");
+        if (!i) return 0;
+        const W0 = +i.dataset.w || parseFloat(i.style.width) || 240, H0 = +i.dataset.h || parseFloat(i.style.height) || 160;
+        return W0 / H0;
+      }).filter((r) => r > 0);
+      const hu = Math.round(Math.min(maxH, ars.length ? iw / Math.max(...ars) : 200));
       if (im) {
         if (!im.dataset.w) { im.dataset.w = parseFloat(im.style.width) || 240; im.dataset.h = parseFloat(im.style.height) || 160; }
         const W0 = +im.dataset.w, H0 = +im.dataset.h;
         w.style.width = "";
-        const iw = Math.max(120, list.clientWidth), ih = Math.min((iw * H0) / W0, maxH);
-        im.style.setProperty("width", `${Math.round(iw)}px`, "important"); im.style.setProperty("height", `${Math.round(ih)}px`, "important");
+        im.style.setProperty("width", `${Math.round(iw)}px`, "important"); im.style.setProperty("height", `${hu}px`, "important");
         im.style.setProperty("max-width", "100%", "important");
         this._addonMarker(w, W0 / H0);
       }
-      this._phoneFit(w, Math.max(120, list.clientWidth), null); // finestra Telefono: larga come le altre
+      this._phoneFit(w, iw, hu); // finestra Telefono: grande come le altre
 
     } else {
       bot.classList.add("docked");
