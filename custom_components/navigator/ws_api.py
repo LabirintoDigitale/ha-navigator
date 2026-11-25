@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from typing import Any
 
 import voluptuous as vol
@@ -776,6 +778,40 @@ async def _count_playlists(hass: HomeAssistant, entity_id: str) -> list[dict]:
     out = await asyncio.gather(*(count(c) for c in (folder.children or [])[:400]))
     hass.data.setdefault("navigator_playlists", {})[entity_id] = {"t": _t.time(), "items": out}
     return out
+
+
+def playlist_players(hass: HomeAssistant) -> list[str]:
+    """Lettori delle finestre Musica attive (add-on con un elenco che ha una scheda Playlist)."""
+    out = []
+    try:
+        addons = _data(hass).trips.addons
+    except NavigatorError:
+        return out
+    for a in addons:
+        if not a.get("enabled"):
+            continue
+        vals = a.get("values") or {}
+        for b in (a.get("window") or {}).get("buttons") or []:
+            lst = b.get("list") or {}
+            tabs = lst.get("tabs") or []
+            if not lst.get("browse") or not any("playlist" in (" ".join(t.get("path") or []) + " " + (t.get("label") or "")).lower()
+                                                for t in tabs):
+                continue
+            ent = re.sub(r"\{([a-z0-9_]+)\}", lambda m: str(vals.get(m.group(1), "")), lst["browse"])
+            if ent.startswith("media_player.") and ent not in out:
+                out.append(ent)
+    return out
+
+
+async def refresh_playlists(hass: HomeAssistant) -> None:
+    """Conteggio delle playlist fatto da Home Assistant da solo (all'avvio e ogni 6 ore), senza aspettare l'app."""
+    for ent in playlist_players(hass):
+        if hass.states.get(ent) is None:
+            continue
+        try:
+            await _count_playlists(hass, ent)
+        except Exception:  # noqa: BLE001 - lettore non sfogliabile: si riprova al giro dopo
+            pass
 
 
 @websocket_api.websocket_command({

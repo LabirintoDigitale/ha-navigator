@@ -114,6 +114,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: NavigatorConfigEntry) ->
     ws_api.async_setup(hass)
     services.async_setup(hass)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # playlist non vuote per le finestre Musica: le conta Home Assistant da solo, poco dopo l'avvio e poi ogni 6 ore
+    # (il pannello trova già il risultato pronto)
+    from datetime import timedelta
+
+    from homeassistant.helpers.event import async_call_later, async_track_time_interval
+
+    async def _pl(_now=None) -> None:
+        await ws_api.refresh_playlists(hass)
+
+    entry.async_on_unload(async_call_later(hass, 120, _pl))
+    entry.async_on_unload(async_track_time_interval(hass, _pl, timedelta(hours=6)))
     entry.async_on_unload(entry.add_update_listener(_async_reload))
     return True
 
