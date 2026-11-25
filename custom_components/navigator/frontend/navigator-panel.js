@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.97";
+const PANEL_VERSION = "1.13.98";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -10284,7 +10284,9 @@ class NavigatorPanel extends HTMLElement {
       c.width = Math.max(1, Math.round(img.naturalWidth * k));
       c.height = Math.max(1, Math.round(img.naturalHeight * k));
       c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      // PNG (trasparenza compresa); se troppo pesante WebP, che tiene anch'esso la trasparenza; JPEG solo come ultima scelta
       let data = c.toDataURL("image/png");
+      if (data.length > 280000) { const w = c.toDataURL("image/webp", 0.9); if (w.startsWith("data:image/webp")) data = w; }
       if (data.length > 280000) data = c.toDataURL("image/jpeg", 0.85);
       return data.length <= 280000 ? data : null;
     } catch (e) { return null; } finally { URL.revokeObjectURL(url); }
