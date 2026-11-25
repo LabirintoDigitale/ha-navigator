@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.90";
+const PANEL_VERSION = "1.13.91";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -8950,7 +8950,8 @@ class NavigatorPanel extends HTMLElement {
       <div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap">
         <button data-addon-example="meteo-satellite">🛰️ Esempio: meteo dal satellite</button>
         <button data-addon-example="satellite-zona">📍 Esempio: satellite sulla tua zona</button>
-        <button data-addon-example="music-assistant">🎵 Esempio: Music Assistant</button></div>
+        <button data-addon-example="music-assistant">🎵 Esempio: Music Assistant</button>
+        <button data-addon-example="telefono">📞 Esempio: Telefono (app NaviHA)</button></div>
       <details class="addinfo"><summary>ℹ️ Come si crea un add-on</summary>
         <ol>
           <li>Crea una cartella e dentro scrivi il file <b>addon.json</b> (esempio qui sotto).</li>
