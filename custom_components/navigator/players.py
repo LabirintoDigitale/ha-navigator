@@ -51,6 +51,21 @@ class Players:
         self.add_entities([ent])
 
     async def register(self, pid: str, name: str) -> None:
+        # stesso telefono registrato due volte (vecchia app: telefono e auto insieme): via il doppione spento
+        dup = [k for k, v in self.players.items() if k != pid and v.get("name") == name and not self.online(k)]
+        if dup:
+            from homeassistant.helpers import entity_registry as er
+
+            reg = er.async_get(self.hass)
+            for k in dup:
+                self.players.pop(k, None)
+                ent = self.entities.pop(k, None)
+                eid = reg.async_get_entity_id("media_player", DOMAIN, f"player_{k}")
+                if eid:
+                    reg.async_remove(eid)
+                elif ent is not None:
+                    await ent.async_remove()
+            await self._store.async_save({"players": self.players})
         old = self.players.get(pid)
         if not old or old.get("name") != name:
             self.players[pid] = {"name": name}
