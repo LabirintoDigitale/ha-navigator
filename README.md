@@ -96,6 +96,10 @@ schermo e senza la barra di Home Assistant, così lo usi come un vero navigatore
 - Si apre **direttamente su Navigator** e usa il **GPS del telefono** anche quando Home Assistant è in `http://` in rete locale
   (dove il browser non darebbe la posizione), con le **indicazioni a voce** di Android.
 - Funziona anche in **Android Auto**: la stessa guida passa sullo schermo dell'auto.
+- **Lettore musicale**: ogni telefono con NaviHA diventa un lettore di Home Assistant (`media_player`, "NaviHA <telefono>").
+  Music Assistant ci manda la musica come a qualsiasi altro lettore (in Music Assistant: *Impostazioni → Provider dei lettori →
+  Home Assistant*, poi scegli il lettore NaviHA); il flusso passa da Home Assistant, quindi suona anche fuori casa, e dal
+  telefono va in auto (Bluetooth o Android Auto). Il lettore è disponibile mentre l'app è aperta.
 
 **[⬇️ Scarica NaviHA.apk](https://github.com/LabirintoDigitale/ha-navigator/raw/apk/NaviHA.apk)** (ultima versione) e installalo sul
 telefono (serve consentire le origini sconosciute). L'app ha bisogno dell'integrazione Navigator installata in Home Assistant.

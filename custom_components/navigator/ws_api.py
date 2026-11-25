@@ -34,7 +34,8 @@ def async_setup(hass: HomeAssistant) -> None:
         return
     for handler in (ws_info, ws_search, ws_reverse, ws_route, ws_place_save, ws_place_delete, ws_recent_clear, ws_nearby,
                     ws_poi_tile, ws_live, ws_weather, ws_trip_save, ws_trips, ws_trip, ws_trip_delete, ws_garage,
-                    ws_garage_save, ws_trip_start, ws_trip_append, ws_trip_finish, ws_poi_tiles, ws_poi_info, ws_live_all, ws_garage_select, ws_cameras_area, ws_imagery, ws_layout, ws_speed_limit, ws_addons, ws_presence, ws_days, ws_day, ws_day_delete):
+                    ws_garage_save, ws_trip_start, ws_trip_append, ws_trip_finish, ws_poi_tiles, ws_poi_info, ws_live_all, ws_garage_select, ws_cameras_area, ws_imagery, ws_layout, ws_speed_limit, ws_addons, ws_presence, ws_days, ws_day, ws_day_delete,
+                    ws_player_register, ws_player_subscribe, ws_player_state):
         websocket_api.async_register_command(hass, handler)
     hass.data[DATA_WS_REGISTERED] = True
 
@@ -694,3 +695,47 @@ async def ws_poi_tiles(hass: HomeAssistant, connection: websocket_api.ActiveConn
         return await _data(hass).pois.poi_tiles([(x, y) for x, y in msg["tiles"]], msg["kinds"])
 
     await _run(connection, msg["id"], go())
+
+
+# ---------------------------------------------------------------- lettori NaviHA (musica sul telefono)
+_PID = vol.All(str, vol.Match(r"^[a-z0-9_]{4,40}$"))
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "navigator/player_register",
+    vol.Required("player_id"): _PID,
+    vol.Required("name"): vol.All(str, vol.Length(min=1, max=60)),
+})
+@websocket_api.async_response
+async def ws_player_register(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    await _data(hass).players.register(msg["player_id"], msg["name"])
+    connection.send_result(msg["id"], {"ok": True})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "navigator/player_subscribe", vol.Required("player_id"): _PID})
+@callback
+def ws_player_subscribe(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Comandi per il lettore di questo telefono (play, pausa, volume…), finché la pagina resta aperta."""
+    mid = msg["id"]
+
+    @callback
+    def send(cmd: dict) -> None:
+        connection.send_message(websocket_api.event_message(mid, cmd))
+
+    connection.subscriptions[mid] = _data(hass).players.subscribe(msg["player_id"], send)
+    connection.send_result(mid)
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "navigator/player_state",
+    vol.Required("player_id"): _PID,
+    vol.Optional("state"): vol.In(["idle", "playing", "paused", "buffering"]),
+    vol.Optional("volume"): vol.All(vol.Coerce(float), vol.Range(min=0, max=1)),
+    vol.Optional("position"): vol.All(vol.Coerce(float), vol.Range(min=0)),
+    vol.Optional("duration"): vol.All(vol.Coerce(float), vol.Range(min=0)),
+})
+@callback
+def ws_player_state(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    st = {k: msg[k] for k in ("state", "volume", "position", "duration") if k in msg}
+    _data(hass).players.set_state(msg["player_id"], st)
+    connection.send_result(msg["id"])

@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.98";
+const PANEL_VERSION = "1.14.0";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -2010,6 +2010,7 @@ class NavigatorPanel extends HTMLElement {
     clearInterval(this._phoneRouteT);
     this._phoneRouteT = setInterval(() => this._phoneRouteSync(), 20000);
     setTimeout(() => this._phoneRouteSync(true), 3000);
+    setTimeout(() => this._playerInit(), 1500); // pannello riaperto: di nuovo in ascolto dei comandi del lettore
     clearInterval(this._phoneTick);
     this._phoneTick = setInterval(() => { if (this._phoneLast === "offhook") this._phoneUpdate(); }, 1000);
     if (this._hass && !this._started) this._init();
@@ -2028,6 +2029,8 @@ class NavigatorPanel extends HTMLElement {
 
   disconnectedCallback() {
     clearInterval(this._phoneTick);
+    try { this._playerUnsub?.(); } catch (e) { /* già chiuso */ }
+    this._playerUnsub = null; this._playerOn = false;
     clearInterval(this._phoneRouteT);
     this._ro?.disconnect();
   }
@@ -2186,6 +2189,7 @@ class NavigatorPanel extends HTMLElement {
     this._loadTrips();
     this._loadGarage();
     this._loadAddons();
+    this._playerInit(); // nell'app NaviHA: il telefono diventa un lettore di Home Assistant
     this._renderPlanSel();
     // nell'app NaviHA restano solo Viaggio: Live e Archivio sono nascosti; altrove li vedono solo gli amministratori
     if (this._isNaviHA() || !this._hass?.user?.is_admin) {
@@ -9293,6 +9297,32 @@ class NavigatorPanel extends HTMLElement {
     this._bindFloatDrag(id, `addon:${a.id}`);
     this._applyFloat(id, `addon:${a.id}`);
     requestAnimationFrame(() => this._addonInside(el)); // appena creata: dentro lo schermo
+  }
+
+  // ---------------------------------------------------------------- lettore NaviHA (musica sul telefono)
+  // Nell'app NaviHA il telefono diventa un lettore di Home Assistant ("NaviHA <telefono>"): Music Assistant ci manda la
+  // musica, Home Assistant passa i comandi qui e il pannello li dà all'app, che suona; lo stato torna a Home Assistant.
+  _playerInit() {
+    const A = window.NaviHAApp;
+    if (this._playerOn || typeof A?.playerId !== "function" || typeof A.mediaCmd !== "function" || !this._hass?.connection) return;
+    this._playerOn = true;
+    let pid = "";
+    try { pid = A.playerId(); } catch (e) { this._playerOn = false; return; }
+    const name = (() => { try { return A.playerName(); } catch (e) { return "NaviHA"; } })();
+    window.__navihaPlayer = (j) => {
+      try {
+        const s = JSON.parse(j), m = { type: "navigator/player_state", player_id: pid };
+        for (const k of ["state", "volume", "position", "duration"]) if (s[k] != null) m[k] = s[k];
+        this._hass.callWS(m).catch(() => { /* integrazione vecchia */ });
+      } catch (e) { /* niente */ }
+    };
+    this._hass.callWS({ type: "navigator/player_register", player_id: pid, name })
+      .then(() => this._hass.connection.subscribeMessage((cmd) => {
+        this._alog?.(`lettore NaviHA: ${cmd.cmd}${cmd.url ? ` ${String(cmd.url).slice(0, 60)}` : ""}`);
+        try { A.mediaCmd(JSON.stringify(cmd)); } catch (e) { /* app vecchia */ }
+      }, { type: "navigator/player_subscribe", player_id: pid }))
+      .then((u) => { this._playerUnsub = u; try { window.__navihaPlayer(A.playerState()); } catch (e) { /* niente */ } })
+      .catch(() => { this._playerOn = false; }); // integrazione vecchia
   }
 
   // ---------------------------------------------------------------- add-on Telefono (solo nell'app NaviHA)

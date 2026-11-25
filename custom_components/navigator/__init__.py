@@ -31,11 +31,12 @@ from .const import (
 )
 from .live import Live
 from .places import Places
+from .players import Players
 from .pois import Pois
 from .trips import Trips
 from .weather import Weather
 
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "media_player"]
 
 
 @dataclass
@@ -46,6 +47,7 @@ class NavigatorData:
     live: Live
     trips: Trips
     weather: Weather
+    players: Players
 
 
 type NavigatorConfigEntry = ConfigEntry[NavigatorData]
@@ -69,7 +71,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: NavigatorConfigEntry) ->
     await live.async_load()
     trips = Trips(hass)
     await trips.async_load()
-    entry.runtime_data = NavigatorData(maps, places, pois, live, trips, Weather(async_get_clientsession(hass)))
+    players = Players(hass)  # lettori NaviHA (musica sul telefono)
+    await players.async_load()
+    entry.runtime_data = NavigatorData(maps, places, pois, live, trips, Weather(async_get_clientsession(hass)), players)
     hass.data[DOMAIN] = entry
 
     # "servizio" nella scheda dell'integrazione: mostra la versione installata
@@ -91,6 +95,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: NavigatorConfigEntry) ->
         from .imgproxy import ImageProxyView
 
         hass.http.register_view(ImageProxyView())  # copertine in http (es. Music Assistant) passate al pannello
+        from .players import StreamProxyView
+
+        hass.http.register_view(StreamProxyView())  # musica per i lettori NaviHA
         hass.data[DATA_STATIC_REGISTERED] = True
 
     await panel_custom.async_register_panel(
