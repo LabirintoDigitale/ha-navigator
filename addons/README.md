@@ -221,9 +221,8 @@ NaviHA** (Android, anche sullo schermo di Android Auto; nel browser dice che ser
 - **chiamata in arrivo**: nome di chi chiama, cornetta **verde** (rispondi) e **rossa** (rifiuta); la finestra compare da
   sola anche se l'avevi chiusa e, nel blocco della guida, diventa quella mostrata;
 - **in chiamata**: nome, durata e cornetta rossa per chiudere;
-- **nessuna chiamata**: i preferiti, da chiamare con un tocco: 4 con nome e numero separati nelle impostazioni
-  (`nome1`/`numero1` … `nome4`/`numero4`) e, volendo, altri in `preferiti` come `Mamma=+39 333 1234567, Ufficio=0437 123456`
-  (al massimo 8 in tutto);
+- **nessuna chiamata**: fino a 4 preferiti da chiamare con un tocco. Nelle impostazioni dell'add-on c'è l'elenco con
+  nome e numero affiancati, **＋ Aggiungi** e 🗑 per toglierne uno (impostazione di tipo `"contacts"`, con `"max"`);
 - **prima volta**: finché NaviHA non è abbinata come app compagna la finestra mostra solo il tasto grande *Abbina NaviHA*.
 
 L'app chiede i permessi *Telefono* (menu ⋮ → *Permessi per le chiamate*). Per vedere il **nome** di chi chiama (Android lo

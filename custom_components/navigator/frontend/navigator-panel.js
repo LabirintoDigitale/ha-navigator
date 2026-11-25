@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.91";
+const PANEL_VERSION = "1.13.92";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1741,6 +1741,12 @@ const STYLE = `
   .aph .phg { background: #1e9e3a; animation: phpu 1.2s infinite; }
   .aph .phr { background: #d93025; }
   @keyframes phpu { 50% { box-shadow: 0 0 0 10px rgba(30,158,58,.25); } }
+  .ctlist .ctr { display: flex; gap: 6px; margin-top: 4px; align-items: center; }
+  .ctlist .ctn { width: 110px; min-width: 0; }
+  .ctlist .ctp { width: 130px; min-width: 0; }
+  .ctlist .ctd { padding: 4px 8px; }
+  .ctlist .cta { margin-top: 6px; }
+  .ctlist .cta[hidden] { display: none; }
   .aph .phfav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
   .aph .phpair { border: none; border-radius: 16px; background: #1a73e8; color: #fff; padding: 16px 12px; display: flex;
     flex-direction: column; align-items: center; gap: 6px; cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,.4); }
@@ -8927,6 +8933,12 @@ class NavigatorPanel extends HTMLElement {
               return `<label class="note" style="display:block;margin-top:4px">${esc(st.label)}<select data-addon-set="${esc(a.id)}" data-k="${esc(st.key)}" style="display:block;max-width:100%">
                 <option value="">— scegli —</option>${ents.map((e) => `<option value="${esc(e)}" ${e === val ? "selected" : ""}>${esc(this._hass.states[e].attributes.friendly_name || e)}</option>`).join("")}</select></label>`;
             }
+            if (st.type === "contacts") { // nome e numero affiancati, + per aggiungerne (fino a max), 🗑 per toglierne uno
+              const rows = this._phoneFavs(a).slice(0, st.max || 4);
+              const row = (f) => `<div class="ctr"><input class="ctn" placeholder="Nome" value="${esc(f?.name || "")}"><input class="ctp" type="tel" inputmode="tel" placeholder="Numero" value="${esc(f?.num || "")}"><button class="ctd" title="Cancella">🗑</button></div>`;
+              return `<div class="note" style="margin-top:6px">${esc(st.label)}</div><div class="ctlist" data-ct="${esc(a.id)}" data-k="${esc(st.key)}" data-max="${st.max || 4}">${
+                rows.map(row).join("")}<template>${row(null)}</template><button class="cta"${rows.length >= (st.max || 4) ? " hidden" : ""}>＋ Aggiungi</button></div>`;
+            }
             return `<label class="note" style="display:block;margin-top:4px">${esc(st.label)}<input data-addon-set="${esc(a.id)}" data-k="${esc(st.key)}" value="${esc(val)}" style="display:block;max-width:100%"></label>`;
           }).join("")}
           ${a.background ? (() => {
@@ -9041,6 +9053,31 @@ class NavigatorPanel extends HTMLElement {
       try { await this._addonCall({ where_id: el.dataset.addonSet, values: { [el.dataset.k]: el.value } }); }
       catch (err) { this._msg(err.message || String(err)); }
     }));
+    // elenco dei preferiti (add-on Telefono): si salva a ogni modifica come righe Nome=numero
+    wrap.querySelectorAll(".ctlist[data-ct]").forEach((box) => {
+      const max = +box.dataset.max || 4, add = box.querySelector(".cta");
+      const save = async () => {
+        const lines = [...box.querySelectorAll(".ctr")].map((r) => {
+          const num = r.querySelector(".ctp").value.replace(/[^0-9+*#]/g, "");
+          const name = r.querySelector(".ctn").value.replace(/[=,;\n]/g, " ").trim();
+          return num ? `${name || num}=${num}` : "";
+        }).filter(Boolean);
+        const values = { [box.dataset.k]: lines.join("\n") };
+        for (let i = 1; i <= 4; i++) { values[`nome${i}`] = ""; values[`numero${i}`] = ""; } // vecchi campi separati
+        try { await this._addonCall({ where_id: box.dataset.ct, values }); } catch (err) { this._msg(err.message || String(err)); }
+      };
+      const sync = () => { add.hidden = box.querySelectorAll(".ctr").length >= max; };
+      box.addEventListener("change", (e) => { if (e.target.closest(".ctr")) save(); });
+      box.addEventListener("click", (e) => {
+        if (e.target.closest(".ctd")) { e.target.closest(".ctr").remove(); sync(); save(); }
+        else if (e.target.closest(".cta")) {
+          if (box.querySelectorAll(".ctr").length >= max) return;
+          add.before(box.querySelector("template").content.cloneNode(true));
+          sync();
+          [...box.querySelectorAll(".ctr .ctn")].pop()?.focus();
+        }
+      });
+    });
     wrap.querySelectorAll("[data-addon-where]").forEach((el) => el.addEventListener("change", async () => {
       try { await this._addonCall({ where_id: el.dataset.addonWhere, where: el.value }); } catch (err) { this._msg(err.message || String(err)); }
     }));

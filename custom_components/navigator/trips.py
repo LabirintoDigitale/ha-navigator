@@ -331,7 +331,9 @@ def _addon_settings(lst: Any) -> list[dict]:
     for st in (lst if isinstance(lst, list) else [])[:12]:
         if isinstance(st, dict) and isinstance(st.get("key"), str) and _KEY.match(st["key"]):
             out.append({"key": st["key"], "label": str(st.get("label") or st["key"])[:40],
-                        "type": "entity" if st.get("type") == "entity" else "text",
+                        # "contacts": elenco di nomi e numeri (add-on Telefono), salvato come righe Nome=numero
+                        "type": st.get("type") if st.get("type") in ("entity", "contacts") else "text",
+                        "max": int(min(8, max(1, st.get("max") or 4))) if isinstance(st.get("max"), (int, float)) else 4,
                         "domain": str(st.get("domain") or "")[:30],
                         # solo le entità di un'integrazione (es. "music_assistant"): niente lettori che non c'entrano
                         "integration": str(st.get("integration") or "")[:40]})
@@ -559,7 +561,7 @@ class Trips:
         if where_id and where in ("both", "guida", "plan"):
             addons = [{**x, "where": where} if x["id"] == where_id else x for x in addons]
         if where_id and isinstance(values, dict):  # impostazioni dell'add-on scelte da chi lo usa
-            clean = {k: str(v)[:200] for k, v in values.items() if isinstance(k, str) and _KEY.match(k)}
+            clean = {k: str(v)[:600] for k, v in values.items() if isinstance(k, str) and _KEY.match(k)}
             addons = [{**x, "values": {**x.get("values", {}), **clean}} if x["id"] == where_id else x for x in addons]
         self.addons = addons
         await self._addon_store.async_save({"addons": addons})
