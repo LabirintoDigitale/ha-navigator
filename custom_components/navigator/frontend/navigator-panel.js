@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.14";
+const PANEL_VERSION = "1.14.15";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -9434,7 +9434,7 @@ class NavigatorPanel extends HTMLElement {
     if (!this._isNaviHA()) return "";
     const d = this._phoneDevList();
     if (!d) return `<label class="line"><span>Bluetooth per le chiamate<div class="note">Aggiorna l'app NaviHA (1.1.53 o più recente) per sceglierlo.</div></span></label>`;
-    const IC = { auto: "🔁", earpiece: "📱", speaker: "🔈", bluetooth: "🎧" };
+    const IC = { auto: "🔁", earpiece: "📱", speaker: "🔈", bluetooth: "🎧", car: "🚗" };
     const by = this._phoneRouteBy();
     const sel = (key) => `<select data-phone-route="${esc(key)}">${d.list.map((o) => `<option value="${esc(o.id)}" ${o.id === (by[key] || "") ? "selected" : ""}>${
       IC[o.type] || ""} ${esc(o.name)}</option>`).join("")}</select>`;
