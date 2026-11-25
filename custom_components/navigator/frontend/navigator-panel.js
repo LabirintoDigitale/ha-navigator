@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.8";
+const PANEL_VERSION = "1.14.9";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1772,6 +1772,13 @@ const STYLE = `
   :host(.carscr) .aph .phau, :host(.carscr) .aph .phrt button { font-size: 18px; padding: 12px 14px; }
   :host(.carscr) .aph .phbig button { width: 80px; height: 80px; }
   :host(.carscr) .aph .phfav button { font-size: 17px; padding: 10px 6px; }
+  .addwin .aload { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 10px; background: rgba(0,0,0,.55); border-radius: 8px; color: #fff; pointer-events: none;
+    padding: 12px; text-align: center; }
+  .addwin .aload i { width: 42px; height: 42px; border-radius: 50%; border: 4px solid rgba(255,255,255,.25);
+    border-top-color: #fff; animation: aspin .9s linear infinite; }
+  .addwin .aload b { font: 700 17px sans-serif; text-shadow: 0 1px 4px #000; }
+  @keyframes aspin { to { transform: rotate(360deg); } }
   .addwin .anopic { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 6px; padding: 30px 12px 50px; text-align: center; color: #fff; pointer-events: none;
     background: radial-gradient(circle at 50% 40%, #2b3a55, #141821); border-radius: 8px; }
@@ -9204,6 +9211,7 @@ class NavigatorPanel extends HTMLElement {
           const st = this._hass?.states?.[eid];
           const sk = `${eid}=${st ? st.state : "assente"}`;
           if (el._lastSt !== sk) { el._lastSt = sk; this._alog(`${a.id}: lettore ${eid}: ${st ? `stato "${st.state}"` : "non esiste in Home Assistant"}`); }
+          if (el._loading && st?.state === "playing" && Date.now() - el._loading.t > 600) this._addonLoading(el, null);
           const pic = st?.attributes?.entity_picture || "";
           if (pic && img.dataset.pic !== pic) { img.dataset.pic = pic; img.src = pic; img.style.display = ""; el.querySelector(".aerr")?.remove(); }
           if (!pic) { img.dataset.pic = ""; img.removeAttribute("src"); img.style.visibility = "hidden"; } else img.style.visibility = "";
@@ -10032,6 +10040,21 @@ class NavigatorPanel extends HTMLElement {
 
   // elenco dentro l'add-on: contenuti di un lettore sfogliati come nel pannello Media di Home Assistant (es. le
   // playlist di Music Assistant); una voce che si può riprodurre parte sul lettore, una cartella si apre
+  // rotellina sulla finestra mentre parte un brano o una radio scelti dall'elenco (null: via). Sparisce quando il lettore
+  // suona (vedi load() dell'immagine "entity:"), o comunque dopo 45 s
+  _addonLoading(el, title) {
+    const box = el.querySelector(".aimg");
+    box?.querySelector(".aload")?.remove();
+    clearTimeout(el._loadT);
+    el._loading = title == null ? null : { t: Date.now() };
+    if (title == null || !box) return;
+    const d = document.createElement("div");
+    d.className = "aload";
+    d.innerHTML = `<i></i>${title ? `<b>${esc(title)}</b>` : ""}`;
+    box.appendChild(d);
+    el._loadT = setTimeout(() => this._addonLoading(el, null), 45000);
+  }
+
   async _addonList(a, el, b, at = null, tab = null) {
     const box = el.querySelector(".aimg");
     if (!box) return;
@@ -10092,8 +10115,14 @@ class NavigatorPanel extends HTMLElement {
         if (c.can_play) {
           this._alog(`${a.id}: scelto "${c.title}" (${c.uri || c.media_content_id || ""}) su ${ent}, che ora è ${this._hass.states?.[ent]?.state ?? "assente"}`);
           setTimeout(() => this._alog(`${a.id}: ${ent} 3 s dopo: ${this._hass.states?.[ent]?.state ?? "assente"}${this._hass.states?.[ent]?.attributes?.media_title ? ` · "${this._hass.states[ent].attributes.media_title}"` : ""}`), 3000);
-          try { await play(c); this._alog(`${a.id}: avvio inviato`); pane.remove(); }
-          catch (err) { this._alog(`${a.id}: avvio ERRORE ${err.message || err.code || err}`); this._msg(`${a.name}: ${err.message || err}`); }
+          // subito alla finestra, con la rotellina e il nome finché la musica non parte davvero
+          pane.remove();
+          this._addonLoading(el, c.title || "");
+          try { await play(c); this._alog(`${a.id}: avvio inviato`); }
+          catch (err) {
+            this._addonLoading(el, null);
+            this._alog(`${a.id}: avvio ERRORE ${err.message || err.code || err}`); this._msg(`${a.name}: ${err.message || err}`);
+          }
         } else if (c.can_expand && open) open(c);
       }));
     };
