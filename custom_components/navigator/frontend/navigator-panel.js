@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.11";
+const PANEL_VERSION = "1.14.12";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -7606,7 +7606,10 @@ class NavigatorPanel extends HTMLElement {
       this._unlockAudio();
       const ac = this._ac;
       if (!ac) return;
-      const t = ac.currentTime;
+      // nell'app NaviHA la musica del lettore si abbassa (a rampa), l'avviso suona e poi risale
+      let lead = 0;
+      try { if (typeof window.NaviHAApp?.duck === "function") { window.NaviHAApp.duck(1400); lead = 0.3; } } catch (e) { /* app vecchia */ }
+      const t = ac.currentTime + lead;
       for (const dt of [0, 0.22]) {
         const o = ac.createOscillator();
         const g = ac.createGain();
