@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.15";
+const PANEL_VERSION = "1.14.16";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -674,7 +674,7 @@ const SETTINGS_KEY = "navigator-panel-settings";
 const DEFAULT_SETTINGS = { voice: false, lang: "it", voiceSel: "f", out: "auto", autoZoom: true, beep: false,
   fuelBrands: [], fuelKind: "", camAlert: true, view3d: false, b3d: true, clouds3d: true, veh3d: true, terrainEx: "1.5", pitch3d: 60, tunnelFx: true, zoom3dOff: 0,
   voiceStyle: "normale", voiceRate: 1, voicePitch: 1, bldStyle: "colorati",
-  poiKinds: ["farmacia", "ospedale", "supermercato"], arrEntities: [], arrHomeOnly: true, nightMode: "auto", wxAlert: true, muteGuide: false, trafficSensor: "", autoDest: true, wx3d: true, arrDist: 500, tileAhead: 100, clickSnd: true, names3d: true };
+  poiKinds: ["farmacia", "ospedale", "supermercato"], arrEntities: [], arrHomeOnly: true, arrNoNav: false, nightMode: "auto", wxAlert: true, muteGuide: false, trafficSensor: "", autoDest: true, wx3d: true, arrDist: 500, tileAhead: 100, clickSnd: true, names3d: true };
 // marche dei distributori (come nell'anagrafica del MIMIT)
 const FUEL_BRANDS = ["Agip Eni", "Api-Ip", "Q8", "Esso", "Tamoil", "Shell", "Retitalia", "Beyfin", "Costantin", "Europam", "Pompe bianche"];
 const BRAND_COLORS = { "agip eni": "#f7c600", "eni": "#f7c600", "api-ip": "#0057a8", "ip": "#0057a8", "q8": "#0a3a7a", "esso": "#d71920",
@@ -2582,6 +2582,7 @@ class NavigatorPanel extends HTMLElement {
         this._me = { lat, lon, src: "gps" };
         this._drawMarkers();
         this._autoDestCheck(this._me);
+        if (this._settings.arrNoNav) this._arrivalButtons(); // tasti all'arrivo anche senza guida, vicino a Casa
         this._idleSpeed(lat, lon, pos.coords.speed, pos.coords.heading);
         this._fixAt = Date.now();
       }, () => { /* GPS non disponibile: niente proposte */ }, { enableHighAccuracy: true, maximumAge: 10000, timeout: 60000 });
@@ -7796,6 +7797,7 @@ class NavigatorPanel extends HTMLElement {
             .sort((a, b) => (a.attributes.friendly_name || a.entity_id).localeCompare(b.attributes.friendly_name || b.entity_id))
             .map((st) => `<option value="${esc(st.entity_id)}">${ARR_ICONS[st.entity_id.split(".")[0]] || ""} ${esc(st.attributes.friendly_name || st.entity_id)}</option>`).join("")}</select></div>
         ${sw("arrHomeOnly", "Solo arrivando a Casa", "Spento: i tasti compaiono arrivando a qualsiasi destinazione")}
+        ${sw("arrNoNav", "Anche senza navigazione", "Avvicinandoti a Casa (alla distanza qui sotto) compaiono anche se non stai navigando: serve il GPS del telefono (app NaviHA o Companion) con Navigator aperto")}
         <label class="line"><span>Compaiono a</span><select data-s="arrDist">${[200, 300, 500, 1000, 2000].map((m) =>
           `<option value="${m}" ${(+s.arrDist || 500) === m ? "selected" : ""}>${m < 1000 ? `${m} m` : `${m / 1000} km`} dall'arrivo</option>`).join("")}</select></label>
         ${(s.arrEntities || []).length ? '<button data-arrtest>👁 Visualizza i tasti sulla mappa</button>' : ""}
@@ -8329,6 +8331,15 @@ class NavigatorPanel extends HTMLElement {
     if (near && s.arrHomeOnly) {
       const h = this._homePoint();
       near = distM([dest.lat, dest.lon], [h.lat, h.lon]) < 250;
+    }
+    // anche senza navigazione (opzione): avvicinandosi a Casa, alla stessa distanza. Solo arrivando da lontano (non
+    // stando a casa); arrivati (entro 60 m) restano ancora 2 minuti, poi spariscono fino al prossimo rientro
+    if (!nav && !keep && s.arrNoNav && ids.length && this._me && this._fixAt && Date.now() - this._fixAt < 120000) {
+      const h = this._homePoint(), d = distM([this._me.lat, this._me.lon], [h.lat, h.lon]), lim = +s.arrDist || 500;
+      if (d > lim + 300) { this._arrFar = true; this._arrHomeAt = 0; }
+      if (this._arrFar && d < 60 && !this._arrHomeAt) this._arrHomeAt = Date.now();
+      if (this._arrHomeAt && Date.now() - this._arrHomeAt > 120000) this._arrFar = false;
+      if (this._arrFar && d < lim) near = true;
     }
     // "Nascondi": restano nascosti finché non si arriva di nuovo vicino (dopo essersi allontanati)
     if (!near) this._arrHidden = false;
