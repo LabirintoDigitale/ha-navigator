@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.13";
+const PANEL_VERSION = "1.14.14";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -2018,6 +2018,16 @@ class NavigatorPanel extends HTMLElement {
     this._phoneRouteT = setInterval(() => this._phoneRouteSync(), 20000);
     setTimeout(() => this._phoneRouteSync(true), 3000);
     setTimeout(() => this._playerInit(), 1500); // pannello riaperto: di nuovo in ascolto dei comandi del lettore
+    // all'app NaviHA: navigazione in corso o no (durante una chiamata torna davanti solo se stai navigando)
+    clearInterval(this._guidaT);
+    this._guidaT = setInterval(() => {
+      const A = window.NaviHAApp;
+      if (typeof A?.setGuida !== "function" || this._isCarScreen()) return;
+      const g = !!(this._nav && this._isGuida());
+      if (g === this._guidaSent) return;
+      this._guidaSent = g;
+      try { A.setGuida(g); } catch (e) { /* app vecchia */ }
+    }, 3000);
     clearInterval(this._phoneTick);
     this._phoneTick = setInterval(() => { if (this._phoneLast === "offhook") this._phoneUpdate(); }, 1000);
     if (this._hass && !this._started) this._init();
@@ -2036,6 +2046,7 @@ class NavigatorPanel extends HTMLElement {
 
   disconnectedCallback() {
     clearInterval(this._phoneTick);
+    clearInterval(this._guidaT);
     try { this._playerUnsub?.(); } catch (e) { /* già chiuso */ }
     this._playerUnsub = null; this._playerOn = false;
     clearInterval(this._phoneRouteT);
