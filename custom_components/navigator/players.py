@@ -104,7 +104,12 @@ class Players:
 
     @callback
     def set_state(self, pid: str, st: dict) -> None:
-        self.states[pid] = {**self.states.get(pid, {}), **st, "_t": time.time()}
+        old = self.states.get(pid, {})
+        new = {**old, **st}
+        same = all(old.get(k) == new.get(k) for k in ("state", "volume", "duration"))
+        if same and abs((new.get("position") or 0) - (old.get("position") or 0)) < 10:
+            return  # niente di nuovo: non si riscrive lo stato (meno aggiornamenti a chi lo segue, es. Music Assistant)
+        self.states[pid] = {**new, "_t": time.time()}
         async_dispatcher_send(self.hass, SIGNAL, pid)
 
     def stream_path(self, url: str) -> str:
