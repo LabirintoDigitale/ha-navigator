@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.29";
+const PANEL_VERSION = "1.14.30";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -9353,6 +9353,17 @@ class NavigatorPanel extends HTMLElement {
           const sk = `${eid}=${st ? st.state : "assente"}`;
           if (el._lastSt !== sk) { el._lastSt = sk; this._alog(`${a.id}: lettore ${eid}: ${st ? `stato "${st.state}"` : "non esiste in Home Assistant"}`); }
           if (el._loading && st?.state === "playing" && Date.now() - el._loading.t > 600) this._addonLoading(el, null);
+          // tasto ▶: mentre suona mostra ⏸ (pausa), fermo o in pausa ▶
+          const playing = ["playing", "buffering"].includes(st?.state);
+          el.querySelectorAll(".abar button, .abl button").forEach((btn) => {
+            const bb = w.buttons?.[+btn.dataset.b];
+            if (!bb || !/\.media_play$/.test(bb.service || "")) return;
+            const k = playing ? "pause" : "play";
+            if (btn.dataset.pp === k) return;
+            btn.dataset.pp = k;
+            btn.innerHTML = ADDON_ICONS(k);
+            btn.title = playing ? "Pausa" : "Play";
+          });
           const pic = st?.attributes?.entity_picture || "";
           if (pic && img.dataset.pic !== pic) {
             img.dataset.pic = pic; img.style.display = ""; el.querySelector(".aerr")?.remove();
@@ -10248,6 +10259,13 @@ class NavigatorPanel extends HTMLElement {
       const ent = typeof data.entity_id === "string" ? data.entity_id : null;
       const stNow = ent ? this._hass.states?.[ent]?.state : null;
       if (ent) this._alog(`${a.id}: ${ent} prima del comando: ${stNow ?? "assente"}`);
+      // ▶ mentre suona fa da pausa (⏸); in pausa ▶ riprende dal punto in cui si era fermato
+      if (/\.media_play$/.test(b.service) && ent && ["playing", "buffering"].includes(stNow)) {
+        this._alog(`${a.id}: in riproduzione → pausa`);
+        try { await this._hass.callService("media_player", "media_pause", { entity_id: ent }); }
+        catch (err) { this._msg(`${a.name}: ${err.message || err}`); }
+        return;
+      }
       // ▶ col lettore fermo (niente da riprendere): riparte l'ultima playlist o radio scelta dall'elenco
       if (/\.media_play$/.test(b.service) && ent && ["idle", "off", "standby", "on"].includes(stNow)) {
         let last = el._last;
