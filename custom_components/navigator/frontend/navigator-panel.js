@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.19";
+const PANEL_VERSION = "1.14.20";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1857,6 +1857,7 @@ const STYLE = `
     box-shadow: 0 4px 16px rgba(0,0,0,.5); display: flex; flex-direction: column; gap: 4px; }
   .addmenu .mt { color: #ddd; font: 600 12px sans-serif; padding: 4px 6px; }
   .addmenu button[data-nav] { font-weight: 700; margin-bottom: 4px; }
+  .addmenu button.out { margin-top: 6px; text-align: center; background: rgba(255,255,255,.16); font-weight: 700; }
   .addmenu button[data-nav] small { display: block; font-weight: 400; opacity: .75; }
   .addmenu button[data-nav]:disabled { opacity: .6; }
   .addmenu button { text-align: left; background: rgba(255,255,255,.08); color: #fff; border: none; border-radius: 8px;
@@ -2187,7 +2188,22 @@ class NavigatorPanel extends HTMLElement {
 
     // mappa
     const home = [this._hass.config.latitude, this._hass.config.longitude];
-    this._map = L.map($("map"), { zoomControl: false, attributionControl: true }).setView(home, 12);
+    // alla riapertura la mappa torna dov'era (centro e zoom dell'ultima volta, fuori dalla guida)
+    let view0 = null;
+    try { view0 = JSON.parse(localStorage.getItem(`${STORE_KEY}-view`) || "null"); } catch (e) { view0 = null; }
+    const v0ok = view0 && Array.isArray(view0.c) && Number.isFinite(view0.c[0]) && Number.isFinite(view0.z);
+    this._map = L.map($("map"), { zoomControl: false, attributionControl: true }).setView(v0ok ? view0.c : home, v0ok ? view0.z : 12);
+    this._map.on("moveend", () => {
+      if (this._nav) return;
+      clearTimeout(this._viewT);
+      this._viewT = setTimeout(() => {
+        const c = this._map.getCenter();
+        try { localStorage.setItem(`${STORE_KEY}-view`, JSON.stringify({ c: [+c.lat.toFixed(6), +c.lng.toFixed(6)], z: this._map.getZoom(), full: !!this._full })); }
+        catch (e) { /* storage non disponibile */ }
+      }, 800);
+    });
+    // e con lo schermo intero com'era (sul telefono; in auto lo è sempre)
+    if (view0?.full && !this._isCarScreen()) setTimeout(() => { if (!this._full) this._toggleFull(true); }, 300);
     const dark = this._hass.themes?.darkMode;
     if (!this._layer || !LAYERS[this._layer]) this._layer = dark ? "scura" : "strade";
     for (const [k, v] of Object.entries(LAYERS)) $("layer").insertAdjacentHTML("beforeend", `<option value="${k}">${v[0]}</option>`);
@@ -4181,6 +4197,12 @@ class NavigatorPanel extends HTMLElement {
     this._syncFullBtns();
     this._updateAwake();
     setTimeout(() => this._relayout(), 150);
+    if (!this._nav && this._map) { // ricordato per la prossima apertura
+      try {
+        const v = JSON.parse(localStorage.getItem(`${STORE_KEY}-view`) || "{}") || {};
+        localStorage.setItem(`${STORE_KEY}-view`, JSON.stringify({ ...v, full: !!on }));
+      } catch (e) { /* storage non disponibile */ }
+    }
   }
 
   _syncFullBtns() {
@@ -9709,6 +9731,8 @@ class NavigatorPanel extends HTMLElement {
     menu.innerHTML = nav + (list.length
       ? `<div class="mt">🧩 Mostra sulla mappa</div>${list.map((a) => `<button data-a="${esc(a.id)}">${esc(a.window.title || a.name)}${a.enabled ? "" : " <small>(spento)</small>"}</button>`).join("")}`
       : `<div class="mt">🧩 ${(this._addons || []).length ? "Tutti gli add-on sono già sulla mappa" : "Nessun add-on: aggiungili da ⚙ → Add-on"}</div>`);
+    menu.insertAdjacentHTML("beforeend", `<button data-out class="out">✕ Esci</button>`);
+    menu.querySelector("[data-out]").addEventListener("click", (e) => { e.stopPropagation(); menu.remove(); });
     menu.querySelector("[data-nav]")?.addEventListener("click", (e) => {
       e.stopPropagation();
       if (guida) return;
