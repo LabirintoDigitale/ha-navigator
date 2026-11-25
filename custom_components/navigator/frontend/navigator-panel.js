@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.20";
+const PANEL_VERSION = "1.14.21";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -9259,7 +9259,7 @@ class NavigatorPanel extends HTMLElement {
   _renderAddons() {
     const wrap = this.$?.("mapwrap");
     if (!wrap) return;
-    this._addonClosed ||= new Set();
+    this._closedSet();
     const view = this._3d ? "3d" : "2d";
     this._addonGuida = !!(this._nav && this._isGuida());
     // la finestra Telefono esiste solo nell'app NaviHA (Android): nel browser non compare proprio
@@ -9422,6 +9422,23 @@ class NavigatorPanel extends HTMLElement {
     this._bindFloatDrag(id, `addon:${a.id}`);
     this._applyFloat(id, `addon:${a.id}`);
     requestAnimationFrame(() => this._addonInside(el)); // appena creata: dentro lo schermo
+  }
+
+  // add-on chiusi col tocco: ricordati anche alla prossima apertura (riaperti dal menu dei km/h); e nel blocco della
+  // guida l'add-on che si vedeva
+  _closedSet() {
+    if (this._addonClosed) return this._addonClosed;
+    let ids = [];
+    try { ids = JSON.parse(localStorage.getItem(`${STORE_KEY}-closed`) || "[]"); } catch (e) { ids = []; }
+    if (this._dockIdx == null) { try { this._dockIdx = +localStorage.getItem(`${STORE_KEY}-dock`) || 0; } catch (e) { /* niente */ } }
+    const save = () => { try { localStorage.setItem(`${STORE_KEY}-closed`, JSON.stringify([...this._addonClosed])); } catch (e) { /* niente */ } };
+    const S = class extends Set {
+      add(v) { super.add(v); if (this._ready) save(); return this; }
+      delete(v) { const r = super.delete(v); if (this._ready) save(); return r; }
+    };
+    this._addonClosed = new S(Array.isArray(ids) ? ids : []);
+    this._addonClosed._ready = true;
+    return this._addonClosed;
   }
 
   // ---------------------------------------------------------------- lettore NaviHA (musica sul telefono)
@@ -9718,7 +9735,7 @@ class NavigatorPanel extends HTMLElement {
     const wrap = this.$("mapwrap"), box = this.$("spdbox");
     let menu = this.$("addmenu");
     if (menu) { menu.remove(); return; } // secondo tocco: si chiude
-    this._addonClosed ||= new Set();
+    this._closedSet();
     const view = this._3d ? "3d" : "2d";
     const list = (this._addons || []).filter((a) => a.window.views.includes(view) && this._addonHere(a)
       && (!a.enabled || this._addonClosed.has(a.id)));
@@ -9799,7 +9816,11 @@ class NavigatorPanel extends HTMLElement {
       dock.innerHTML = `<div class="alist"></div><div class="across"></div>`;
       wrap.appendChild(dock);
       this._pcHome = { parent: pc.parentNode, next: pc.nextSibling };
-      const go = (d) => { this._dockIdx = (this._dockIdx || 0) + d; this._syncDock(); };
+      const go = (d) => {
+        this._dockIdx = (this._dockIdx || 0) + d; this._dockIdxBack = null;
+        try { localStorage.setItem(`${STORE_KEY}-dock`, String(this._dockIdx)); } catch (e) { /* storage non disponibile */ }
+        this._syncDock();
+      };
       const list0 = dock.querySelector(".alist");
       let y0 = null;
       list0.addEventListener("pointerdown", (e) => { y0 = e.target.closest?.(".alp") ? null : e.clientY; }); // nell'elenco si scorre
