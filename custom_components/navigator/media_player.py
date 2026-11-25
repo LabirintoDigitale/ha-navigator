@@ -64,6 +64,10 @@ class NaviHAPlayer(MediaPlayerEntity):
         self.async_on_remove(async_dispatcher_connect(self.hass, SIGNAL, _changed))
 
     @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {"naviha_id": self._pid}  # per riconoscere nel pannello il lettore di questo telefono
+
+    @property
     def _st(self) -> dict[str, Any]:
         return self._p.states.get(self._pid, {})
 

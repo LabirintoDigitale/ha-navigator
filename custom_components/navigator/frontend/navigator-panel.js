@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.2";
+const PANEL_VERSION = "1.14.3";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -8929,6 +8929,7 @@ class NavigatorPanel extends HTMLElement {
     return `<div class="grp"><h3>Add-on</h3>
       <div class="note">Aggiungono finestre alla mappa (per esempio un'immagine del meteo dal satellite). Si caricano da un file
         .zip con dentro <b>addon.json</b>; valgono per tutti i dispositivi. Tieni premuta una finestra per spostarla.</div>
+      ${this._playerDiagHtml()}
       ${list.length ? list.map((a) => `<div class="addrow">
         <div class="ai"><b>${esc(a.name)}</b>${a.version ? ` <span class="note">v${esc(a.version)}</span>` : ""}
           ${a.description ? `<div class="note">${esc(a.description)}</div>` : ""}
@@ -9063,6 +9064,16 @@ class NavigatorPanel extends HTMLElement {
     wrap.querySelectorAll("[data-addon-set]").forEach((el) => el.addEventListener("change", async () => {
       try { await this._addonCall({ where_id: el.dataset.addonSet, values: { [el.dataset.k]: el.value } }); }
       catch (err) { this._msg(err.message || String(err)); }
+    }));
+    // prova del lettore NaviHA senza Music Assistant: una radio pubblica (Rai Radio 1) direttamente al lettore
+    wrap.querySelectorAll("[data-ptest]").forEach((el) => el.addEventListener("click", () => {
+      this._hass.callService("media_player", "play_media", { entity_id: el.dataset.ptest,
+        media_content_id: "https://icestreaming.rai.it/1.mp3", media_content_type: "music" })
+        .then(() => this._msg("Comando mandato: dovresti sentire Rai Radio 1 fra qualche secondo"))
+        .catch((err) => this._msg(`Prova non riuscita: ${err.message || err}`));
+    }));
+    wrap.querySelectorAll("[data-pstop]").forEach((el) => el.addEventListener("click", () => {
+      this._hass.callService("media_player", "media_stop", { entity_id: el.dataset.pstop }).catch(() => { /* niente */ });
     }));
     wrap.querySelectorAll("[data-phone-route]").forEach((el) => el.addEventListener("change", () => {
       this._settings.callRouteBy = { ...this._phoneRouteBy(), [el.dataset.phoneRoute]: el.value };
@@ -9324,6 +9335,23 @@ class NavigatorPanel extends HTMLElement {
       }, { type: "navigator/player_subscribe", player_id: pid }))
       .then((u) => { this._playerUnsub = u; try { window.__navihaPlayer(A.playerState()); } catch (e) { /* niente */ } })
       .catch(() => { this._playerOn = false; }); // integrazione vecchia
+  }
+
+  // stato del lettore NaviHA di questo telefono (nelle impostazioni degli add-on), con una prova senza Music Assistant
+  _playerDiagHtml() {
+    const A = window.NaviHAApp;
+    if (typeof A?.playerId !== "function") return "";
+    let pid = "", link = null;
+    try { pid = A.playerId(); } catch (e) { return ""; }
+    try { link = typeof A.playerNative === "function" ? !!A.playerNative() : null; } catch (e) { link = null; }
+    const st = Object.values(this._hass?.states || {}).find((x) => x.attributes?.naviha_id === pid);
+    const STN = { idle: "pronto", playing: "in riproduzione", paused: "in pausa", buffering: "in caricamento", unavailable: "non disponibile" };
+    return `<div class="note" style="margin:8px 0;padding:8px;border:1px solid rgba(255,255,255,.15);border-radius:10px">
+      <b>📻 Lettore NaviHA di questo telefono</b><br>
+      In Home Assistant: ${st ? `<code>${esc(st.entity_id)}</code> · ${esc(STN[st.state] || st.state)}` : "non ancora registrato"}<br>
+      Collegamento dell'app: ${link == null ? "dalla pagina (app vecchia)" : link ? "attivo ✔" : "non collegato ✖"}
+      ${st ? `<div class="row" style="gap:6px;margin-top:6px"><button data-ptest="${esc(st.entity_id)}">▶ Prova con una radio</button>
+        <button data-pstop="${esc(st.entity_id)}">⏹ Ferma</button></div>` : ""}</div>`;
   }
 
   // ---------------------------------------------------------------- add-on Telefono (solo nell'app NaviHA)
