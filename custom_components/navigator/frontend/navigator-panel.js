@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.93";
+const PANEL_VERSION = "1.13.94";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1728,7 +1728,7 @@ const STYLE = `
   .addwin.botmode .aimg img { border-radius: 10px; }
   .addwin .aph { box-sizing: border-box; padding: 8px; display: flex; flex-direction: column; gap: 8px; justify-content: center;
     color: #fff; font: 600 14px sans-serif; text-align: center; }
-  .addock .addwin.phwin .aph { width: auto !important; min-width: 220px; }
+  .addock .addwin.phwin .aph { min-width: 0; box-sizing: border-box; }
   .aph .phst { opacity: .85; font-size: 13px; }
   .aph .phst.ring { color: #7ee08a; animation: phbl 1s infinite; }
   .aph .phst.on { color: #7ee08a; }
@@ -9622,6 +9622,8 @@ class NavigatorPanel extends HTMLElement {
         im.style.setProperty("max-width", "100%", "important");
         this._addonMarker(w, W0 / H0);
       }
+      this._phoneFit(w, Math.max(120, list.clientWidth), null); // finestra Telefono: larga come le altre
+
     } else {
       bot.classList.add("docked");
       // tutta l'altezza a sinistra: da sotto la barra verde fino al fondo della barra in basso; le scritte della barra
@@ -9635,14 +9637,23 @@ class NavigatorPanel extends HTMLElement {
       list.style.maxHeight = "";
       const H = Math.max(80, y1 - y0 - 8); // altezza dell'immagine (dentro i bordi del riquadro)
       const w = wins[k], im = w?.querySelector(".aimg img");
+      // tutti gli add-on del blocco larghi uguale (passando dall'uno all'altro il riquadro non cambia): la larghezza del
+      // più largo alla stessa altezza, al massimo il 55% dello schermo; gli altri si tagliano sopra e sotto
+      const ar = (x) => {
+        const i = x.querySelector(".aimg img");
+        if (!i) return 0;
+        const W0 = +i.dataset.w || parseFloat(i.style.width) || 240, H0 = +i.dataset.h || parseFloat(i.style.height) || 160;
+        return W0 / H0;
+      };
+      const Wd = Math.round(Math.min(H * Math.max(1.4, ...wins.map(ar)), wrap.clientWidth * 0.55));
+      this._phoneFit(w, Wd, H);
       if (im) {
         if (!im.dataset.w) { im.dataset.w = parseFloat(im.style.width) || 240; im.dataset.h = parseFloat(im.style.height) || 160; }
         const W0 = +im.dataset.w, H0 = +im.dataset.h;
         w.style.width = "";
         // l'immagine riempie tutto il riquadro: alta quanto lo spazio, larga in proporzione ma al massimo il 55% dello
         // schermo (oltre si taglia ai lati, al centro resta quello che conta)
-        const iw = Math.min((H * W0) / H0, wrap.clientWidth * 0.55);
-        im.style.setProperty("height", `${Math.round(H)}px`, "important"); im.style.setProperty("width", `${Math.round(iw)}px`, "important");
+        im.style.setProperty("height", `${Math.round(H)}px`, "important"); im.style.setProperty("width", `${Wd}px`, "important");
         this._addonMarker(w, W0 / H0);
       }
       dock.style.height = `${H + 8}px`;
@@ -9665,7 +9676,21 @@ class NavigatorPanel extends HTMLElement {
     me.style.left = `${x.toFixed(1)}px`; me.style.top = `${y.toFixed(1)}px`;
   }
 
+  // finestra Telefono nel blocco della guida: larga come gli altri add-on (alta come loro in orizzontale)
+  _phoneFit(w, W, H) {
+    const ph = w?.querySelector(".aph");
+    if (!ph) return;
+    if (ph.dataset.w0 == null) ph.dataset.w0 = ph.style.width;
+    ph.style.setProperty("width", `${W}px`, "important");
+    if (H) { ph.style.height = `${H}px`; ph.style.overflowY = "auto"; } else { ph.style.height = ""; ph.style.overflowY = ""; }
+  }
+
   _addonSize(w) {
+    const ph = w.querySelector(".aph");
+    if (ph?.dataset.w0 != null) {
+      ph.style.removeProperty("width"); ph.style.width = ph.dataset.w0; ph.style.height = ""; ph.style.overflowY = "";
+      delete ph.dataset.w0;
+    }
     if (w.classList.contains("botmode")) {
       w.classList.remove("botmode");
       w.querySelector(".aov")?.remove();
