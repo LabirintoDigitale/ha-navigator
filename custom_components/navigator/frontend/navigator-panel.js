@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.24";
+const PANEL_VERSION = "1.14.25";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1856,14 +1856,17 @@ const STYLE = `
   .addmenu { position: absolute; z-index: 1008; width: 220px; background: rgba(24,24,24,.95); border-radius: 12px; padding: 6px;
     box-shadow: 0 4px 16px rgba(0,0,0,.5); display: flex; flex-direction: column; gap: 4px; }
   .addmenu .mt { color: #ddd; font: 600 12px sans-serif; padding: 4px 6px; }
-  .addmenu button[data-nav] { font-weight: 700; margin-bottom: 4px; transition: box-shadow .3s, background .3s, color .3s; }
-  .addmenu button[data-nav].on { color: #fff3dc; text-shadow: 0 1px 2px rgba(0,0,0,.45);
-    box-shadow: 0 0 10px 0 rgba(255,190,80,.22), inset 0 0 0 1px rgba(255,220,160,.18);
+  .addmenu button[data-nav] { font-weight: 700; margin-bottom: 4px; display: flex; align-items: center; gap: 12px; }
+  /* tondo con la lampadina: acceso (luce calda dietro un vetro smerigliato, come i tasti all'arrivo) = visibile */
+  .addmenu button[data-nav] .bulb { width: 46px; height: 46px; border-radius: 50%; flex: none; display: flex; align-items: center;
+    justify-content: center; background: rgba(255,255,255,.1); color: rgba(255,255,255,.6); transition: box-shadow .3s, background .3s; }
+  .addmenu button[data-nav] .bulb svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+  .addmenu button[data-nav].on .bulb { color: #3a2500; box-shadow: 0 0 18px 2px rgba(255,190,80,.55), 0 1px 6px rgba(0,0,0,.4);
     background:
       url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .38 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"),
-      radial-gradient(circle at 50% 40%, rgba(255,214,140,.55) 0, rgba(214,150,70,.38) 45%, rgba(90,60,25,.45) 100%); }
-  .addmenu button.out { margin: 8px auto 0; display: block; width: auto; padding: 4px 14px; text-align: center; background: none;
-    border: 1px solid rgba(255,255,255,.25); border-radius: 999px; font: 500 13px sans-serif; color: rgba(255,255,255,.8); }
+      radial-gradient(circle at 50% 40%, #fff6d8 0, #ffd77a 22%, #f5a83a 48%, #8a5a1c 78%, #3c2a12 100%); }
+  .addmenu button.out { margin-top: 6px; display: flex; align-items: center; justify-content: center; gap: 8px; text-align: center;
+    background: rgba(255,255,255,.16); font-weight: 700; }
   .addmenu button[data-nav]:disabled { opacity: 1; cursor: default; }
   .addmenu button { text-align: left; background: rgba(255,255,255,.08); color: #fff; border: none; border-radius: 8px;
     padding: 10px; font: 14px sans-serif; cursor: pointer; }
@@ -9775,12 +9778,21 @@ class NavigatorPanel extends HTMLElement {
     // in cima "Navigator" (la croce di ora e zoom): fuori dalla guida si mostra o si nasconde (resta ricordato)
     // acceso (luce, come i tasti all'arrivo) = visibile, spento = nascosto; in guida sempre acceso
     const nav = `<button data-nav class="${guida || !this._settings.hideCross ? "on" : ""}" ${guida ? "disabled" : ""}
-      title="${guida ? "In guida è sempre visibile" : "Mostra o nascondi Navigator"}">🧭 Navigator</button>`;
+      title="${guida ? "In guida è sempre visibile" : "Mostra o nascondi Navigator"}"><span class="bulb">${arrSvg("lampadina")}</span><span>Navigator</span></button>`;
     menu.innerHTML = nav + (list.length
       ? `<div class="mt">🧩 Mostra sulla mappa</div>${list.map((a) => `<button data-a="${esc(a.id)}">${esc(a.window.title || a.name)}${a.enabled ? "" : " <small>(spento)</small>"}</button>`).join("")}`
       : `<div class="mt">🧩 ${(this._addons || []).length ? "Tutti gli add-on sono già sulla mappa" : "Nessun add-on: aggiungili da ⚙ → Add-on"}</div>`);
-    menu.insertAdjacentHTML("beforeend", `<button data-out class="out" title="Chiudi il menu">Chiudi</button>`);
-    menu.querySelector("[data-out]").addEventListener("click", (e) => { e.stopPropagation(); menu.remove(); });
+    // in fondo: esce dall'app NaviHA (come il tasto Indietro → Esci), solo nell'app
+    if (window.NaviHAApp?.confirmExit || window.NaviHAApp?.exit) {
+      menu.insertAdjacentHTML("beforeend", `<button data-out class="out" title="Esci da NaviHA"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v8"/><path d="M6.6 6.6a8 8 0 1 0 10.8 0"/></svg> Esci da NaviHA</button>`);
+      menu.querySelector("[data-out]").addEventListener("click", (e) => {
+        e.stopPropagation(); menu.remove();
+        try {
+          if (window.NaviHAApp.confirmExit) window.NaviHAApp.confirmExit();
+          else if (window.confirm("Vuoi uscire da NaviHA?")) window.NaviHAApp.exit();
+        } catch (err) { /* ponte non disponibile */ }
+      });
+    }
     menu.querySelector("[data-nav]")?.addEventListener("click", (e) => {
       e.stopPropagation();
       if (guida) return;
