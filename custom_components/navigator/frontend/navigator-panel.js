@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.92";
+const PANEL_VERSION = "1.13.93";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -8941,6 +8941,7 @@ class NavigatorPanel extends HTMLElement {
             }
             return `<label class="note" style="display:block;margin-top:4px">${esc(st.label)}<input data-addon-set="${esc(a.id)}" data-k="${esc(st.key)}" value="${esc(val)}" style="display:block;max-width:100%"></label>`;
           }).join("")}
+          ${a.window?.kind === "phone" ? this._phoneDevHtml() : ""}
           ${a.background ? (() => {
             const u = a.background.includes("{ma_ingress}") ? (this._maIng?.url || "Music Assistant (in preparazione)")
               : this._addonFill(a.background, this._addonVarsA(a)).trim();
@@ -9052,6 +9053,10 @@ class NavigatorPanel extends HTMLElement {
     wrap.querySelectorAll("[data-addon-set]").forEach((el) => el.addEventListener("change", async () => {
       try { await this._addonCall({ where_id: el.dataset.addonSet, values: { [el.dataset.k]: el.value } }); }
       catch (err) { this._msg(err.message || String(err)); }
+    }));
+    wrap.querySelectorAll("[data-phone-route]").forEach((el) => el.addEventListener("change", () => {
+      try { window.NaviHAApp.phoneSetRoute(el.value); this._msg("Audio delle chiamate: " + el.selectedOptions[0].textContent.trim()); }
+      catch (err) { this._msg("Serve l'app NaviHA aggiornata"); }
     }));
     // elenco dei preferiti (add-on Telefono): si salva a ogni modifica come righe Nome=numero
     wrap.querySelectorAll(".ctlist[data-ct]").forEach((box) => {
@@ -9306,6 +9311,17 @@ class NavigatorPanel extends HTMLElement {
       const num = (m.length > 1 ? m.slice(1).join("=") : m[0]).replace(/[^0-9+*#]/g, "");
       return num ? { name: (m.length > 1 ? m[0] : "").trim() || num, num } : null;
     }).filter(Boolean)).slice(0, 8);
+  }
+
+  // impostazioni dell'add-on Telefono (solo nell'app): dispositivo dove va l'audio delle chiamate, ogni volta
+  _phoneDevHtml() {
+    let d = null;
+    try { d = typeof window.NaviHAApp?.phoneDevices === "function" ? JSON.parse(window.NaviHAApp.phoneDevices()) : null; } catch (e) { d = null; }
+    if (!d) return "";
+    const IC = { auto: "🔁", earpiece: "📱", speaker: "🔈", bluetooth: "🎧" };
+    return `<label class="note" style="display:block;margin-top:6px">🔊 Audio delle chiamate (su questo telefono)<select data-phone-route style="display:block;max-width:100%">${
+      d.list.map((o) => `<option value="${esc(o.id)}" ${o.id === d.cur ? "selected" : ""}>${IC[o.type] || ""} ${esc(o.name)}</option>`).join("")}</select></label>${
+      d.bt ? "" : `<div class="note">Per vedere i dispositivi Bluetooth concedi a NaviHA il permesso «Dispositivi nelle vicinanze».</div>`}`;
   }
 
   _phoneWin(a, el) {
