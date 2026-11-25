@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.18";
+const PANEL_VERSION = "1.14.19";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -7159,7 +7159,7 @@ class NavigatorPanel extends HTMLElement {
       const el = this._editSel;
       if (!el) return;
       const key = el.id.startsWith("addon-") ? `addon:${el.id.slice(6)}` : el.id;
-      (this._layout ||= {})[key] = { x: el.offsetLeft / wrap.clientWidth, y: el.offsetTop / wrap.clientHeight };
+      (this._layout ||= {})[key] = this._posOf(el.offsetLeft, el.offsetTop, el, wrap);
       this._saveLayout();
     };
     wrap.addEventListener("pointerup", up, true);
@@ -7271,9 +7271,25 @@ class NavigatorPanel extends HTMLElement {
       return;
     }
     el.classList.add("moved");
-    const x = Math.max(4, Math.min(wrap.clientWidth - el.offsetWidth - 4, pos.x * wrap.clientWidth));
-    const y = Math.max(4, Math.min(wrap.clientHeight - el.offsetHeight - 4, pos.y * wrap.clientHeight));
+    const [px, py] = this._posXY(pos, el, wrap);
+    const x = Math.max(4, Math.min(wrap.clientWidth - el.offsetWidth - 4, px));
+    const y = Math.max(4, Math.min(wrap.clientHeight - el.offsetHeight - 4, py));
     el.style.left = `${x}px`; el.style.top = `${y}px`;
+  }
+
+  // posizione salvata agganciata al bordo più vicino, in pixel (sinistra/destra, sopra/sotto): cambiando l'altezza della
+  // mappa (schermo intero, pannello sotto aperto o chiuso) un riquadro in alto resta in alto alla stessa distanza, uno in
+  // basso resta in basso. Prima era una frazione dello schermo e il riquadro "scivolava" da solo
+  _posOf(x, y, el, wrap) {
+    const W = wrap.clientWidth, H = wrap.clientHeight, w = el.offsetWidth, h = el.offsetHeight;
+    const right = x + w / 2 > W / 2, bottom = y + h / 2 > H / 2;
+    return { ax: right ? "r" : "l", ay: bottom ? "b" : "t", dx: Math.round(right ? W - x - w : x), dy: Math.round(bottom ? H - y - h : y) };
+  }
+
+  _posXY(pos, el, wrap) {
+    const W = wrap.clientWidth, H = wrap.clientHeight;
+    if (pos.dx == null) return [pos.x * W, pos.y * H]; // posizioni salvate prima (frazioni)
+    return [pos.ax === "r" ? W - el.offsetWidth - pos.dx : pos.dx, pos.ay === "b" ? H - el.offsetHeight - pos.dy : pos.dy];
   }
 
   // posto predefinito del riquadro velocità: a sinistra, sotto la barra verde
@@ -7342,7 +7358,7 @@ class NavigatorPanel extends HTMLElement {
       this._ghostEnd(el, gh); gh = null;
       this._dragging = false;
       this._longAt = Date.now();
-      (this._layout ||= {})[key] = { x: (parseFloat(el.style.left) || 0) / wrap.clientWidth, y: (parseFloat(el.style.top) || 0) / wrap.clientHeight };
+      (this._layout ||= {})[key] = this._posOf(parseFloat(el.style.left) || 0, parseFloat(el.style.top) || 0, el, wrap);
       this._saveLayout();
     };
     el.addEventListener("pointerup", end);
@@ -9926,7 +9942,7 @@ class NavigatorPanel extends HTMLElement {
     el.classList.add("moved"); el.style.right = "auto";
     el.style.left = `${x}px`; el.style.top = `${y}px`;
     const key = `addon:${el.id.slice(6)}`;
-    if (this._layout?.[key]) { this._layout[key] = { x: x / W, y: y / H }; this._saveLayout(); }
+    // solo spostata per vederla: la posizione scelta resta quella (su uno schermo più grande torna lì)
   }
 
   _placeAddons() {
