@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.1";
+const PANEL_VERSION = "1.14.2";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -9305,6 +9305,7 @@ class NavigatorPanel extends HTMLElement {
   _playerInit() {
     const A = window.NaviHAApp;
     if (this._playerOn || typeof A?.playerId !== "function" || typeof A.mediaCmd !== "function" || !this._hass?.connection) return;
+    if (typeof A.playerNative === "function") return; // app nuova: si collega a Home Assistant da sola (anche in secondo piano)
     this._playerOn = true;
     let pid = "";
     try { pid = A.playerId(); } catch (e) { this._playerOn = false; return; }
