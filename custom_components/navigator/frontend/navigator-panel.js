@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.21";
+const PANEL_VERSION = "1.14.22";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1856,10 +1856,11 @@ const STYLE = `
   .addmenu { position: absolute; z-index: 1008; width: 220px; background: rgba(24,24,24,.95); border-radius: 12px; padding: 6px;
     box-shadow: 0 4px 16px rgba(0,0,0,.5); display: flex; flex-direction: column; gap: 4px; }
   .addmenu .mt { color: #ddd; font: 600 12px sans-serif; padding: 4px 6px; }
-  .addmenu button[data-nav] { font-weight: 700; margin-bottom: 4px; }
+  .addmenu button[data-nav] { font-weight: 700; margin-bottom: 4px; transition: box-shadow .3s, background .3s, color .3s; }
+  .addmenu button[data-nav].on { color: #3a2500; box-shadow: 0 0 14px 2px rgba(255,190,80,.55), 0 1px 6px rgba(0,0,0,.4);
+    background: radial-gradient(circle at 50% 40%, #fff6d8 0, #ffd77a 25%, #f5a83a 60%, #8a5a1c 100%); }
   .addmenu button.out { margin-top: 6px; text-align: center; background: rgba(255,255,255,.16); font-weight: 700; }
-  .addmenu button[data-nav] small { display: block; font-weight: 400; opacity: .75; }
-  .addmenu button[data-nav]:disabled { opacity: .6; }
+  .addmenu button[data-nav]:disabled { opacity: 1; cursor: default; }
   .addmenu button { text-align: left; background: rgba(255,255,255,.08); color: #fff; border: none; border-radius: 8px;
     padding: 10px; font: 14px sans-serif; cursor: pointer; }
   .addmenu small { opacity: .6; }
@@ -9743,8 +9744,9 @@ class NavigatorPanel extends HTMLElement {
     menu.id = "addmenu"; menu.className = "addmenu";
     const guida = !!(this._nav && this._isGuida());
     // in cima "Navigator" (la croce di ora e zoom): fuori dalla guida si mostra o si nasconde (resta ricordato)
-    const nav = `<button data-nav class="${this._settings.hideCross ? "" : "on"}" ${guida ? "disabled" : ""}>🧭 Navigator <small>${
-      guida ? "(sempre visibile in guida)" : this._settings.hideCross ? "(nascosto: tocca per mostrarlo)" : "(visibile: tocca per nasconderlo)"}</small></button>`;
+    // acceso (luce, come i tasti all'arrivo) = visibile, spento = nascosto; in guida sempre acceso
+    const nav = `<button data-nav class="${guida || !this._settings.hideCross ? "on" : ""}" ${guida ? "disabled" : ""}
+      title="${guida ? "In guida è sempre visibile" : "Mostra o nascondi Navigator"}">🧭 Navigator</button>`;
     menu.innerHTML = nav + (list.length
       ? `<div class="mt">🧩 Mostra sulla mappa</div>${list.map((a) => `<button data-a="${esc(a.id)}">${esc(a.window.title || a.name)}${a.enabled ? "" : " <small>(spento)</small>"}</button>`).join("")}`
       : `<div class="mt">🧩 ${(this._addons || []).length ? "Tutti gli add-on sono già sulla mappa" : "Nessun add-on: aggiungili da ⚙ → Add-on"}</div>`);
