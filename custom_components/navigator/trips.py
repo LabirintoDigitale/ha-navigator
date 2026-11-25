@@ -328,7 +328,7 @@ def _addon_buttons(lst: Any) -> list[dict]:
 def _addon_settings(lst: Any) -> list[dict]:
     """Impostazioni scelte da chi usa l'add-on (es. quale lettore): {"key", "label", "type": "entity"|"text", "domain"}."""
     out = []
-    for st in (lst if isinstance(lst, list) else [])[:6]:
+    for st in (lst if isinstance(lst, list) else [])[:12]:
         if isinstance(st, dict) and isinstance(st.get("key"), str) and _KEY.match(st["key"]):
             out.append({"key": st["key"], "label": str(st.get("label") or st["key"])[:40],
                         "type": "entity" if st.get("type") == "entity" else "text",

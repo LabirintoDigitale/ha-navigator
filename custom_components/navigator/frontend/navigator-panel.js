@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.89";
+const PANEL_VERSION = "1.13.90";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1741,7 +1741,12 @@ const STYLE = `
   .aph .phg { background: #1e9e3a; animation: phpu 1.2s infinite; }
   .aph .phr { background: #d93025; }
   @keyframes phpu { 50% { box-shadow: 0 0 0 10px rgba(30,158,58,.25); } }
-  .aph .phfav { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; }
+  .aph .phfav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .aph .phpair { border: none; border-radius: 16px; background: #1a73e8; color: #fff; padding: 16px 12px; display: flex;
+    flex-direction: column; align-items: center; gap: 6px; cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,.4); }
+  .aph .phpair span { font-size: 34px; }
+  .aph .phpair b { font: 700 20px sans-serif; }
+  .aph .phpair small { font: 400 13px sans-serif; opacity: .9; line-height: 1.3; }
   .aph .phfav button { border: none; border-radius: 12px; background: rgba(255,255,255,.1); color: #fff; font: 600 14px sans-serif;
     padding: 8px 6px; display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; overflow: hidden;
     text-overflow: ellipsis; }
@@ -9251,11 +9256,18 @@ class NavigatorPanel extends HTMLElement {
 
   // preferiti dall'impostazione "preferiti": "Mamma=+39 333 1234567, Ufficio=0437 123456" (anche ; o a capo)
   _phoneFavs(a) {
-    return String(a.values?.preferiti || "").split(/[,;\n]+/).map((x) => {
+    // 4 preferiti con nome e numero separati (impostazioni nome1/numero1 … nome4/numero4), poi eventuali altri scritti
+    // in "preferiti" come Nome=numero
+    const v = a.values || {}, out = [];
+    for (let i = 1; i <= 4; i++) {
+      const num = String(v[`numero${i}`] || "").replace(/[^0-9+*#]/g, "");
+      if (num) out.push({ name: String(v[`nome${i}`] || "").trim() || num, num });
+    }
+    return out.concat(String(v.preferiti || "").split(/[,;\n]+/).map((x) => {
       const m = x.split("=");
       const num = (m.length > 1 ? m.slice(1).join("=") : m[0]).replace(/[^0-9+*#]/g, "");
       return num ? { name: (m.length > 1 ? m[0] : "").trim() || num, num } : null;
-    }).filter(Boolean).slice(0, 8);
+    }).filter(Boolean)).slice(0, 8);
   }
 
   _phoneWin(a, el) {
@@ -9311,7 +9323,10 @@ class NavigatorPanel extends HTMLElement {
         el._phOpen ? `<div class="phrt">${routes.map((r) => `<button data-ph="route" data-num="${esc(r.id)}" class="${r.on ? "on" : ""}">${rIc(r)} ${esc(r.name)}</button>`).join("")}</div>` : ""}`
         : st.canCompanion && !st.companion && st.state !== "idle" ? `<button class="phset" data-set="companion">🔊 Scegliere l'audio: abbina NaviHA</button>` : "";
       const pair = st.canCompanion && !st.companion ? `<button class="phset" data-set="companion">🔊 Audio delle chiamate: abbina</button>` : "";
-      if (st.state === "ringing") {
+      if (pair && st.state === "idle") {
+        // prima volta: solo il tasto grande per abbinare NaviHA (permesso per le chiamate e l'audio); poi la finestra normale
+        html = `<button class="phpair" data-set="companion"><span>🔊📞</span><b>Abbina NaviHA</b><small>Tocca e scegli un dispositivo Bluetooth (anche l'auto): serve una volta sola per le chiamate e l'audio</small></button>`;
+      } else if (st.state === "ringing") {
         html = `<div class="phst ring">Chiamata in arrivo</div><div class="phwho">${esc(who || "Numero sconosciuto")}</div>
           <div class="phbig"><button class="phg" data-ph="answer" title="Rispondi">${ic(false)}</button><button class="phr" data-ph="end" title="Rifiuta">${ic(true)}</button></div>${audio}${names}`;
       } else if (st.state === "offhook") {
@@ -9321,7 +9336,7 @@ class NavigatorPanel extends HTMLElement {
       } else {
         const favs = this._phoneFavs(a);
         html = `${favs.length ? `<div class="phfav">${favs.map((f) => `<button data-ph="call" data-num="${esc(f.num)}" title="${esc(f.num)}"><span>${ic(false)}</span>${esc(f.name)}</button>`).join("")}</div>`
-          : `<div class="phst">Nessun preferito: scrivili nelle impostazioni dell'add-on (Nome=numero, …)</div>`}${perm}${pair}`;
+          : `<div class="phst">Nessun preferito: scrivi nomi e numeri nelle impostazioni dell'add-on</div>`}${perm}`;
         el._phOpen = false;
       }
     }
