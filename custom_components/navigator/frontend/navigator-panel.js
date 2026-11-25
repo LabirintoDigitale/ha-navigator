@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.25";
+const PANEL_VERSION = "1.14.26";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -2201,6 +2201,14 @@ class NavigatorPanel extends HTMLElement {
     try { view0 = JSON.parse(localStorage.getItem(`${STORE_KEY}-view`) || "null"); } catch (e) { view0 = null; }
     const v0ok = view0 && Array.isArray(view0.c) && Number.isFinite(view0.c[0]) && Number.isFinite(view0.z);
     this._map = L.map($("map"), { zoomControl: false, attributionControl: true }).setView(v0ok ? view0.c : home, v0ok ? view0.z : 12);
+    // inquadratura ripresa: per qualche secondo niente inquadrature automatiche (percorso, posizione), finché non tocchi
+    if (v0ok) {
+      this._keepViewUntil = Date.now() + 10000;
+      this.shadowRoot.addEventListener("pointerdown", () => { this._keepViewUntil = 0; }, { once: true, capture: true });
+    }
+    // chiudendo o mettendo in secondo piano: l'inquadratura si salva subito (senza aspettare)
+    document.addEventListener("visibilitychange", () => { if (document.hidden) this._saveViewNow(); });
+    window.addEventListener("pagehide", () => this._saveViewNow());
     this._map.on("moveend", () => {
       if (this._nav) return;
       clearTimeout(this._viewT);
@@ -2270,6 +2278,7 @@ class NavigatorPanel extends HTMLElement {
       brand.addEventListener("click", () => {
         try {
           // app recente: dialogo nativo col titolo "Navigator" (il confirm del WebView mostrava l'URL)
+          this._saveViewNow(); // l'inquadratura resta per la prossima apertura
           if (window.NaviHAApp?.confirmExit) { window.NaviHAApp.confirmExit(); return; }
           // app più vecchia: confirm del WebView come ripiego
           if (window.NaviHAApp?.exit && window.confirm("Vuoi uscire da NaviHA?")) window.NaviHAApp.exit();
@@ -3101,6 +3110,7 @@ class NavigatorPanel extends HTMLElement {
   // centra la mappa su un punto (zoom alla Leaflet). In 3D si sposta la vista 3D: la mappa 2D è nascosta e il suo
   // spostamento non arrivava alla 3D ("Centra" non faceva niente); a fine movimento la 2D la segue da sola
   _flyTo(lat, lon, z = 15, behind = false) {
+    if (!this._nav && Date.now() < (this._keepViewUntil || 0)) return; // appena riaperto: resta l'inquadratura di prima
     const g = this._g3;
     if (this._3d && g && this._g3ok) {
       // durante il volo la sincronizzazione con la 2D (ancora sul punto di prima) non deve riportarla indietro
@@ -9459,6 +9469,22 @@ class NavigatorPanel extends HTMLElement {
 
   // add-on chiusi col tocco: ricordati anche alla prossima apertura (riaperti dal menu dei km/h); e nel blocco della
   // guida l'add-on che si vedeva
+  // inquadratura attuale salvata subito (mappa piatta e, se c'è, vista 3D), fuori dalla guida
+  _saveViewNow() {
+    if (this._nav || !this._map) return;
+    try {
+      const v = JSON.parse(localStorage.getItem(`${STORE_KEY}-view`) || "{}") || {};
+      const c = this._map.getCenter();
+      Object.assign(v, { c: [+c.lat.toFixed(6), +c.lng.toFixed(6)], z: this._map.getZoom(), full: !!this._full });
+      const g = this._g3;
+      if (this._3d && g && this._g3ok) {
+        const c3 = g.getCenter();
+        Object.assign(v, { c3: [+c3.lng.toFixed(6), +c3.lat.toFixed(6)], z3: +g.getZoom().toFixed(2), p3: Math.round(g.getPitch()), b3: Math.round(g.getBearing()) });
+      }
+      localStorage.setItem(`${STORE_KEY}-view`, JSON.stringify(v));
+    } catch (e) { /* storage non disponibile */ }
+  }
+
   _closedSet() {
     if (this._addonClosed) return this._addonClosed;
     let ids = [];
@@ -9787,6 +9813,7 @@ class NavigatorPanel extends HTMLElement {
       menu.insertAdjacentHTML("beforeend", `<button data-out class="out" title="Esci da NaviHA"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v8"/><path d="M6.6 6.6a8 8 0 1 0 10.8 0"/></svg> Esci da NaviHA</button>`);
       menu.querySelector("[data-out]").addEventListener("click", (e) => {
         e.stopPropagation(); menu.remove();
+        this._saveViewNow();
         try {
           if (window.NaviHAApp.confirmExit) window.NaviHAApp.confirmExit();
           else if (window.confirm("Vuoi uscire da NaviHA?")) window.NaviHAApp.exit();
@@ -11145,6 +11172,7 @@ class NavigatorPanel extends HTMLElement {
   }
 
   _fit() {
+    if (!this._nav && Date.now() < (this._keepViewUntil || 0)) return; // appena riaperto: resta l'inquadratura di prima
     const pts = [];
     if (this._result) pts.push(...this._result.routes[this._sel].shape);
     else this._points.forEach((p) => p && pts.push([p.lat, p.lon]));
