@@ -52,7 +52,8 @@ class Players:
 
     async def register(self, pid: str, name: str) -> None:
         # stesso telefono registrato due volte (vecchia app: telefono e auto insieme): via il doppione spento
-        dup = [k for k, v in self.players.items() if k != pid and v.get("name") == name and not self.online(k)]
+        # (stesso nome = stesso telefono: resta solo quello che si è appena registrato)
+        dup = [k for k, v in self.players.items() if k != pid and v.get("name") == name]
         if dup:
             from homeassistant.helpers import entity_registry as er
 
