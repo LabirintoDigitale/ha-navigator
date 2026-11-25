@@ -35,7 +35,7 @@ def async_setup(hass: HomeAssistant) -> None:
     for handler in (ws_info, ws_search, ws_reverse, ws_route, ws_place_save, ws_place_delete, ws_recent_clear, ws_nearby,
                     ws_poi_tile, ws_live, ws_weather, ws_trip_save, ws_trips, ws_trip, ws_trip_delete, ws_garage,
                     ws_garage_save, ws_trip_start, ws_trip_append, ws_trip_finish, ws_poi_tiles, ws_poi_info, ws_live_all, ws_garage_select, ws_cameras_area, ws_imagery, ws_layout, ws_speed_limit, ws_addons, ws_presence, ws_days, ws_day, ws_day_delete,
-                    ws_player_register, ws_player_subscribe, ws_player_state):
+                    ws_player_register, ws_player_subscribe, ws_player_state, ws_playlists):
         websocket_api.async_register_command(hass, handler)
     hass.data[DATA_WS_REGISTERED] = True
 
@@ -739,3 +739,71 @@ def ws_player_state(hass: HomeAssistant, connection: websocket_api.ActiveConnect
     st = {k: msg[k] for k in ("state", "volume", "position", "duration") if k in msg}
     _data(hass).players.set_state(msg["player_id"], st)
     connection.send_result(msg["id"])
+
+
+# ---------------------------------------------------------------- playlist non vuote (finestra Musica)
+# Molte playlist possono risultare vuote (es. file su un disco di rete spento): Navigator le conta in sottofondo,
+# sfogliando il lettore come fa il pannello Media, e il pannello mostra solo quelle con almeno 2 brani. Il conteggio
+# resta in memoria per 6 ore (o finché non si chiede di rifarlo).
+_PL_TTL = 6 * 3600
+
+
+async def _count_playlists(hass: HomeAssistant, entity_id: str) -> list[dict]:
+    import asyncio
+    import time as _t
+
+    from homeassistant.components.media_player import DATA_COMPONENT
+
+    player = hass.data[DATA_COMPONENT].get_entity(entity_id)
+    if player is None:
+        raise NavigatorError("lettore non trovato")
+    root = await player.async_browse_media()
+    node = next((c for c in (root.children or []) if "playlist" in (c.title or "").lower()), None)
+    if node is None:
+        raise NavigatorError("nessuna cartella Playlist nel lettore")
+    folder = await player.async_browse_media(node.media_content_type, node.media_content_id)
+    sem = asyncio.Semaphore(4)
+
+    async def count(c) -> dict:
+        async with sem:
+            try:
+                n = len((await asyncio.wait_for(
+                    player.async_browse_media(c.media_content_type, c.media_content_id), 25)).children or [])
+            except Exception:  # noqa: BLE001 - playlist non leggibile (es. disco di rete spento): vuota
+                n = 0
+        return {"id": c.media_content_id, "title": c.title, "count": n}
+
+    out = await asyncio.gather(*(count(c) for c in (folder.children or [])[:400]))
+    hass.data.setdefault("navigator_playlists", {})[entity_id] = {"t": _t.time(), "items": out}
+    return out
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "navigator/playlists",
+    vol.Required("entity_id"): str,
+    vol.Optional("refresh", default=False): bool,
+})
+@websocket_api.async_response
+async def ws_playlists(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    import asyncio
+    import time as _t
+
+    cache = hass.data.setdefault("navigator_playlists", {})
+    busy = hass.data.setdefault("navigator_playlists_busy", {})
+    eid = msg["entity_id"]
+    c = cache.get(eid)
+    if c and not msg["refresh"] and _t.time() - c["t"] < _PL_TTL:
+        items = c["items"]
+    else:
+        task = busy.get(eid)
+        if task is None or task.done():
+            task = busy[eid] = hass.async_create_task(_count_playlists(hass, eid))
+        try:
+            items = await asyncio.shield(task)
+        except NavigatorError as err:
+            connection.send_error(msg["id"], "navigator_error", str(err))
+            return
+        except Exception as err:  # noqa: BLE001
+            connection.send_error(msg["id"], "navigator_error", f"conteggio non riuscito: {err}")
+            return
+    connection.send_result(msg["id"], {"items": items, "ok": [i["id"] for i in items if i["count"] >= 2]})

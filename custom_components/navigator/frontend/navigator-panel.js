@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.9";
+const PANEL_VERSION = "1.14.10";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -8923,6 +8923,7 @@ class NavigatorPanel extends HTMLElement {
     try { this._addons = (await this._hass.callWS({ type: "navigator/addons" })).addons || []; }
     catch (e) { this._addons = []; } // integrazione vecchia
     this._renderAddons();
+    setTimeout(() => this._plWarm(), 4000); // playlist non vuote contate in anticipo
   }
 
   async _addonCall(msg) {
@@ -10055,6 +10056,35 @@ class NavigatorPanel extends HTMLElement {
     el._loadT = setTimeout(() => this._addonLoading(el, null), 45000);
   }
 
+  // playlist con almeno 2 brani per un lettore: chieste a Navigator (che le conta e le ricorda per 6 ore); null se
+  // non disponibile (integrazione vecchia o lettore che non si sfoglia: si mostrano tutte)
+  async _plOk(ent, wait = true) {
+    this._plc ||= {};
+    const c = this._plc[ent];
+    if (c?.set && Date.now() - c.t < 3600e3) return c.set;
+    if (!c?.p) {
+      const p = this._hass.callWS({ type: "navigator/playlists", entity_id: ent })
+        .then((r) => { this._plc[ent] = { t: Date.now(), set: (r.ok || []).length ? new Set(r.ok) : null }; /* nessuna "piena": meglio mostrarle tutte */ this._alog?.(`playlist con almeno 2 brani: ${(r.ok || []).length} su ${(r.items || []).length}`); return this._plc[ent].set; })
+        .catch((e) => { this._plc[ent] = null; this._alog?.(`conteggio playlist non riuscito: ${e.message || e}`); return null; });
+      this._plc[ent] = { ...(c || {}), p };
+    }
+    if (!wait) return null;
+    // la prima volta il conteggio può durare: al massimo 8 s, poi l'elenco esce intero
+    return Promise.race([this._plc[ent].p, new Promise((ok) => setTimeout(() => ok(null), 8000))]);
+  }
+
+  // all'avvio: conteggio delle playlist in anticipo per le finestre Musica, così l'elenco è già filtrato
+  _plWarm() {
+    for (const a of this._addons || []) {
+      if (!a.enabled) continue;
+      for (const b of a.window?.buttons || []) {
+        if (!b.list?.browse || !(b.list.tabs || []).some((t) => /playlist/i.test(`${(t.path || []).join(" ")} ${t.label || ""}`))) continue;
+        const ent = this._addonFill(b.list.browse, this._addonVarsA(a));
+        if (this._hass?.states?.[ent]) this._plOk(ent, false);
+      }
+    }
+  }
+
   async _addonList(a, el, b, at = null, tab = null) {
     const box = el.querySelector(".aimg");
     if (!box) return;
@@ -10079,12 +10109,16 @@ class NavigatorPanel extends HTMLElement {
     pane.querySelectorAll("[data-t]").forEach((t) => t.addEventListener("click", () => this._addonList(a, el, b, null, +t.dataset.t)));
     const list = pane.querySelector(".all");
     // elenco di voci da toccare: play(c) fa partire, open(c) apre una cartella
+    // scheda delle playlist: solo quelle con almeno 2 brani (contate da Navigator in sottofondo)
+    const isPl = /playlist/i.test(`${path.join(" ")} ${tabs[ti]?.label || ""}`) && !at;
+    const plOk = isPl ? await this._plOk(ent) : null;
     const show = (items0, play0, open) => {
       // voci nascoste (es. le playlist che vengono dalle cartelle: "filesystem" nell'indirizzo o nella copertina)
-      const items = excl.length ? items0.filter((c) => {
+      let items = excl.length ? items0.filter((c) => {
         const k = `${c.uri || ""} ${c.media_content_id || ""} ${c.thumbnail || ""}`.toLowerCase();
         return !excl.some((x) => k.includes(x));
       }) : items0;
+      if (plOk) items = items.filter((c) => plOk.has(c.media_content_id) || plOk.has(c.uri));
       if (!items.length) { list.textContent = "Vuoto"; return; }
       const playable = items.filter((c) => c.can_play);
       // partita una voce di una scheda che cicla (es. una radio): il tasto "successivo" passerà alla voce dopo
