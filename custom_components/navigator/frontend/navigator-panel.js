@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.96";
+const PANEL_VERSION = "1.13.97";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -2007,6 +2007,9 @@ class NavigatorPanel extends HTMLElement {
   connectedCallback() {
     // telefonate dall'app NaviHA (add-on Telefono)
     window.__navihaPhone = () => this._phoneUpdate();
+    clearInterval(this._phoneRouteT);
+    this._phoneRouteT = setInterval(() => this._phoneRouteSync(), 20000);
+    setTimeout(() => this._phoneRouteSync(true), 3000);
     clearInterval(this._phoneTick);
     this._phoneTick = setInterval(() => { if (this._phoneLast === "offhook") this._phoneUpdate(); }, 1000);
     if (this._hass && !this._started) this._init();
@@ -2025,6 +2028,7 @@ class NavigatorPanel extends HTMLElement {
 
   disconnectedCallback() {
     clearInterval(this._phoneTick);
+    clearInterval(this._phoneRouteT);
     this._ro?.disconnect();
   }
 
@@ -9057,14 +9061,10 @@ class NavigatorPanel extends HTMLElement {
       catch (err) { this._msg(err.message || String(err)); }
     }));
     wrap.querySelectorAll("[data-phone-route]").forEach((el) => el.addEventListener("change", () => {
-      try {
-        window.NaviHAApp.phoneSetRoute(el.value);
-        const t = el.selectedOptions[0].textContent.trim();
-        const nt = el.closest(".line")?.querySelector(".note");
-        if (nt) nt.textContent = `Scelto: ${t}. Se non è collegato l'audio resta dove lo mette Android; durante la chiamata si cambia col tasto 🔊.`;
-        this._msg("Bluetooth per le chiamate: " + t);
-      }
-      catch (err) { this._msg("Serve l'app NaviHA aggiornata"); }
+      this._settings.callRouteBy = { ...this._phoneRouteBy(), [el.dataset.phoneRoute]: el.value };
+      this._saveSettings();
+      this._phoneRouteSync(true);
+      this._msg(`Bluetooth per le chiamate (${el.closest(".line")?.querySelector("span")?.textContent.trim() || ""}): ${el.selectedOptions[0].textContent.trim()}`);
     }));
     // elenco dei preferiti (add-on Telefono): si salva a ogni modifica come righe Nome=numero
     wrap.querySelectorAll(".ctlist[data-ct]").forEach((box) => {
@@ -9322,16 +9322,51 @@ class NavigatorPanel extends HTMLElement {
   }
 
   // impostazioni dell'add-on Telefono (solo nell'app): dispositivo dove va l'audio delle chiamate, ogni volta
+  // Bluetooth per le chiamate (solo nell'app NaviHA): uno per quando si usa solo il telefono e uno per ogni mezzo del
+  // garage (ogni auto ha il suo: a bordo vale quello del mezzo in uso). Salvati su questo telefono.
+  _phoneDevList() {
+    try { return typeof window.NaviHAApp?.phoneDevices === "function" ? JSON.parse(window.NaviHAApp.phoneDevices()) : null; }
+    catch (e) { return null; }
+  }
+
+  _phoneRouteBy() {
+    const by = this._settings.callRouteBy;
+    if (by && typeof by === "object") return by;
+    const d = this._phoneDevList(); // scelta di prima (unica): vale per il solo telefono
+    return { tel: d?.cur || "" };
+  }
+
   _phoneDevHtml() {
-    let d = null;
-    try { d = typeof window.NaviHAApp?.phoneDevices === "function" ? JSON.parse(window.NaviHAApp.phoneDevices()) : null; } catch (e) { d = null; }
-    if (!d) return "";
+    if (!this._isNaviHA()) return "";
+    const d = this._phoneDevList();
+    if (!d) return `<label class="line"><span>Bluetooth per le chiamate<div class="note">Aggiorna l'app NaviHA (1.1.53 o più recente) per sceglierlo.</div></span></label>`;
     const IC = { auto: "🔁", earpiece: "📱", speaker: "🔈", bluetooth: "🎧" };
-    const cur = d.list.find((o) => o.id === d.cur) || d.list[0];
-    return `<label class="line"><span>Bluetooth per le chiamate<div class="note">Scelto: ${esc(cur ? cur.name : "—")}. Se non è collegato
-      l'audio resta dove lo mette Android; durante la chiamata si cambia col tasto 🔊.</div></span><select data-phone-route>${
-      d.list.map((o) => `<option value="${esc(o.id)}" ${o.id === d.cur ? "selected" : ""}>${IC[o.type] || ""} ${esc(o.name)}</option>`).join("")}</select></label>${
-      d.bt ? "" : `<div class="note">Per vedere i dispositivi Bluetooth concedi a NaviHA il permesso «Dispositivi nelle vicinanze».</div>`}`;
+    const by = this._phoneRouteBy();
+    const sel = (key) => `<select data-phone-route="${esc(key)}">${d.list.map((o) => `<option value="${esc(o.id)}" ${o.id === (by[key] || "") ? "selected" : ""}>${
+      IC[o.type] || ""} ${esc(o.name)}</option>`).join("")}</select>`;
+    const veh = this._vehicles().filter((v) => v.id !== "base");
+    return `<div class="line" style="display:block"><span>Bluetooth per le chiamate<div class="note">Dove va la voce delle telefonate:
+      a bordo quello scelto per il mezzo in uso, altrimenti quello del solo telefono. Se non è collegato l'audio resta dove lo
+      mette Android; durante la chiamata si cambia col tasto 🔊.</div></span></div>
+      <label class="line"><span>📱 Solo telefono</span>${sel("tel")}</label>
+      ${veh.map((v) => `<label class="line"><span>🚗 ${esc(v.name || v.plate || v.id)}</span>${sel(v.id)}</label>`).join("")}
+      ${veh.length ? "" : `<label class="line"><span>🚗 In auto (Base)</span>${sel("base")}</label>`}
+      ${d.bt ? "" : `<div class="note">Per vedere i dispositivi Bluetooth concedi a NaviHA il permesso «Dispositivi nelle vicinanze».</div>`}`;
+  }
+
+  // all'app va la scelta che vale adesso: sullo schermo dell'auto quella del mezzo in uso; sul telefono quella del solo
+  // telefono (se però l'auto è collegata decide la pagina dell'auto)
+  _phoneRouteSync(force = false) {
+    if (typeof window.NaviHAApp?.phoneSetRoute !== "function") return;
+    let carOn = false;
+    try { carOn = !!window.NaviHAApp.carConnected?.(); } catch (e) { carOn = false; }
+    const car = this._isCarScreen();
+    if (!car && carOn) return;
+    const by = this._phoneRouteBy();
+    const id = car ? (by[this._vehicleId()] ?? (this._vehicleId() === "base" ? "" : by.base) ?? "") : (by.tel || "");
+    if (!force && id === this._phoneRouteSent) return;
+    this._phoneRouteSent = id;
+    try { window.NaviHAApp.phoneSetRoute(id || ""); } catch (e) { /* app vecchia */ }
   }
 
   _phoneWin(a, el) {
@@ -10223,6 +10258,7 @@ class NavigatorPanel extends HTMLElement {
 
   // loghi di avvio mandati all'app NaviHA, che li mostra sull'auto prima che il pannello sia pronto
   _syncSplashes() {
+    this._phoneRouteSync(); // cambiato il mezzo: anche il Bluetooth per le chiamate
     if (!window.NaviHAApp?.setSplashes) return;
     const src = (v) => {
       if (!v?.type || !v.splash) return "";

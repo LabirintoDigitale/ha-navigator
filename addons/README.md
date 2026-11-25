@@ -235,9 +235,10 @@ recente e, una volta sola, l'**abbinamento** di NaviHA come app compagna (tasto 
 finestra o menu ⋮ → *Audio delle chiamate*): Android chiede di scegliere un dispositivo Bluetooth qualunque. Le chiamate
 restano dell'app del telefono.
 
-Nelle impostazioni, in *Indicazioni vocali* (solo nell'app), c'è **Bluetooth per le chiamate**: il dispositivo dove va la voce a ogni
-chiamata (automatico, telefono, vivavoce o un dispositivo Bluetooth associato, per esempio gli auricolari). Si sceglie per
-ogni telefono; durante la chiamata si può sempre cambiare col tasto 🔊.
+Nelle impostazioni, in *Indicazioni vocali* (solo nell'app), c'è **Bluetooth per le chiamate**: il dispositivo dove va la voce
+a ogni chiamata, uno per il **solo telefono** e uno per **ogni mezzo del garage** (a bordo vale quello del mezzo in uso:
+ogni auto il suo). Automatico, telefono, vivavoce o un dispositivo Bluetooth associato; durante la chiamata si cambia
+sempre col tasto 🔊.
 
 ---
 
