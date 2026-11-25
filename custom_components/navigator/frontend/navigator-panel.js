@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.30";
+const PANEL_VERSION = "1.14.31";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1610,6 +1610,13 @@ const STYLE = `
   .spdbox .v { height: 100%; }
   .spdbox .v svg { height: 100%; width: auto; display: block; }
   .spdbox .u { font: 700 12px sans-serif; opacity: .85; margin-bottom: 2px; }
+  /* batteria del telefono sopra "km/h": verde oltre il 50%, gialla dal 20 al 50, rossa sotto il 20 */
+  .spdbox .ucol { align-self: stretch; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start; }
+  .spdbox .bat { font: 800 11px sans-serif; color: #43d17a; margin-top: 1px; white-space: nowrap; }
+  .spdbox .bat.mid { color: #ffd54a; }
+  .spdbox .bat.low { color: #ff5252; }
+  .spdbox .bat[hidden] { visibility: hidden; display: block; }
+  .spdbox.big .bat { font-size: 16px; }
   /* connessione: verde se ci sono i dati e Home Assistant risponde, rossa (lampeggiante) se manca */
   .spdbox .spdside { align-self: stretch; display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; margin-left: 4px; }
   .spdbox .net { width: 18px; height: 18px; color: #43d17a; }
@@ -2154,7 +2161,7 @@ class NavigatorPanel extends HTMLElement {
             <div class="tf-vis" id="tfvis"></div>
             <div class="tf-label"><span>🚇 In galleria</span><small id="tunrem"></small></div></div>
           <div id="arrbox"></div>
-          <div class="spdbox" id="spdbox" hidden title="Velocità (tieni premuto per spostarlo)"><span class="lim" id="spdlim" hidden></span><div class="v" id="spdv"></div><span class="u">km/h</span><span class="spdside"><span class="net" id="spdnet" title="Connessione dati e Home Assistant"><svg viewBox="0 0 24 24"><path d="M2 9a15 15 0 0 1 20 0M5.5 12.5a10 10 0 0 1 13 0M9 16a5 5 0 0 1 6 0"/><circle cx="12" cy="19.5" r="1.6"/></svg></span>
+          <div class="spdbox" id="spdbox" hidden title="Velocità (tieni premuto per spostarlo)"><span class="lim" id="spdlim" hidden></span><div class="v" id="spdv"></div><span class="ucol"><span class="bat" id="spdbat" hidden title="Batteria del telefono"></span><span class="u">km/h</span></span><span class="spdside"><span class="net" id="spdnet" title="Connessione dati e Home Assistant"><svg viewBox="0 0 24 24"><path d="M2 9a15 15 0 0 1 20 0M5.5 12.5a10 10 0 0 1 13 0M9 16a5 5 0 0 1 6 0"/><circle cx="12" cy="19.5" r="1.6"/></svg></span>
             <span class="gps" id="gpscar" hidden title="GPS dell'auto (Android Auto)">🚗<b>GPS</b></span><span class="gps" id="gpsphone" title="GPS del telefono">📱<b>GPS</b></span></span></div>
           <div class="pitchctl" id="pitchctl" hidden>
             <button class="up" data-p="-15" title="Più dall'alto"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></button>
@@ -2250,6 +2257,7 @@ class NavigatorPanel extends HTMLElement {
     this._loadGarage();
     this._loadAddons();
     this._playerInit(); // nell'app NaviHA: il telefono diventa un lettore di Home Assistant
+    this._batteryStart(); // batteria del telefono sopra "km/h"
     this._renderPlanSel();
     // nell'app NaviHA restano solo Viaggio: Live e Archivio sono nascosti; altrove li vedono solo gli amministratori
     if (this._isNaviHA() || !this._hass?.user?.is_admin) {
@@ -9526,6 +9534,37 @@ class NavigatorPanel extends HTMLElement {
     this._addonClosed = new S(Array.isArray(ids) ? ids : []);
     this._addonClosed._ready = true;
     return this._addonClosed;
+  }
+
+  // batteria del telefono nel riquadro della velocità (dall'app NaviHA o dal browser, se la sa leggere)
+  async _batteryStart() {
+    if (this._batOn) return;
+    this._batOn = true;
+    const show = (lvl, chg) => {
+      const el = this.$?.("spdbat");
+      if (!el) return;
+      if (!(lvl >= 0)) { el.hidden = true; return; }
+      const p = Math.round(lvl);
+      el.hidden = false;
+      el.textContent = `${chg ? "⚡" : ""}${p}%`;
+      el.classList.toggle("low", p < 20);
+      el.classList.toggle("mid", p >= 20 && p <= 50);
+    };
+    const A = window.NaviHAApp;
+    if (typeof A?.battery === "function") {
+      const tick = () => { try { const b = JSON.parse(A.battery()); show(b.level, b.charging); } catch (e) { /* niente */ } };
+      tick();
+      this._batT = setInterval(tick, 60000);
+      return;
+    }
+    try {
+      const b = await window.navigator.getBattery?.();
+      if (!b) return;
+      const up = () => show(b.level * 100, b.charging);
+      up();
+      b.addEventListener("levelchange", up);
+      b.addEventListener("chargingchange", up);
+    } catch (e) { /* il browser non la dà */ }
   }
 
   // ---------------------------------------------------------------- lettore NaviHA (musica sul telefono)
