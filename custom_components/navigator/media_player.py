@@ -27,6 +27,13 @@ from .players import SIGNAL, Players
 async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddEntitiesCallback) -> None:
     players: Players = entry.runtime_data.players
     players.add_entities = async_add_entities
+    # via i lettori NaviHA rimasti da prove vecchie (non più fra quelli registrati)
+    from homeassistant.helpers import entity_registry as er
+
+    reg = er.async_get(hass)
+    for e in er.async_entries_for_config_entry(reg, entry.entry_id):
+        if e.domain == "media_player" and e.unique_id.startswith("player_") and e.unique_id[7:] not in players.players:
+            reg.async_remove(e.entity_id)
     for pid in list(players.players):
         players.make_entity(pid)
 
