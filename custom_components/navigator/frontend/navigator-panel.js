@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.12";
+const PANEL_VERSION = "1.14.13";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -9217,7 +9217,16 @@ class NavigatorPanel extends HTMLElement {
           if (el._lastSt !== sk) { el._lastSt = sk; this._alog(`${a.id}: lettore ${eid}: ${st ? `stato "${st.state}"` : "non esiste in Home Assistant"}`); }
           if (el._loading && st?.state === "playing" && Date.now() - el._loading.t > 600) this._addonLoading(el, null);
           const pic = st?.attributes?.entity_picture || "";
-          if (pic && img.dataset.pic !== pic) { img.dataset.pic = pic; img.src = pic; img.style.display = ""; el.querySelector(".aerr")?.remove(); }
+          if (pic && img.dataset.pic !== pic) {
+            img.dataset.pic = pic; img.style.display = ""; el.querySelector(".aerr")?.remove();
+            // copertina su un altro indirizzo in http (es. il server di Music Assistant in casa, per i brani locali): una
+            // pagina in https o fuori casa non la carica, la scarica Home Assistant e la passa qui
+            if (/^http:\/\//i.test(pic) && (location.protocol === "https:" || !pic.startsWith(location.origin))) {
+              this._hass.callWS({ type: "auth/sign_path", path: `/api/navigator/image?url=${encodeURIComponent(pic)}`, expires: 3600 })
+                .then((r) => { if (img.dataset.pic === pic) img.src = r.path; })
+                .catch(() => { if (img.dataset.pic === pic) img.src = pic; });
+            } else img.src = pic;
+          }
           if (!pic) { img.dataset.pic = ""; img.removeAttribute("src"); img.style.visibility = "hidden"; } else img.style.visibility = "";
           // senza copertina (es. molte radio): il nome grande al centro
           let np = el.querySelector(".anopic");
