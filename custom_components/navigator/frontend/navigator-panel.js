@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.6";
+const PANEL_VERSION = "1.14.7";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -9351,7 +9351,7 @@ class NavigatorPanel extends HTMLElement {
     const STN = { idle: "pronto", playing: "in riproduzione", paused: "in pausa", buffering: "in caricamento", unavailable: "non disponibile" };
     return `<div class="note" style="margin:8px 0;padding:8px;border:1px solid rgba(255,255,255,.15);border-radius:10px">
       <b>📻 Lettore NaviHA di questo telefono</b><br>
-      In Home Assistant: ${st ? `<code>${esc(st.entity_id)}</code> · ${esc(STN[st.state] || st.state)}` : "non ancora registrato"}<br>
+      In Home Assistant: ${st ? `<code style="word-break:break-all;white-space:normal">${esc(st.entity_id)}</code> · ${esc(STN[st.state] || st.state)}` : "non ancora registrato"}<br>
       Collegamento dell'app: ${link == null ? "dalla pagina (app vecchia)" : link ? "attivo ✔" : "non collegato ✖"}
       ${st ? `<div class="row" style="gap:6px;margin-top:6px"><button data-ptest="${esc(st.entity_id)}">▶ Prova con una radio</button>
         <button data-pstop="${esc(st.entity_id)}">⏹ Ferma</button></div>` : ""}</div>`;
