@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.16";
+const PANEL_VERSION = "1.14.17";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1853,6 +1853,9 @@ const STYLE = `
   .addmenu { position: absolute; z-index: 1008; width: 220px; background: rgba(24,24,24,.95); border-radius: 12px; padding: 6px;
     box-shadow: 0 4px 16px rgba(0,0,0,.5); display: flex; flex-direction: column; gap: 4px; }
   .addmenu .mt { color: #ddd; font: 600 12px sans-serif; padding: 4px 6px; }
+  .addmenu button[data-nav] { font-weight: 700; margin-bottom: 4px; }
+  .addmenu button[data-nav] small { display: block; font-weight: 400; opacity: .75; }
+  .addmenu button[data-nav]:disabled { opacity: .6; }
   .addmenu button { text-align: left; background: rgba(255,255,255,.08); color: #fff; border: none; border-radius: 8px;
     padding: 10px; font: 14px sans-serif; cursor: pointer; }
   .addmenu small { opacity: .6; }
@@ -4359,12 +4362,15 @@ class NavigatorPanel extends HTMLElement {
 
   // in alto a destra, sotto l'indicazione della guida (o sotto la scelta della mappa)
   _placePitchCtl(pitch) {
+    this._layoutSync();
     const el = this.$("pitchctl");
     if (!el || this._dragging) return; // durante uno spostamento non si tocca niente
     this._syncDock();
     // sempre visibile: zoom −/+ con la lampadina giorno/notte in mezzo; in 3D anche l'inclinazione (croce)
     const guida = !!(this._isGuida() && this._nav);
-    el.hidden = false;
+    // "Navigator" (la croce): fuori dalla guida si può nascondere dal menu del riquadro della velocità; in guida c'è sempre
+    el.hidden = !guida && !!this._settings.hideCross;
+    if (el.hidden) return;
     el.classList.toggle("twod", !this._3d);
     el.classList.toggle("plan", !guida);
     this._syncNightBtn();
@@ -7063,8 +7069,27 @@ class NavigatorPanel extends HTMLElement {
     } else {
       try { lay = JSON.parse(localStorage.getItem(`${STORE_KEY}-layout`) || "null"); } catch (e) { /* storage non disponibile */ }
     }
-    this._layout = lay && typeof lay === "object" ? lay : {};
+    lay = lay && typeof lay === "object" ? lay : {};
+    // posizioni dei riquadri separate in guida (g) e fuori (p); quelle di prima valgono per entrambe
+    this._layoutAll = lay.g || lay.p ? { g: lay.g || {}, p: lay.p || {} } : { g: { ...lay }, p: JSON.parse(JSON.stringify(lay)) };
+    this._layoutMode = null;
+    this._layoutSync(true);
     this._applyNavTopPos(); this._placePitchCtl(); this._applyFloat("spdbox"); this._placeAddons();
+  }
+
+  // posizioni in uso: quelle della guida o quelle fuori dalla guida (passando dall'una all'altra i riquadri si rimettono)
+  _layoutSync(quiet = false) {
+    if (!this._layoutAll) return;
+    const m = this._nav && this._isGuida() ? "g" : "p";
+    if (this._layoutMode === m) return;
+    this._layoutMode = m;
+    this._layout = (this._layoutAll[m] ||= {});
+    if (quiet || this._layoutReplacing) return;
+    this._layoutReplacing = true;
+    requestAnimationFrame(() => {
+      this._layoutReplacing = false;
+      this._applyNavTopPos(); this._placePitchCtl(); this._applyFloat("spdbox"); this._placeAddons();
+    });
   }
 
   // ------------------------------------------------------------------ modalità spostamento (schermo dell'auto)
@@ -7146,7 +7171,7 @@ class NavigatorPanel extends HTMLElement {
   // add-on, barra in basso e croce spariscono dopo 10 s senza tocchi; il primo tocco li fa ricomparire (e basta)
   // cosa si può nascondere: [chiave, nome]; di base tutto tranne barra verde e velocità (scelte "skip" = da non nascondere)
   _autoHideItems() {
-    return [["navbot", "Barra in basso"], ["pitchctl", "Croce (ora e zoom)"], ["spdbox", "Velocità"], ["navtop", "Barra verde"],
+    return [["navbot", "Barra in basso"], ["pitchctl", "Navigator (ora e zoom)"], ["spdbox", "Velocità"], ["navtop", "Barra verde"],
       ...(this._addons || []).map((a) => [`addon:${a.id}`, `Add-on: ${a.name}`])];
   }
 
@@ -7222,7 +7247,8 @@ class NavigatorPanel extends HTMLElement {
   }
 
   _saveLayout() {
-    const lay = this._layout || {};
+    if (this._layoutAll && this._layoutMode) this._layoutAll[this._layoutMode] = this._layout || {};
+    const lay = this._layoutAll || this._layout || {};
     if (this._isCarScreen()) {
       this._hass.callWS({ type: "navigator/layout", profile: "auto", data: lay }).catch(() => { /* integrazione vecchia */ });
     } else {
@@ -7232,6 +7258,7 @@ class NavigatorPanel extends HTMLElement {
 
   // mette il riquadro dove l'ha lasciato l'utente (solo in guida); senza posizione salvata resta al posto predefinito
   _applyFloat(id, key = id) {
+    this._layoutSync();
     const el = this.$(id);
     const wrap = this.$("mapwrap");
     if (!el || !wrap || el.hidden) return;
@@ -9656,9 +9683,21 @@ class NavigatorPanel extends HTMLElement {
       && (!a.enabled || this._addonClosed.has(a.id)));
     menu = document.createElement("div");
     menu.id = "addmenu"; menu.className = "addmenu";
-    menu.innerHTML = list.length
+    const guida = !!(this._nav && this._isGuida());
+    // in cima "Navigator" (la croce di ora e zoom): fuori dalla guida si mostra o si nasconde (resta ricordato)
+    const nav = `<button data-nav class="${this._settings.hideCross ? "" : "on"}" ${guida ? "disabled" : ""}>🧭 Navigator <small>${
+      guida ? "(sempre visibile in guida)" : this._settings.hideCross ? "(nascosto: tocca per mostrarlo)" : "(visibile: tocca per nasconderlo)"}</small></button>`;
+    menu.innerHTML = nav + (list.length
       ? `<div class="mt">🧩 Mostra sulla mappa</div>${list.map((a) => `<button data-a="${esc(a.id)}">${esc(a.window.title || a.name)}${a.enabled ? "" : " <small>(spento)</small>"}</button>`).join("")}`
-      : `<div class="mt">🧩 ${(this._addons || []).length ? "Tutti gli add-on sono già sulla mappa" : "Nessun add-on: aggiungili da ⚙ → Add-on"}</div>`;
+      : `<div class="mt">🧩 ${(this._addons || []).length ? "Tutti gli add-on sono già sulla mappa" : "Nessun add-on: aggiungili da ⚙ → Add-on"}</div>`);
+    menu.querySelector("[data-nav]")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (guida) return;
+      this._settings.hideCross = !this._settings.hideCross;
+      this._saveSettings();
+      menu.remove();
+      this._placePitchCtl();
+    });
     const wr = wrap.getBoundingClientRect(), br = box.getBoundingClientRect();
     menu.style.left = `${Math.max(4, Math.min(wrap.clientWidth - 230, br.left - wr.left))}px`;
     menu.style.top = `${br.bottom - wr.top + 6}px`;
