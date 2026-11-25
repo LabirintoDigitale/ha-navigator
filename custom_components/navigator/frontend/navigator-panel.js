@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.13.94";
+const PANEL_VERSION = "1.13.95";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -7135,7 +7135,10 @@ class NavigatorPanel extends HTMLElement {
     if (!wrap) return;
     const skip = new Set(this._ahCfg().skip || []);
     for (const id of ["navbot", "pitchctl", "spdbox", "navtop"]) this.$(id)?.classList.toggle("ahsel", !skip.has(id));
-    wrap.querySelectorAll(".addwin").forEach((w) => w.classList.toggle("ahsel", !skip.has(`addon:${w.id.slice(6)}`)));
+    // con una chiamata in corso (o che squilla) la finestra Telefono resta sempre visibile
+    const call = ["ringing", "offhook"].includes(this._phoneGet()?.state);
+    wrap.querySelectorAll(".addwin").forEach((w) => w.classList.toggle("ahsel", !skip.has(`addon:${w.id.slice(6)}`)
+      && !(call && w.classList.contains("phwin"))));
     const dock = this.$("addock");
     if (dock) {
       const wins = [...dock.querySelectorAll(".addwin")];
@@ -9412,6 +9415,12 @@ class NavigatorPanel extends HTMLElement {
       const k = wins.findIndex((x) => x.classList.contains("phwin"));
       if (k >= 0 && this.$("addock")) { this._dockIdx = k; this._syncDock(); }
     } else if (st?.state !== "ringing") this._phoneRang = false;
+    // inizio o fine di una chiamata col nascondi automatico attivo: la finestra Telefono ricompare (o torna a nascondersi)
+    const callNow = ["ringing", "offhook"].includes(st?.state);
+    if (callNow !== !!this._phoneCall) {
+      this._phoneCall = callNow;
+      if (this.$?.("mapwrap")?.classList.contains("autohid")) this._autoHideMark();
+    }
     this.$?.("mapwrap")?.querySelectorAll(".addwin.phwin").forEach((el) => el._phone?.());
   }
 
