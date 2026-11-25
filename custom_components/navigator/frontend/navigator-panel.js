@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.28";
+const PANEL_VERSION = "1.14.29";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1791,6 +1791,11 @@ const STYLE = `
   .addwin .acap { position: absolute; left: 0; right: 0; top: 0; padding: 4px 8px; color: #fff; font: 600 12px sans-serif;
     background: linear-gradient(rgba(0,0,0,.7), transparent); border-radius: 8px 8px 0 0; white-space: nowrap; overflow: hidden;
     text-overflow: ellipsis; pointer-events: none; }
+  .addwin .acap.mq { text-overflow: clip; }
+  .addwin .acap .mqi { display: inline-block; }
+  .addwin .acap.mq .mqi { animation: amq linear infinite; }
+  .addwin .acap.mq .mqi > span { padding-right: 40px; }
+  @keyframes amq { 0%, 8% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
   .addwin .abar { position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); display: flex; gap: 6px; }
   .addwin .abar button, .addwin .abl button { border: none; border-radius: 10px; background: rgba(0,0,0,.55); color: #fff;
     font-size: 16px; min-width: 40px; height: 36px; padding: 0 8px; cursor: pointer; display: flex; align-items: center;
@@ -9372,10 +9377,23 @@ class NavigatorPanel extends HTMLElement {
           const cap = el.querySelector(".acap");
           if (cap) {
             const t = [st?.attributes?.media_title, st?.attributes?.media_artist].filter(Boolean).join(" — ");
-            cap.textContent = !st ? "Scegli il lettore nelle impostazioni dell'add-on"
+            const txt = !st ? "Scegli il lettore nelle impostazioni dell'add-on"
               : st.state === "unavailable" ? "Lettore non disponibile: scegline un altro nelle impostazioni"
                 : t || (st.state === "off" ? "Spento" : st.state === "idle" ? "In attesa" : st.state === "paused" ? "In pausa" : "");
-            cap.hidden = !cap.textContent || !!el.querySelector(".anopic"); // col nome grande al centro non si ripete in alto
+            cap.hidden = !txt || !!el.querySelector(".anopic"); // col nome grande al centro non si ripete in alto
+            if (cap.dataset.t !== txt || cap.dataset.w !== String(cap.clientWidth)) {
+              cap.dataset.t = txt; cap.dataset.w = String(cap.clientWidth);
+              // testo troppo lungo: scorre piano da destra a sinistra, in giro continuo
+              cap.classList.remove("mq");
+              cap.innerHTML = `<span class="mqi"><span>${esc(txt)}</span></span>`;
+              requestAnimationFrame(() => {
+                const inner = cap.querySelector(".mqi > span");
+                if (!inner || inner.offsetWidth <= cap.clientWidth - 16) return;
+                cap.classList.add("mq");
+                const w = inner.offsetWidth + 40;
+                cap.innerHTML = `<span class="mqi" style="animation-duration:${Math.max(6, Math.round(w / 28))}s"><span>${esc(txt)}</span><span>${esc(txt)}</span></span>`;
+              });
+            }
           }
           return;
         }
