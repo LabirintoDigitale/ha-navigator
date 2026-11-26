@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.36";
+const PANEL_VERSION = "1.14.37";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1876,6 +1876,11 @@ const STYLE = `
   .navbot > * { zoom: var(--czb, 1); }
   .addmenu { position: absolute; z-index: 1008; width: calc(220px * var(--cz, 1)); background: rgba(24,24,24,.95); border-radius: 12px; padding: 6px;
     box-shadow: 0 4px 16px rgba(0,0,0,.5); display: flex; flex-direction: column; gap: 4px; }
+  /* in orizzontale il menu arriva in fondo e i tasti si dividono tutta l'altezza: più grandi da toccare */
+  .addmenu.tall > button { flex: 1 1 0; min-height: 44px; max-height: 120px; display: flex; align-items: center; font-size: 18px; }
+  .addmenu.tall > button.out { justify-content: center; }
+  .addmenu.tall > button.out svg { width: 30px; height: 30px; }
+  .addmenu.tall > .mt { flex: none; }
   .addmenu .mt { color: #ddd; font: 600 12px sans-serif; padding: 4px 6px; }
   .addmenu button[data-nav] { font-weight: 700; margin-bottom: 4px; display: flex; align-items: center; gap: 10px; }
   /* tondo con la lampadina: acceso (luce calda dietro un vetro smerigliato, come i tasti all'arrivo) = visibile */
@@ -9982,7 +9987,7 @@ class NavigatorPanel extends HTMLElement {
     const mw = 220 * this._carScale() + 12;
     menu.style.left = `${Math.max(4, Math.min(wrap.clientWidth - mw - 4, br.left - wr.left))}px`;
     menu.style.top = `${br.bottom - wr.top + 6}px`;
-    if (wrap.clientWidth > wrap.clientHeight) menu.style.bottom = "8px";
+    if (wrap.clientWidth > wrap.clientHeight) { menu.style.bottom = "8px"; menu.classList.add("tall"); } // i tasti riempiono tutto
     else menu.style.maxHeight = `${wrap.clientHeight - (br.bottom - wr.top) - 14}px`;
     menu.style.overflowY = "auto";
     wrap.appendChild(menu);
