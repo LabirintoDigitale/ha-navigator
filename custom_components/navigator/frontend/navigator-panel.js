@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.43";
+const PANEL_VERSION = "1.14.44";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -6337,6 +6337,11 @@ class NavigatorPanel extends HTMLElement {
     if (!m) return;
     this._applyNavTopPos();
     this._applyFloat("pitchctl"); this._applyFloat("spdbox");
+    // mappa della stessa misura di prima (es. aperto un pannello sopra, un add-on, un menu): la mappa non si tocca
+    const wr = this.$("mapwrap");
+    const sz = wr ? `${wr.clientWidth}x${wr.clientHeight}|${this._rotated() ? 1 : 0}` : "";
+    if (sz && sz === this._relaySz && !this._nav) return;
+    this._relaySz = sz;
     const c = m.getCenter();
     this._layoutRot();
     m.invalidateSize({ pan: false });
