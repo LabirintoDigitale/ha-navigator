@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.61";
+const PANEL_VERSION = "1.14.62";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -9730,6 +9730,31 @@ class NavigatorPanel extends HTMLElement {
     try { A.setDragOrigin(fx, fy); } catch (e) { /* app vecchia */ }
   }
 
+  // playlist create in Music Assistant (proprietario "Music Assistant"): le altre (da cartelle di rete condivise, servizi
+  // remoti…) non compaiono nell'elenco. null se non si sa (si mostrano tutte). Ricordate per 10 minuti
+  async _maOwnPlaylists() {
+    const c = this._maOwnC;
+    if (c && Date.now() - c.t < 600e3) return c.set;
+    let set = null;
+    try {
+      const entries = await this._hass.callWS({ type: "config_entries/get", domain: "music_assistant" });
+      const entry = entries?.find((e) => e.state === "loaded") || entries?.[0];
+      if (entry) {
+        const r = await this._hass.callWS({ type: "call_service", domain: "music_assistant", service: "get_library",
+          service_data: { config_entry_id: entry.entry_id, media_type: "playlist", limit: 500 }, return_response: true });
+        const items = r?.response?.items || [];
+        const withOwner = items.filter((it) => it.owner != null);
+        if (withOwner.length) {
+          set = new Set(items.filter((it) => /music ?assistant/i.test(String(it.owner || ""))).map((it) => it.uri));
+          this._alog?.(`playlist di Music Assistant: ${set.size} su ${items.length}`);
+          if (!set.size) set = null; // nessuna riconosciuta: meglio mostrarle tutte
+        }
+      }
+    } catch (e) { set = null; }
+    this._maOwnC = { t: Date.now(), set };
+    return set;
+  }
+
   // casuale / in ordine scelto nell'elenco dei brani: ricordato (anche chiudendo l'app) e rimesso a ogni playlist che parte
   _applyShuffle(a, ent) {
     let v = null;
@@ -10729,6 +10754,7 @@ class NavigatorPanel extends HTMLElement {
     // scheda delle playlist: solo quelle con almeno 2 brani (contate da Navigator in sottofondo)
     const isPl = /playlist/i.test(`${path.join(" ")} ${tabs[ti]?.label || ""}`) && !at;
     const plOk = isPl ? await this._plOk(ent) : null;
+    const maOwn = isPl ? await this._maOwnPlaylists() : null; // solo le playlist di Music Assistant (non di condivisioni remote)
     const show = (items0, play0, open) => {
       // voci nascoste (es. le playlist che vengono dalle cartelle: "filesystem" nell'indirizzo o nella copertina)
       let items = excl.length ? items0.filter((c) => {
@@ -10736,6 +10762,7 @@ class NavigatorPanel extends HTMLElement {
         return !excl.some((x) => k.includes(x));
       }) : items0;
       if (plOk) items = items.filter((c) => plOk.has(c.media_content_id) || plOk.has(c.uri));
+      if (maOwn) items = items.filter((c) => maOwn.has(c.media_content_id) || maOwn.has(c.uri));
       if (!items.length) { list.textContent = "Vuoto"; return; }
       const playable = items.filter((c) => c.can_play);
       // partita una voce di una scheda che cicla (es. una radio): il tasto "successivo" passerà alla voce dopo
