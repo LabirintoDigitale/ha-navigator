@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.42";
+const PANEL_VERSION = "1.14.43";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -2282,6 +2282,8 @@ class NavigatorPanel extends HTMLElement {
     setTimeout(() => this._spdBox(null, false), 1500); // riquadro della velocità (e del menu) subito presente
     this._applyCarScale();
     window.addEventListener("resize", () => setTimeout(() => this._applyCarScale(), 200));
+    // schermo dell'auto: i trascinamenti partono dal pannello o menu aperto (si scorre lui, la mappa sotto resta ferma)
+    if (this._isCarScreen()) setInterval(() => this._carDragOrigin(), 400);
     this._playerInit(); // nell'app NaviHA: il telefono diventa un lettore di Home Assistant
     this._batteryStart(); // batteria del telefono sopra "km/h"
     this._renderPlanSel();
@@ -9647,6 +9649,24 @@ class NavigatorPanel extends HTMLElement {
     // la barra in basso in auto è già un po' più grande (tasti da 56): cresce un po' meno
     this.style.setProperty("--czb", String(Math.max(1, +(z * 0.72).toFixed(2))));
     if (this._addons?.length) this._renderAddons();
+  }
+
+  _carDragOrigin() {
+    const A = window.NaviHAApp;
+    if (typeof A?.setDragOrigin !== "function") return;
+    const root = this.shadowRoot;
+    // il più in alto fra quelli aperti: elenco di un add-on, menu dei km/h, pannello delle destinazioni
+    const cand = [root.querySelector(".addwin .alp"), this.$?.("addmenu"),
+      this.classList.contains("sideopen") ? root.querySelector(".main .side") : null].find((x) => x && x.offsetParent !== null);
+    let fx = -1, fy = -1;
+    if (cand) {
+      const r = cand.getBoundingClientRect();
+      if (r.width > 20 && r.height > 20) { fx = (r.left + r.width / 2) / window.innerWidth; fy = (r.top + r.height / 2) / window.innerHeight; }
+    }
+    const k = `${fx.toFixed(3)},${fy.toFixed(3)}`;
+    if (k === this._dragOk) return;
+    this._dragOk = k;
+    try { A.setDragOrigin(fx, fy); } catch (e) { /* app vecchia */ }
   }
 
   // batteria del telefono nel riquadro della velocità (dall'app NaviHA o dal browser, se la sa leggere)
