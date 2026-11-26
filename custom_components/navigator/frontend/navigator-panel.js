@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.49";
+const PANEL_VERSION = "1.14.50";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -10724,7 +10724,16 @@ class NavigatorPanel extends HTMLElement {
         }
       }
       show(node.children || [],
-        (c) => this._hass.callService("media_player", "play_media", { entity_id: ent, media_content_id: c.media_content_id, media_content_type: c.media_content_type }),
+        // alcune playlist si compongono al momento (es. "Random album from library", mix e playlist da script): se il
+        // lettore le rifiuta così, si chiedono direttamente a Music Assistant
+        (c) => this._hass.callService("media_player", "play_media", { entity_id: ent, media_content_id: c.media_content_id, media_content_type: c.media_content_type })
+          .catch((err) => {
+            this._alog(`${a.id}: play_media rifiutato (${err.message || err.code || err}) → provo music_assistant.play_media`);
+            const mt = /radio/i.test(c.media_content_type) ? "radio" : /track/i.test(c.media_content_type) ? "track" : /album/i.test(c.media_content_type) ? "album" : "playlist";
+            return this._hass.callService("music_assistant", "play_media", { entity_id: ent, media_id: c.media_content_id, media_type: mt })
+              .catch(() => this._hass.callService("music_assistant", "play_media", { entity_id: ent, media_id: c.title }))
+              .catch(() => { throw err; });
+          }),
         (c) => this._addonList(a, el, { ...b, label: c.title }, c));
     } catch (err) {
       // il lettore non si sfoglia (es. "Entity not found"): si prova con Music Assistant
