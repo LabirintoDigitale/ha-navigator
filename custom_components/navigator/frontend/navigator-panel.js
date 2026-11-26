@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.59";
+const PANEL_VERSION = "1.14.60";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -9730,6 +9730,14 @@ class NavigatorPanel extends HTMLElement {
     try { A.setDragOrigin(fx, fy); } catch (e) { /* app vecchia */ }
   }
 
+  // casuale / in ordine scelto nell'elenco dei brani: ricordato (anche chiudendo l'app) e rimesso a ogni playlist che parte
+  _applyShuffle(a, ent) {
+    let v = null;
+    try { v = localStorage.getItem(`${STORE_KEY}-shuf-${a.id}`); } catch (e) { v = null; }
+    if (v !== "1" && v !== "0") return;
+    setTimeout(() => this._hass.callService("media_player", "shuffle_set", { entity_id: ent, shuffle: v === "1" }).catch(() => { /* lettore senza casuale */ }), 1500);
+  }
+
   // porta una voce al centro di un elenco scorrevole muovendo SOLO l'elenco (scrollIntoView spostava anche la mappa e la
   // pagina: a schermo intero in verticale restava mezza schermata nera, anche girando il telefono)
   _centerIn(list, item) {
@@ -10574,7 +10582,11 @@ class NavigatorPanel extends HTMLElement {
     box.id = "aqueue"; box.className = "aqueue";
     const lb = listBtn || (a.window.buttons || []).find((x) => x.list);
     const shuf = !!this._hass.states[ent]?.attributes?.shuffle;
-    box.innerHTML = `<div class="aqh"><b>${esc(a.window.title || a.name)}</b><button data-sh class="${shuf ? "on" : ""}" title="${shuf ? "Casuale (tocca per l'ordine della playlist)" : "In ordine (tocca per casuale)"}">${ADDON_ICONS(shuf ? "shuffle" : "repeat")}</button>${lb ? `<button data-pl title="Playlist e radio">${ADDON_ICONS("playlist")}</button>` : ""}<button data-x title="Chiudi">✕</button></div>
+    // in cima il nome della playlist (o "Radio") invece di quello dell'add-on
+    let last0 = null;
+    try { last0 = JSON.parse(localStorage.getItem(`${STORE_KEY}-alast-${a.id}`) || "null"); } catch (e) { last0 = null; }
+    const head = el._cyc?.items?.length ? "📻 Radio" : (last0?.title || a.window.title || a.name);
+    box.innerHTML = `<div class="aqh"><b>${esc(head)}</b><button data-sh class="${shuf ? "on" : ""}" title="${shuf ? "Casuale (tocca per l'ordine della playlist)" : "In ordine (tocca per casuale)"}">${ADDON_ICONS(shuf ? "shuffle" : "repeat")}</button>${lb ? `<button data-pl title="Playlist e radio">${ADDON_ICONS("playlist")}</button>` : ""}<button data-x title="Chiudi">✕</button></div>
       <div class="aql">Carico…</div><div class="aqn"><button data-s="-1" title="Su">▲</button><button data-s="1" title="Giù">▼</button></div>`;
     wrap.appendChild(box);
     const list = box.querySelector(".aql");
@@ -10586,6 +10598,7 @@ class NavigatorPanel extends HTMLElement {
       const on = !shb.classList.contains("on");
       try {
         await this._hass.callService("media_player", "shuffle_set", { entity_id: ent, shuffle: on });
+        try { localStorage.setItem(`${STORE_KEY}-shuf-${a.id}`, on ? "1" : "0"); } catch (e) { /* niente */ }
         shb.classList.toggle("on", on);
         shb.innerHTML = ADDON_ICONS(on ? "shuffle" : "repeat");
         shb.title = on ? "Casuale (tocca per l'ordine della playlist)" : "In ordine (tocca per casuale)";
@@ -10629,7 +10642,7 @@ class NavigatorPanel extends HTMLElement {
       const i = +b.dataset.i;
       box.remove();
       this._addonLoading(el, items[i].title || "");
-      try { await play(i); } catch (err) { this._addonLoading(el, null); this._msg(`${a.name}: ${err.message || err}`); }
+      try { await play(i); if (!el._cyc) this._applyShuffle(a, ent); } catch (err) { this._addonLoading(el, null); this._msg(`${a.name}: ${err.message || err}`); }
     }));
   }
 
@@ -10766,7 +10779,7 @@ class NavigatorPanel extends HTMLElement {
           // subito alla finestra, con la rotellina e il nome finché la musica non parte davvero
           box.remove();
           this._addonLoading(el, c.title || "");
-          try { await play(c); this._alog(`${a.id}: avvio inviato`); }
+          try { await play(c); this._alog(`${a.id}: avvio inviato`); if (!cycle) this._applyShuffle(a, ent); }
           catch (err) {
             this._addonLoading(el, null);
             this._alog(`${a.id}: avvio ERRORE ${err.message || err.code || err}`);
