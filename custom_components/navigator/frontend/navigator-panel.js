@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.47";
+const PANEL_VERSION = "1.14.48";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -10462,7 +10462,7 @@ class NavigatorPanel extends HTMLElement {
       const st0 = this._hass.states?.[ent0]?.state;
       let last = null;
       try { last = JSON.parse(localStorage.getItem(`${STORE_KEY}-alast-${a.id}`) || "null"); } catch (e) { last = null; }
-      if (!el._cyc && last && ["playing", "paused", "buffering"].includes(st0)) { this._addonQueue(a, el, b); return; }
+      if (!el._cyc && last && !last.cyc && ["playing", "paused", "buffering"].includes(st0)) { this._addonQueue(a, el, b); return; }
       this._addonList(a, el, b);
       return;
     }
@@ -10649,7 +10649,7 @@ class NavigatorPanel extends HTMLElement {
         el._cyc = cycle ? { items: playable, idx: playable.indexOf(c), play: play0 } : null;
         // l'ultima voce partita: ▶ col lettore fermo la fa ripartire (anche dopo un riavvio)
         el._last = { title: c.title, play: () => play0(c) };
-        try { localStorage.setItem(`${STORE_KEY}-alast-${a.id}`, JSON.stringify({ title: c.title, uri: c.uri || "", mt: c.mt || "", id: c.media_content_id || "", type: c.media_content_type || "" })); } catch (e) { /* niente */ }
+        try { localStorage.setItem(`${STORE_KEY}-alast-${a.id}`, JSON.stringify({ title: c.title, uri: c.uri || "", mt: c.mt || "", id: c.media_content_id || "", type: c.media_content_type || "", cyc: !!cycle })); } catch (e) { /* niente */ }
       };
       list.innerHTML = items.map((c, i) => `<button data-i="${i}">${c.thumbnail ? `<img data-src="${esc(c.thumbnail)}" alt="">` : "<i>🎵</i>"}<span>${esc(c.title || "")}</span></button>`).join("");
       // copertine: quelle interne di Home Assistant (/api/…) si aprono solo con la firma, come nel pannello Media; quelle
