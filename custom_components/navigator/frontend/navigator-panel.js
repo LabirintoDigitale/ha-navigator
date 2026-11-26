@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.58";
+const PANEL_VERSION = "1.14.59";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1811,6 +1811,7 @@ const STYLE = `
   .aqueue .aqh { display: flex; align-items: center; padding: 10px 12px; gap: 10px; font: 700 18px sans-serif; }
   .aqueue .aqh b { flex: 1; }
   .aqueue .aqh button svg { width: 28px; height: 28px; display: block; margin: auto; }
+  .aqueue .aqh button.on { background: #1a73e8; }
   .aqueue .aqh button, .aqueue .aqn button { border: none; border-radius: 12px; background: rgba(255,255,255,.14); color: #fff;
     font: 700 22px sans-serif; min-width: 56px; height: 50px; cursor: pointer; }
   .aqueue .aql { flex: 1; overflow-y: auto; padding: 0 8px; display: flex; flex-direction: column; gap: 4px; }
@@ -6379,6 +6380,7 @@ class NavigatorPanel extends HTMLElement {
     this._applyFloat("pitchctl"); this._applyFloat("spdbox");
     // mappa della stessa misura di prima (es. aperto un pannello sopra, un add-on, un menu): la mappa non si tocca
     const wr = this.$("mapwrap");
+    if (wr) { wr.scrollTop = 0; wr.scrollLeft = 0; if (wr.parentElement) { wr.parentElement.scrollTop = 0; } }
     const sz = wr ? `${wr.clientWidth}x${wr.clientHeight}|${this._rotated() ? 1 : 0}` : "";
     if (sz && sz === this._relaySz && !this._nav) return;
     this._relaySz = sz;
@@ -9728,6 +9730,14 @@ class NavigatorPanel extends HTMLElement {
     try { A.setDragOrigin(fx, fy); } catch (e) { /* app vecchia */ }
   }
 
+  // porta una voce al centro di un elenco scorrevole muovendo SOLO l'elenco (scrollIntoView spostava anche la mappa e la
+  // pagina: a schermo intero in verticale restava mezza schermata nera, anche girando il telefono)
+  _centerIn(list, item) {
+    if (!list || !item) return;
+    const lr = list.getBoundingClientRect(), r = item.getBoundingClientRect();
+    list.scrollTop += (r.top - lr.top) - (lr.height - r.height) / 2;
+  }
+
   // avvisi in basso di Home Assistant (connessione persa, riavvio, integrazione ricaricata…): con Navigator aperto non
   // servono e coprono la mappa, si nascondono finché si resta qui
   _hideHaToasts(on) {
@@ -10563,12 +10573,25 @@ class NavigatorPanel extends HTMLElement {
     const box = document.createElement("div");
     box.id = "aqueue"; box.className = "aqueue";
     const lb = listBtn || (a.window.buttons || []).find((x) => x.list);
-    box.innerHTML = `<div class="aqh"><b>${esc(a.window.title || a.name)}</b>${lb ? `<button data-pl title="Playlist e radio">${ADDON_ICONS("playlist")}</button>` : ""}<button data-x title="Chiudi">✕</button></div>
+    const shuf = !!this._hass.states[ent]?.attributes?.shuffle;
+    box.innerHTML = `<div class="aqh"><b>${esc(a.window.title || a.name)}</b><button data-sh class="${shuf ? "on" : ""}" title="${shuf ? "Casuale (tocca per l'ordine della playlist)" : "In ordine (tocca per casuale)"}">${ADDON_ICONS(shuf ? "shuffle" : "repeat")}</button>${lb ? `<button data-pl title="Playlist e radio">${ADDON_ICONS("playlist")}</button>` : ""}<button data-x title="Chiudi">✕</button></div>
       <div class="aql">Carico…</div><div class="aqn"><button data-s="-1" title="Su">▲</button><button data-s="1" title="Giù">▼</button></div>`;
     wrap.appendChild(box);
     const list = box.querySelector(".aql");
     box.addEventListener("click", (e) => e.stopPropagation());
     box.querySelector("[data-x]").onclick = () => box.remove();
+    // casuale / in ordine: salta a brani a caso della playlist oppure li suona in sequenza
+    const shb = box.querySelector("[data-sh]");
+    shb.onclick = async () => {
+      const on = !shb.classList.contains("on");
+      try {
+        await this._hass.callService("media_player", "shuffle_set", { entity_id: ent, shuffle: on });
+        shb.classList.toggle("on", on);
+        shb.innerHTML = ADDON_ICONS(on ? "shuffle" : "repeat");
+        shb.title = on ? "Casuale (tocca per l'ordine della playlist)" : "In ordine (tocca per casuale)";
+        this._msg(on ? "🔀 Casuale" : "➡ In ordine");
+      } catch (err) { this._msg("Questo lettore non sa suonare a caso"); }
+    };
     const plb = box.querySelector("[data-pl]");
     if (plb) plb.onclick = () => { box.remove(); this._addonList(a, el, lb); }; // all'elenco di playlist e radio
     box.querySelectorAll("[data-s]").forEach((b) => { b.onclick = () => list.scrollBy({ top: +b.dataset.s * list.clientHeight * 0.85, behavior: "smooth" }); });
@@ -10601,7 +10624,7 @@ class NavigatorPanel extends HTMLElement {
     if (cur < 0 && el._cyc?.items?.length) cur = el._cyc.idx ?? -1;
     list.innerHTML = items.map((x, i) => `<button data-i="${i}" class="${i === cur ? "on" : ""}">${x.thumb && /^https:|^\//.test(x.thumb) ? `<img src="${esc(x.thumb)}" alt="">` : "<i>🎵</i>"}<span>${esc(x.title || "")}</span></button>`).join("");
     list.querySelectorAll("img").forEach((im) => { im.onerror = () => im.replaceWith(Object.assign(document.createElement("i"), { textContent: "🎵" })); });
-    requestAnimationFrame(() => list.querySelector(".on")?.scrollIntoView({ block: "center" })); // la voce in corso al centro
+    requestAnimationFrame(() => this._centerIn(list, list.querySelector(".on"))); // la voce in corso al centro
     list.querySelectorAll("[data-i]").forEach((b) => b.addEventListener("click", async () => {
       const i = +b.dataset.i;
       box.remove();
@@ -10720,7 +10743,7 @@ class NavigatorPanel extends HTMLElement {
       const icon = (c) => isPl && isDyn(c) ? `<i class="pli">${ADDON_ICONS("playlistdyn")}</i>`
         : c.thumbnail ? `<img data-src="${esc(c.thumbnail)}" alt="">` : isPl ? `<i class="pli">${ADDON_ICONS("playlist")}</i>` : "<i>🎵</i>";
       list.innerHTML = items.map((c, i) => `<button data-i="${i}" class="${isLast(c) ? "on" : ""}">${icon(c)}<span>${esc(c.title || "")}</span></button>`).join("");
-      requestAnimationFrame(() => list.querySelector(".on")?.scrollIntoView({ block: "center" })); // quella in corso al centro
+      requestAnimationFrame(() => this._centerIn(list, list.querySelector(".on"))); // quella in corso al centro
       // copertine: quelle interne di Home Assistant (/api/…) si aprono solo con la firma, come nel pannello Media; quelle
       // che non si caricano (es. dal server di Music Assistant in http) lasciano il posto all'icona
       list.querySelectorAll("img[data-src]").forEach(async (im) => {
