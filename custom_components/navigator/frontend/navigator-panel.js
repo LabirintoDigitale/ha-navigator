@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.35";
+const PANEL_VERSION = "1.14.36";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -9977,16 +9977,13 @@ class NavigatorPanel extends HTMLElement {
       menu.remove();
       this._placePitchCtl();
     });
-    // tutta l'altezza della mappa (è un menu: sotto non serve vedere), a fianco del riquadro della velocità se c'è posto
+    // sotto il riquadro della velocità; in orizzontale arriva fino in fondo (è un menu: sotto non serve vedere)
     const wr = wrap.getBoundingClientRect(), br = box.getBoundingClientRect();
     const mw = 220 * this._carScale() + 12;
-    const right = br.right - wr.left + 8;
-    menu.style.left = `${right + mw <= wrap.clientWidth - 4 ? right : Math.max(4, Math.min(wrap.clientWidth - mw - 4, br.left - wr.left))}px`;
-    if (wrap.clientWidth > wrap.clientHeight) { menu.style.top = "8px"; menu.style.bottom = "8px"; } // orizzontale: tutta l'altezza
-    else { // verticale: sotto il riquadro della velocità, come prima
-      menu.style.left = `${Math.max(4, Math.min(wrap.clientWidth - mw - 4, br.left - wr.left))}px`;
-      menu.style.top = `${br.bottom - wr.top + 6}px`; menu.style.maxHeight = `${wrap.clientHeight - (br.bottom - wr.top) - 14}px`;
-    }
+    menu.style.left = `${Math.max(4, Math.min(wrap.clientWidth - mw - 4, br.left - wr.left))}px`;
+    menu.style.top = `${br.bottom - wr.top + 6}px`;
+    if (wrap.clientWidth > wrap.clientHeight) menu.style.bottom = "8px";
+    else menu.style.maxHeight = `${wrap.clientHeight - (br.bottom - wr.top) - 14}px`;
     menu.style.overflowY = "auto";
     wrap.appendChild(menu);
     menu.querySelectorAll("[data-a]").forEach((b) => b.addEventListener("click", async (e) => {
