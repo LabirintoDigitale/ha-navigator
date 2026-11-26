@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.55";
+const PANEL_VERSION = "1.14.56";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -10568,7 +10568,7 @@ class NavigatorPanel extends HTMLElement {
           media_id: items.slice(i, i + 200).map((x) => x.id), media_type: "track" })
           .catch(() => this._hass.callService("media_player", "play_media", { entity_id: ent, media_content_id: items[i].id, media_content_type: "music" }));
       }
-    } catch (err) { list.textContent = `Elenco non disponibile: ${err.message || err}`; return; }
+    } catch (err) { this._alog?.(`${a.id}: elenco dei brani: ${err.message || err}`); list.textContent = "Playlist vuota"; return; }
     // voce in riproduzione: stesso indirizzo o stesso titolo (senza badare a maiuscole, spazi, "feat." e simili)
     const at0 = this._hass.states[ent]?.attributes || {};
     const norm = (t) => String(t || "").toLowerCase().replace(/\(.*?\)|\[.*?\]|feat\..*$/g, "").replace(/[^a-z0-9àèéìòù]+/g, " ").trim();
@@ -10726,7 +10726,8 @@ class NavigatorPanel extends HTMLElement {
             this._addonLoading(el, null);
             this._alog(`${a.id}: avvio ERRORE ${err.message || err.code || err}`);
             const m = String(err.message || err);
-            this._msg(/nothing to play/i.test(m) ? `«${c.title}»: per ora vuota (Music Assistant non trova brani o album da suonare, es. cartella di rete spenta)` : `${a.name}: ${m}`);
+            // niente messaggi tecnici: la playlist che non parte risulta vuota (il motivo resta nel registro del debug)
+            this._msg(isPl ? `«${c.title}»: playlist vuota` : `«${c.title}»: non disponibile`);
           }
         } else if (c.can_expand && open) open(c);
       }));
