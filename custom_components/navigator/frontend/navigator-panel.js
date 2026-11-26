@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.50";
+const PANEL_VERSION = "1.14.51";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -906,7 +906,12 @@ const ADDON_ICONS = (() => {
     stop: S('<rect x="6.5" y="6.5" width="11" height="11" rx="1.5"/>'),
     next: S('<path d="M6 6v12l8.5-6z"/><path d="M18 6v12"/>'),
     prev: S('<path d="M18 6v12l-8.5-6z"/><path d="M6 6v12"/>'),
-    playlist: S('<path d="M4 6.5h11M4 11h11M4 15.5h6"/><path d="M17 17.5V9.5l3.5-1"/><circle cx="15.5" cy="17.5" r="1.6"/>'),
+    // doppia croma colorata (dal rosso all'azzurro) da cui volano via piccoli 0 e 1
+    playlist: `<svg viewBox="0 0 24 24" width="22" height="22"><defs><linearGradient id="npl" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff2d55"/><stop offset=".35" stop-color="#ff9500"/><stop offset=".65" stop-color="#8bd34a"/><stop offset="1" stop-color="#32c5ff"/></linearGradient></defs>
+      <path fill="url(#npl)" d="M7 7.2 16.2 5v10.6a2.6 2.1 0 1 1-1.6-1.95V8.6L8.6 10v7.6a2.6 2.1 0 1 1-1.6-1.95z"/>
+      <g font-family="monospace" font-weight="700" fill="#8fe3ff"><text x="17.4" y="6.2" font-size="3.6">1</text><text x="19.6" y="3.6" font-size="3">0</text>
+      <text x="20.6" y="8.4" font-size="2.6" fill="#b6f08a">1</text><text x="15.4" y="2.9" font-size="2.6" fill="#ffd36b">0</text><text x="21.4" y="2" font-size="2.2">1</text></g></svg>`,
     volup: S('<path d="M5 9.5h3l4-3.5v12l-4-3.5H5z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11"/>'),
     voldown: S('<path d="M5 9.5h3l4-3.5v12l-4-3.5H5z"/><path d="M16 9a4 4 0 0 1 0 6"/>'),
     mute: S('<path d="M5 9.5h3l4-3.5v12l-4-3.5H5z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/>'),
@@ -1787,6 +1792,21 @@ const STYLE = `
   :host(.carscr) .aph .phau, :host(.carscr) .aph .phrt button { font-size: 18px; padding: 12px 14px; }
   :host(.carscr) .aph .phbig button { width: 80px; height: 80px; }
   :host(.carscr) .aph .phfav button { font-size: 17px; padding: 10px 6px; }
+  /* elenco di playlist e radio a tutto schermo, come quello dei brani */
+  .alpwrap { position: absolute; inset: 8px; z-index: 1009; border-radius: 14px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,.6);
+    display: flex; flex-direction: column; background: rgba(18,18,18,.97); }
+  .alpwrap .alp { position: relative; inset: auto; flex: 1; border-radius: 0; background: none; min-height: 0; }
+  .alpwrap .alh { padding: 10px 12px; font: 700 18px sans-serif; }
+  .alpwrap .alh button { width: 56px; height: 50px; font: 700 22px sans-serif; border-radius: 12px; }
+  .alpwrap .altabs button { height: 50px; font: 700 17px sans-serif !important; padding: 0 18px !important; }
+  .alpwrap .all { font: 17px sans-serif; padding: 0 8px; display: flex; flex-direction: column; gap: 4px; }
+  .alpwrap .all > button { min-height: 56px; font: 600 17px sans-serif; color: #fff; border-radius: 10px; padding: 8px 10px; flex: none;
+    background: rgba(255,255,255,.06); }
+  .alpwrap .all img, .alpwrap .all i { width: 44px; height: 44px; font-size: 26px; display: flex; align-items: center; justify-content: center; }
+  .alpwrap .aqn { display: flex; gap: 10px; justify-content: center; padding: 10px; }
+  .alpwrap .aqn button { flex: 1; max-width: 200px; border: none; border-radius: 12px; background: rgba(255,255,255,.14); color: #fff;
+    font: 700 22px sans-serif; height: 50px; cursor: pointer; }
+  :host(.carscr) .alpwrap .alp, :host(.carscr) .alpwrap .aqn { zoom: var(--cz, 1); }
   /* elenco dei brani a tutto schermo (⏭ tenuto premuto) */
   .aqueue { position: absolute; inset: 8px; z-index: 1009; background: rgba(18,18,18,.97); border-radius: 14px; display: flex;
     flex-direction: column; color: #fff; box-shadow: 0 4px 20px rgba(0,0,0,.6); overflow: hidden; }
@@ -1835,20 +1855,20 @@ const STYLE = `
   .addwin .abl ~ .abar, .addwin.botmode .abar { left: 6px; transform: none; }
   .addwin .aimg:has(.abl) .acap { padding-left: 54px; }
   .addwin.botmode .acap { padding-right: 46px; }
-  .addwin .alp { position: absolute; inset: 0; background: rgba(18,18,18,.96); border-radius: 8px; display: flex;
+  :is(.addwin, .alpwrap) .alp { position: absolute; inset: 0; background: rgba(18,18,18,.96); border-radius: 8px; display: flex;
     flex-direction: column; z-index: 2; }
-  .addwin .alh { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; color: #fff; font: 600 13px sans-serif; }
-  .addwin .altabs { display: flex; gap: 4px; }
-  .addwin .altabs button { width: auto !important; padding: 0 10px; font: 600 12px sans-serif; opacity: .75; }
-  .addwin .altabs button.on { background: #1a73e8 !important; opacity: 1; }
-  .addwin .alh button { border: none; background: rgba(255,255,255,.14); color: #fff; border-radius: 8px; width: 32px; height: 28px; cursor: pointer; }
-  .addwin .all { flex: 1; overflow-y: auto; padding: 0 6px 6px; color: #ccc; font: 12px sans-serif; touch-action: pan-y;
+  :is(.addwin, .alpwrap) .alh { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; color: #fff; font: 600 13px sans-serif; }
+  :is(.addwin, .alpwrap) .altabs { display: flex; gap: 4px; }
+  :is(.addwin, .alpwrap) .altabs button { width: auto !important; padding: 0 10px; font: 600 12px sans-serif; opacity: .75; }
+  :is(.addwin, .alpwrap) .altabs button.on { background: #1a73e8 !important; opacity: 1; }
+  :is(.addwin, .alpwrap) .alh button { border: none; background: rgba(255,255,255,.14); color: #fff; border-radius: 8px; width: 32px; height: 28px; cursor: pointer; }
+  :is(.addwin, .alpwrap) .all { flex: 1; overflow-y: auto; padding: 0 6px 6px; color: #ccc; font: 12px sans-serif; touch-action: pan-y;
     -webkit-overflow-scrolling: touch; }
-  .addwin .all button.on { background: #1a73e8 !important; color: #fff; }
-  .addwin .all button { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: none;
+  :is(.addwin, .alpwrap) .all button.on { background: #1a73e8 !important; color: #fff; }
+  :is(.addwin, .alpwrap) .all button { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: none;
     background: rgba(255,255,255,.07); color: #fff; border-radius: 8px; padding: 6px; margin-bottom: 4px; font: 13px sans-serif; cursor: pointer; }
-  .addwin .all img { width: 32px; height: 32px; border-radius: 4px; object-fit: cover; flex: none; position: static; }
-  .addwin .all i { width: 32px; text-align: center; font-style: normal; flex: none; }
+  :is(.addwin, .alpwrap) .all img { width: 32px; height: 32px; border-radius: 4px; object-fit: cover; flex: none; position: static; }
+  :is(.addwin, .alpwrap) .all i { width: 32px; text-align: center; font-style: normal; flex: none; }
   .addwin .aov button { position: absolute; border: none; border-radius: 8px; background: rgba(0,0,0,.55); color: #fff;
     font: 600 13px sans-serif; padding: 4px 8px; cursor: pointer; line-height: 1.2; }
   .addwin .aov .fmt { left: 4px; top: 4px; font-size: 15px; }
@@ -9691,7 +9711,7 @@ class NavigatorPanel extends HTMLElement {
     if (typeof A?.setDragOrigin !== "function") return;
     const root = this.shadowRoot;
     // il più in alto fra quelli aperti: elenco di un add-on, menu dei km/h, pannello delle destinazioni
-    const cand = [root.querySelector("#aqueue .aql"), root.querySelector(".addwin .alp"), this.$?.("addmenu"),
+    const cand = [root.querySelector("#aqueue .aql"), root.querySelector("#alpfull .all"), this.$?.("addmenu"),
       this.classList.contains("sideopen") ? root.querySelector(".main .side") : null].find((x) => x && x.offsetParent !== null);
     let fx = -1, fy = -1;
     if (cand) {
@@ -10616,8 +10636,18 @@ class NavigatorPanel extends HTMLElement {
   }
 
   async _addonList(a, el, b, at = null, tab = null) {
-    const box = el.querySelector(".aimg");
-    if (!box) return;
+    // a tutto schermo sopra la mappa (come l'elenco dei brani), con ▲▼ per scorrere e ✕ per chiudere
+    const mw = this.$("mapwrap");
+    if (!mw) return;
+    let box = this.$("alpfull");
+    if (!box) {
+      box = document.createElement("div");
+      box.id = "alpfull"; box.className = "alpwrap";
+      box.innerHTML = `<div class="aqn"><button data-s="-1" title="Su">▲</button><button data-s="1" title="Giù">▼</button></div>`;
+      mw.appendChild(box);
+      box.addEventListener("click", (e) => e.stopPropagation());
+      box.querySelectorAll(".aqn [data-s]").forEach((bt) => { bt.onclick = () => { const l = box.querySelector(".all"); l?.scrollBy({ top: +bt.dataset.s * l.clientHeight * 0.85, behavior: "smooth" }); }; });
+    }
     const v = this._addonVarsA(a);
     const ent = this._addonFill(b.list.browse, v);
     // schede in alto (es. Playlist / Radio): ognuna con le sue cartelle; si ricorda l'ultima usata
@@ -10629,13 +10659,13 @@ class NavigatorPanel extends HTMLElement {
     const excl = tabs[ti]?.exclude || [];
     let pane = box.querySelector(".alp");
     if (!pane) {
-      pane = document.createElement("div"); pane.className = "alp"; box.appendChild(pane);
+      pane = document.createElement("div"); pane.className = "alp"; box.insertBefore(pane, box.firstChild);
       pane.addEventListener("click", (e) => e.stopPropagation()); // dentro l'elenco il tocco non chiude l'add-on
     }
     pane.innerHTML = `<div class="alh">${tabs.length > 1
       ? `<span class="altabs">${tabs.map((t, i) => `<button data-t="${i}" class="${i === ti ? "on" : ""}">${esc(t.label)}</button>`).join("")}</span>`
       : `<span>${esc(b.label || "Elenco")}</span>`}<button data-x title="Chiudi">✕</button></div><div class="all">Carico…</div>`;
-    pane.querySelector("[data-x]").addEventListener("click", () => pane.remove());
+    pane.querySelector("[data-x]").addEventListener("click", () => box.remove());
     pane.querySelectorAll("[data-t]").forEach((t) => t.addEventListener("click", () => this._addonList(a, el, b, null, +t.dataset.t)));
     const list = pane.querySelector(".all");
     // elenco di voci da toccare: play(c) fa partire, open(c) apre una cartella
@@ -10684,12 +10714,14 @@ class NavigatorPanel extends HTMLElement {
           this._alog(`${a.id}: scelto "${c.title}" (${c.uri || c.media_content_id || ""}) su ${ent}, che ora è ${this._hass.states?.[ent]?.state ?? "assente"}`);
           setTimeout(() => this._alog(`${a.id}: ${ent} 3 s dopo: ${this._hass.states?.[ent]?.state ?? "assente"}${this._hass.states?.[ent]?.attributes?.media_title ? ` · "${this._hass.states[ent].attributes.media_title}"` : ""}`), 3000);
           // subito alla finestra, con la rotellina e il nome finché la musica non parte davvero
-          pane.remove();
+          box.remove();
           this._addonLoading(el, c.title || "");
           try { await play(c); this._alog(`${a.id}: avvio inviato`); }
           catch (err) {
             this._addonLoading(el, null);
-            this._alog(`${a.id}: avvio ERRORE ${err.message || err.code || err}`); this._msg(`${a.name}: ${err.message || err}`);
+            this._alog(`${a.id}: avvio ERRORE ${err.message || err.code || err}`);
+            const m = String(err.message || err);
+            this._msg(/nothing to play/i.test(m) ? `«${c.title}»: per ora vuota (Music Assistant non trova brani o album da suonare, es. cartella di rete spenta)` : `${a.name}: ${m}`);
           }
         } else if (c.can_expand && open) open(c);
       }));
