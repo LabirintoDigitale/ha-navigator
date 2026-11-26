@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.56";
+const PANEL_VERSION = "1.14.57";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -2089,6 +2089,7 @@ class NavigatorPanel extends HTMLElement {
   }
 
   connectedCallback() {
+    this._hideHaToasts(true);
     // telefonate dall'app NaviHA (add-on Telefono)
     window.__navihaPhone = () => this._phoneUpdate();
     clearInterval(this._phoneRouteT);
@@ -2122,6 +2123,7 @@ class NavigatorPanel extends HTMLElement {
   set panel(p) { this._panel = p; }
 
   disconnectedCallback() {
+    this._hideHaToasts(false);
     clearInterval(this._phoneTick);
     clearInterval(this._guidaT);
     try { this._playerUnsub?.(); } catch (e) { /* già chiuso */ }
@@ -2501,6 +2503,7 @@ class NavigatorPanel extends HTMLElement {
   }
 
   _msg(text) {
+    if (this._hass?.connection && this._hass.connection.connected === false) return; // Home Assistant si sta riavviando: niente avvisi
     const t = document.createElement("div");
     t.textContent = text;
     Object.assign(t.style, { position: "fixed", bottom: "20px", left: "50%", transform: "translateX(-50%)", zIndex: 2000,
@@ -9721,6 +9724,23 @@ class NavigatorPanel extends HTMLElement {
     if (k === this._dragOk) return;
     this._dragOk = k;
     try { A.setDragOrigin(fx, fy); } catch (e) { /* app vecchia */ }
+  }
+
+  // avvisi in basso di Home Assistant (connessione persa, riavvio, integrazione ricaricata…): con Navigator aperto non
+  // servono e coprono la mappa, si nascondono finché si resta qui
+  _hideHaToasts(on) {
+    try {
+      const ha = document.querySelector("home-assistant");
+      const r = ha?.shadowRoot;
+      if (!r) { if (on) setTimeout(() => this.isConnected && this._hideHaToasts(true), 1000); return; }
+      let st = r.getElementById("navigator-notoast");
+      if (on && !st) {
+        st = document.createElement("style");
+        st.id = "navigator-notoast";
+        st.textContent = "notification-manager, ha-toast { display: none !important; }";
+        r.appendChild(st);
+      } else if (!on && st) st.remove();
+    } catch (e) { /* struttura della pagina diversa: niente */ }
   }
 
   // batteria del telefono nel riquadro della velocità (dall'app NaviHA o dal browser, se la sa leggere)
