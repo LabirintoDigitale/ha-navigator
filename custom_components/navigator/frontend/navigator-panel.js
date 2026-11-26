@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.39";
+const PANEL_VERSION = "1.14.40";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1709,7 +1709,7 @@ const STYLE = `
     padding: 4px; box-shadow: 0 2px 10px rgba(0,0,0,.45); touch-action: none; user-select: none; -webkit-user-select: none; cursor: pointer; }
   .addwin.moved { right: auto; }
   /* modalità spostamento (auto): riquadro scelto svuotato come la sagoma del trascinamento sul telefono */
-  .mapwrap.editing .pitchctl, .mapwrap.editing .spdbox, .mapwrap.editing .addwin:not(.addock .addwin) { outline: 2px dashed rgba(255,255,255,.7); outline-offset: 2px; }
+  .mapwrap.editing .pitchctl, .mapwrap.editing .spdbox, .mapwrap.editing .addwin:not(.addock .addwin), .mapwrap.editing .navtop:not(.docked) { outline: 2px dashed rgba(255,255,255,.7); outline-offset: 2px; }
   .mapwrap.editing .editsel { outline: 3px solid #1a73e8; background: rgba(26,115,232,.22) !important; }
   .mapwrap.editing .editsel > * { visibility: hidden; }
   .editsz { position: absolute; z-index: 1101; display: flex; align-items: center; gap: 2px; border: none; border-radius: 10px;
@@ -7220,6 +7220,7 @@ class NavigatorPanel extends HTMLElement {
     this._editSel?.classList.remove("editsel");
     this._editSel = el;
     if (!el) { this.$("editsz")?.remove(); return; }
+    if (el.id === "navtop") { el.classList.add("editsel"); this.$("editsz")?.remove(); return; } // niente ⤢ per la barra verde
     el.classList.add("editsel", "moved");
     el.style.right = "auto";
     el.style.left = `${el.offsetLeft}px`; el.style.top = `${el.offsetTop}px`;
@@ -7265,20 +7266,26 @@ class NavigatorPanel extends HTMLElement {
     const wrap = this.$("mapwrap");
     if (!wrap) return;
     let down = null;
-    const movable = (t) => t.closest?.("#pitchctl, #spdbox, .addwin");
+    const movable = (t) => t.closest?.("#pitchctl, #spdbox, .addwin, #navtop");
     const stop = (e) => { if (!this._editing || e.target.closest?.("#editbar, #editsz")) return false; e.stopPropagation(); if (e.cancelable) e.preventDefault(); return true; };
     wrap.addEventListener("pointerdown", (e) => {
       if (!stop(e)) return;
       const m = movable(e.target);
-      if (m && !m.closest(".addock")) this._editPick(m);
+      if (m && (m.id === "navtop" ? !m.classList.contains("docked") : !m.closest(".addock"))) this._editPick(m);
       const el = this._editSel;
-      down = el ? { x: e.clientX, y: e.clientY, l: el.offsetLeft, t: el.offsetTop } : null;
+      // barra verde: solo su e giù (resta larga quanto lo schermo)
+      down = el ? { x: e.clientX, y: e.clientY, l: el.offsetLeft, t: el.id === "navtop" ? el.getBoundingClientRect().top - wrap.getBoundingClientRect().top : el.offsetTop } : null;
       if (down) this._dragging = true; // durante lo spostamento niente ricollocazioni automatiche
       if (down) try { wrap.setPointerCapture(e.pointerId); } catch (err) { /* puntatore simulato */ }
     }, true);
     wrap.addEventListener("pointermove", (e) => {
       if (!stop(e) || !down || !this._editSel) return;
       const el = this._editSel;
+      if (el.id === "navtop") {
+        const y = Math.max(4, Math.min(wrap.clientHeight - el.offsetHeight - 4, down.t + e.clientY - down.y));
+        el.classList.add("moved"); el.style.setProperty("--nty", `${y}px`);
+        return;
+      }
       const x = Math.max(4, Math.min(wrap.clientWidth - el.offsetWidth - 4, down.l + e.clientX - down.x));
       const y = Math.max(4, Math.min(wrap.clientHeight - el.offsetHeight - 4, down.t + e.clientY - down.y));
       el.style.left = `${x}px`; el.style.top = `${y}px`;
@@ -7290,6 +7297,13 @@ class NavigatorPanel extends HTMLElement {
       this._dragging = false;
       const el = this._editSel;
       if (!el) return;
+      if (el.id === "navtop") { // come lo spostamento col dito sul telefono: altezza in frazione della mappa
+        const y = el.getBoundingClientRect().top - wrap.getBoundingClientRect().top;
+        (this._layout ||= {}).navtop = { y: y / wrap.clientHeight };
+        this._saveLayout();
+        this._syncDock();
+        return;
+      }
       const key = el.id.startsWith("addon-") ? `addon:${el.id.slice(6)}` : el.id;
       (this._layout ||= {})[key] = this._posOf(el.offsetLeft, el.offsetTop, el, wrap);
       this._saveLayout();
