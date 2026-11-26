@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.48";
+const PANEL_VERSION = "1.14.49";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1844,6 +1844,7 @@ const STYLE = `
   .addwin .alh button { border: none; background: rgba(255,255,255,.14); color: #fff; border-radius: 8px; width: 32px; height: 28px; cursor: pointer; }
   .addwin .all { flex: 1; overflow-y: auto; padding: 0 6px 6px; color: #ccc; font: 12px sans-serif; touch-action: pan-y;
     -webkit-overflow-scrolling: touch; }
+  .addwin .all button.on { background: #1a73e8 !important; color: #fff; }
   .addwin .all button { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: none;
     background: rgba(255,255,255,.07); color: #fff; border-radius: 8px; padding: 6px; margin-bottom: 4px; font: 13px sans-serif; cursor: pointer; }
   .addwin .all img { width: 32px; height: 32px; border-radius: 4px; object-fit: cover; flex: none; position: static; }
@@ -10549,10 +10550,17 @@ class NavigatorPanel extends HTMLElement {
           .catch(() => this._hass.callService("media_player", "play_media", { entity_id: ent, media_content_id: items[i].id, media_content_type: "music" }));
       }
     } catch (err) { list.textContent = `Elenco non disponibile: ${err.message || err}`; return; }
-    const now = this._hass.states[ent]?.attributes?.media_title || this._hass.states[ent]?.attributes?.media_channel || "";
-    list.innerHTML = items.map((x, i) => `<button data-i="${i}" class="${x.title === now ? "on" : ""}">${x.thumb && /^https:|^\//.test(x.thumb) ? `<img src="${esc(x.thumb)}" alt="">` : "<i>🎵</i>"}<span>${esc(x.title || "")}</span></button>`).join("");
+    // voce in riproduzione: stesso indirizzo o stesso titolo (senza badare a maiuscole, spazi, "feat." e simili)
+    const at0 = this._hass.states[ent]?.attributes || {};
+    const norm = (t) => String(t || "").toLowerCase().replace(/\(.*?\)|\[.*?\]|feat\..*$/g, "").replace(/[^a-z0-9àèéìòù]+/g, " ").trim();
+    const nowT = norm(at0.media_title || at0.media_channel), nowId = at0.media_content_id || "";
+    let cur = items.findIndex((x) => (x.id && nowId && (nowId === x.id || nowId.endsWith(x.id) || x.id.endsWith(nowId))));
+    if (cur < 0 && nowT) cur = items.findIndex((x) => norm(x.title) === nowT);
+    if (cur < 0 && nowT) cur = items.findIndex((x) => { const n = norm(x.title); return n && (n.includes(nowT) || nowT.includes(n)); });
+    if (cur < 0 && el._cyc?.items?.length) cur = el._cyc.idx ?? -1;
+    list.innerHTML = items.map((x, i) => `<button data-i="${i}" class="${i === cur ? "on" : ""}">${x.thumb && /^https:|^\//.test(x.thumb) ? `<img src="${esc(x.thumb)}" alt="">` : "<i>🎵</i>"}<span>${esc(x.title || "")}</span></button>`).join("");
     list.querySelectorAll("img").forEach((im) => { im.onerror = () => im.replaceWith(Object.assign(document.createElement("i"), { textContent: "🎵" })); });
-    list.querySelector(".on")?.scrollIntoView({ block: "center" });
+    requestAnimationFrame(() => list.querySelector(".on")?.scrollIntoView({ block: "center" })); // la voce in corso al centro
     list.querySelectorAll("[data-i]").forEach((b) => b.addEventListener("click", async () => {
       const i = +b.dataset.i;
       box.remove();
@@ -10651,7 +10659,11 @@ class NavigatorPanel extends HTMLElement {
         el._last = { title: c.title, play: () => play0(c) };
         try { localStorage.setItem(`${STORE_KEY}-alast-${a.id}`, JSON.stringify({ title: c.title, uri: c.uri || "", mt: c.mt || "", id: c.media_content_id || "", type: c.media_content_type || "", cyc: !!cycle })); } catch (e) { /* niente */ }
       };
-      list.innerHTML = items.map((c, i) => `<button data-i="${i}">${c.thumbnail ? `<img data-src="${esc(c.thumbnail)}" alt="">` : "<i>🎵</i>"}<span>${esc(c.title || "")}</span></button>`).join("");
+      let lastSel = null;
+      try { lastSel = JSON.parse(localStorage.getItem(`${STORE_KEY}-alast-${a.id}`) || "null"); } catch (e) { lastSel = null; }
+      const isLast = (c) => !!lastSel && ((lastSel.id && lastSel.id === c.media_content_id) || (lastSel.uri && lastSel.uri === c.uri) || (!lastSel.id && !lastSel.uri && lastSel.title === c.title));
+      list.innerHTML = items.map((c, i) => `<button data-i="${i}" class="${isLast(c) ? "on" : ""}">${c.thumbnail ? `<img data-src="${esc(c.thumbnail)}" alt="">` : "<i>🎵</i>"}<span>${esc(c.title || "")}</span></button>`).join("");
+      requestAnimationFrame(() => list.querySelector(".on")?.scrollIntoView({ block: "center" })); // quella in corso al centro
       // copertine: quelle interne di Home Assistant (/api/…) si aprono solo con la firma, come nel pannello Media; quelle
       // che non si caricano (es. dal server di Music Assistant in http) lasciano il posto all'icona
       list.querySelectorAll("img[data-src]").forEach(async (im) => {
