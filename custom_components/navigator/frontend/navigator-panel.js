@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.57";
+const PANEL_VERSION = "1.14.58";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1780,12 +1780,12 @@ const STYLE = `
   .aph .phset { border: 1px solid rgba(255,255,255,.35); border-radius: 10px; background: none; color: #fff; padding: 6px 10px;
     font: 600 13px sans-serif; cursor: pointer; }
   .aph button.ko { outline: 2px solid #d93025; }
-  .aph .phau { align-self: center; border: none; border-radius: 12px; background: rgba(255,255,255,.14); color: #fff;
-    font: 600 15px sans-serif; padding: 8px 14px; cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .aph .phau { align-self: stretch; border: none; border-radius: 14px; background: rgba(255,255,255,.16); color: #fff;
+    font: 700 18px sans-serif; padding: 14px 16px; min-height: 52px; cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .aph .phau.on { background: rgba(26,115,232,.5); }
   .aph .phrt { display: flex; flex-direction: column; gap: 4px; }
-  .aph .phrt button { border: none; border-radius: 10px; background: rgba(255,255,255,.08); color: #fff; font: 600 15px sans-serif;
-    padding: 9px 10px; text-align: left; cursor: pointer; }
+  .aph .phrt button { border: none; border-radius: 12px; background: rgba(255,255,255,.1); color: #fff; font: 600 17px sans-serif;
+    padding: 12px 14px; min-height: 50px; text-align: left; cursor: pointer; }
   .aph .phrt button.on { background: #1a73e8; }
   :host(.carscr) .aph .phau, :host(.carscr) .aph .phrt button { font-size: 18px; padding: 12px 14px; }
   :host(.carscr) .aph .phbig button { width: 80px; height: 80px; }
@@ -9646,6 +9646,8 @@ class NavigatorPanel extends HTMLElement {
       // un tasto (o l'elenco aperto) fa la sua cosa; il tocco su tutto il resto del riquadro lo chiude, per ogni
       // add-on: lo decide Navigator, non l'add-on
       if (e.target.closest?.("button, a, select, input, .alp")) return;
+      // finestra Telefono durante una chiamata (o mentre squilla): un tocco per sbaglio non la chiude
+      if (el.classList.contains("phwin") && ["ringing", "offhook"].includes(this._phoneGet()?.state)) return;
       this._addonClick(a, el, load);
     });
     wrap.appendChild(el);
