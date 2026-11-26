@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.32";
+const PANEL_VERSION = "1.14.33";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1866,7 +1866,11 @@ const STYLE = `
   .addrow { display: flex; align-items: flex-start; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--divider-color, #333); }
   .addrow .ai { flex: 1; min-width: 0; }
   .addrow button { padding: 4px 10px; }
-  .addmenu { position: absolute; z-index: 1008; width: 220px; background: rgba(24,24,24,.95); border-radius: 12px; padding: 6px;
+  /* schermo dell'auto: comandi ingranditi tutti nella stessa proporzione (--cz) */
+  .addwin .at, .addwin .abar, .addwin .abl, .addwin .aov, .addwin .acap, .addwin .abtns, .addwin .alp, .addwin .aload,
+  .addwin .anopic, .addwin .aph > *, .addmenu > * { zoom: var(--cz, 1); }
+  .navbot > * { zoom: var(--czb, 1); }
+  .addmenu { position: absolute; z-index: 1008; width: calc(220px * var(--cz, 1)); background: rgba(24,24,24,.95); border-radius: 12px; padding: 6px;
     box-shadow: 0 4px 16px rgba(0,0,0,.5); display: flex; flex-direction: column; gap: 4px; }
   .addmenu .mt { color: #ddd; font: 600 12px sans-serif; padding: 4px 6px; }
   .addmenu button[data-nav] { font-weight: 700; margin-bottom: 4px; display: flex; align-items: center; gap: 10px; }
@@ -2257,6 +2261,9 @@ class NavigatorPanel extends HTMLElement {
     this._loadTrips();
     this._loadGarage();
     this._loadAddons();
+    setTimeout(() => this._spdBox(null, false), 1500); // riquadro della velocità (e del menu) subito presente
+    this._applyCarScale();
+    window.addEventListener("resize", () => setTimeout(() => this._applyCarScale(), 200));
     this._playerInit(); // nell'app NaviHA: il telefono diventa un lettore di Home Assistant
     this._batteryStart(); // batteria del telefono sopra "km/h"
     this._renderPlanSel();
@@ -7527,8 +7534,10 @@ class NavigatorPanel extends HTMLElement {
   _spdBox(kmh, over, lim = null) {
     const el = this.$("spdbox");
     if (!el || this._dragging) return;
-    // in guida e anche senza percorso (velocità dal GPS del telefono, limite della strada attuale)
-    const show = kmh != null && (!this._nav || this._isGuida());
+    // in guida e anche senza percorso (velocità dal GPS del telefono, limite della strada attuale); sempre presente
+    // perché toccandolo si apre il menu (senza velocità dal GPS segna 0)
+    const show = !this._nav || this._isGuida();
+    if (kmh == null) kmh = 0;
     if (el.hidden === show) { el.hidden = !show; if (show) { el.classList.toggle("big", this._isCarScreen()); this._applyFloat("spdbox"); } }
     if (!show) return;
     el.classList.toggle("over", over);
@@ -7847,6 +7856,9 @@ class NavigatorPanel extends HTMLElement {
       </div>
       <div class="grp"><h3>Mappa</h3>
         ${sw("clickSnd", "Suono alla pressione dei pulsanti", "Un \"tic\" leggero a ogni tasto premuto, anche sullo schermo dell'auto")}
+        <label class="line"><span>Grandezza dei comandi in auto<div class="note">Finestre degli add-on, i loro tasti, la barra in basso e il menu dei km/h sullo schermo dell'auto. Automatica: in proporzione all'altezza dello schermo, come sul telefono</div></span><select data-s="carScale">${
+          [["auto", "Automatica"], ["0.8", "80%"], ["1", "100%"], ["1.2", "120%"], ["1.5", "150%"], ["2", "200%"]].map(([v, t]) =>
+            `<option value="${v}" ${String(s.carScale || "auto") === v ? "selected" : ""}>${t}</option>`).join("")}</select></label>
         ${(() => { // nascondi automatico: riquadro con la scelta di schermo e veicolo
           const E = (this._ahEdit ||= { scr: this._isCarScreen() ? "auto" : "tel", veh: this._vehSel || "base" });
           const own = (s.autoHideBy || {})[this._ahKey(E.scr, E.veh)];
@@ -7980,6 +7992,7 @@ class NavigatorPanel extends HTMLElement {
       this._saveSettings();
       if (k === "voiceStyle") { this._unlockAudio(); this._speak(PHRASES[s.lang].test, true, true); }
       if (k === "terrainEx" || k === "bldStyle") this._apply3dSettings();
+      if (k === "carScale") { this._czLast = null; this._applyCarScale(); }
       if (k === "nightMode") { delete s.nightOverride; this._saveSettings(); this._applyNight(); this._syncNightBtn(); }
       if (k === "lang" && this._result && !this._nav) this._compute(false); // indicazioni nella nuova lingua
       this._openSettings();
@@ -9332,7 +9345,7 @@ class NavigatorPanel extends HTMLElement {
     });
     want.forEach((a, i) => {
       const id = `addon-${a.id}`, w = a.window;
-      const sig = JSON.stringify(w) + (a.files?.[w.image] ? "f" : "");
+      const sig = JSON.stringify(w) + (a.files?.[w.image] ? "f" : "") + this._carScale();
       let el = this.$(id);
       if (el && el._sig === sig) return;
       if (el) { clearInterval(el._timer); el.remove(); }
@@ -9345,7 +9358,8 @@ class NavigatorPanel extends HTMLElement {
       const selKey = `${STORE_KEY}-addon-${a.id}`;
       let sel = 0;
       try { sel = Math.max(0, Math.min((alts?.length || 1) - 1, +localStorage.getItem(selKey) || 0)); } catch (e) { /* niente */ }
-      el.innerHTML = `${w.title ? `<div class="at">${esc(w.title)}</div>` : ""}<div class="aimg"><img alt="" style="width:${w.width}px;height:${w.height}px">${
+      const cz = this._carScale();
+      el.innerHTML = `${w.title ? `<div class="at">${esc(w.title)}</div>` : ""}<div class="aimg"><img alt="" style="width:${Math.round(w.width * cz)}px;height:${Math.round(w.height * cz)}px">${
         w.marker ? `<i class="ame" title="Tu sei qui"></i>` : ""}${w.caption ? `<div class="acap"></div>` : ""}${
         w.buttons?.some((b) => b.list) ? `<div class="abl">${w.buttons.map((b, i) => (b.list ? `<button data-b="${i}" title="${esc(b.label || "")}">${ADDON_ICONS(b.icon) || esc(b.icon || b.label)}</button>` : "")).join("")}</div>` : ""}${
         w.buttons?.some((b) => !b.list) ? `<div class="abar">${w.buttons.map((b, i) => (!b.list ? `<button data-b="${i}" title="${esc(b.label || "")}">${ADDON_ICONS(b.icon) || esc(b.icon || b.label)}</button>` : "")).join("")}</div>` : ""}</div>${
@@ -9535,6 +9549,27 @@ class NavigatorPanel extends HTMLElement {
     this._addonClosed = new S(Array.isArray(ids) ? ids : []);
     this._addonClosed._ready = true;
     return this._addonClosed;
+  }
+
+  // schermo dell'auto: i comandi crescono tutti nella stessa proporzione, perché occupino la stessa parte di schermo
+  // che sul telefono in orizzontale (lo schermo dell'auto si dichiara a bassa densità e senza questo restano minuscoli).
+  // "Grandezza dei comandi in auto" in ⚙: automatica (dall'altezza dello schermo) o fissa
+  _carScale() {
+    if (!this._isCarScreen()) return 1;
+    const set = this._settings.carScale;
+    if (set && set !== "auto" && +set > 0) return +set;
+    const H = this.$?.("mapwrap")?.clientHeight || window.innerHeight || 400;
+    return Math.max(1, Math.min(2.2, H / 400));
+  }
+
+  _applyCarScale() {
+    const z = this._carScale();
+    if (this._czLast === z) return;
+    this._czLast = z;
+    this.style.setProperty("--cz", String(z));
+    // la barra in basso in auto è già un po' più grande (tasti da 56): cresce un po' meno
+    this.style.setProperty("--czb", String(Math.max(1, +(z * 0.72).toFixed(2))));
+    if (this._addons?.length) this._renderAddons();
   }
 
   // batteria del telefono nel riquadro della velocità (dall'app NaviHA o dal browser, se la sa leggere)
@@ -9896,9 +9931,12 @@ class NavigatorPanel extends HTMLElement {
       menu.remove();
       this._placePitchCtl();
     });
+    // tutta l'altezza della mappa (è un menu: sotto non serve vedere), a fianco del riquadro della velocità se c'è posto
     const wr = wrap.getBoundingClientRect(), br = box.getBoundingClientRect();
-    menu.style.left = `${Math.max(4, Math.min(wrap.clientWidth - 230, br.left - wr.left))}px`;
-    menu.style.top = `${br.bottom - wr.top + 6}px`;
+    const mw = 220 * this._carScale() + 12;
+    const right = br.right - wr.left + 8;
+    menu.style.left = `${right + mw <= wrap.clientWidth - 4 ? right : Math.max(4, Math.min(wrap.clientWidth - mw - 4, br.left - wr.left))}px`;
+    menu.style.top = "8px"; menu.style.bottom = "8px"; menu.style.overflowY = "auto";
     wrap.appendChild(menu);
     menu.querySelectorAll("[data-a]").forEach((b) => b.addEventListener("click", async (e) => {
       e.stopPropagation();
