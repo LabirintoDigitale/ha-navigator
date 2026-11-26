@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.45";
+const PANEL_VERSION = "1.14.46";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1787,6 +1787,22 @@ const STYLE = `
   :host(.carscr) .aph .phau, :host(.carscr) .aph .phrt button { font-size: 18px; padding: 12px 14px; }
   :host(.carscr) .aph .phbig button { width: 80px; height: 80px; }
   :host(.carscr) .aph .phfav button { font-size: 17px; padding: 10px 6px; }
+  /* elenco dei brani a tutto schermo (⏭ tenuto premuto) */
+  .aqueue { position: absolute; inset: 8px; z-index: 1009; background: rgba(18,18,18,.97); border-radius: 14px; display: flex;
+    flex-direction: column; color: #fff; box-shadow: 0 4px 20px rgba(0,0,0,.6); overflow: hidden; }
+  .aqueue .aqh { display: flex; align-items: center; padding: 10px 12px; gap: 10px; font: 700 18px sans-serif; }
+  .aqueue .aqh b { flex: 1; }
+  .aqueue .aqh button, .aqueue .aqn button { border: none; border-radius: 12px; background: rgba(255,255,255,.14); color: #fff;
+    font: 700 22px sans-serif; min-width: 56px; height: 50px; cursor: pointer; }
+  .aqueue .aql { flex: 1; overflow-y: auto; padding: 0 8px; display: flex; flex-direction: column; gap: 4px; }
+  .aqueue .aql > button { display: flex; align-items: center; gap: 12px; border: none; border-radius: 10px; background: rgba(255,255,255,.06);
+    color: #fff; font: 600 17px sans-serif; text-align: left; padding: 8px 10px; min-height: 56px; cursor: pointer; flex: none; }
+  .aqueue .aql > button.on { background: #1a73e8; }
+  .aqueue .aql img, .aqueue .aql i { width: 44px; height: 44px; border-radius: 6px; object-fit: cover; flex: none; font-style: normal;
+    display: flex; align-items: center; justify-content: center; font-size: 26px; }
+  .aqueue .aqn { display: flex; gap: 10px; justify-content: center; padding: 10px; }
+  .aqueue .aqn button { flex: 1; max-width: 200px; }
+  :host(.carscr) .aqueue .aqh, :host(.carscr) .aqueue .aql, :host(.carscr) .aqueue .aqn { zoom: var(--cz, 1); }
   .addwin .aload { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; align-items: center;
     justify-content: center; gap: 10px; background: rgba(0,0,0,.55); border-radius: 8px; color: #fff; pointer-events: none;
     padding: 12px; text-align: center; }
@@ -9536,11 +9552,28 @@ class NavigatorPanel extends HTMLElement {
       };
       el._fmtLabel = () => (alts ? alts[sel].label : "");
       el._entityTick = cur().startsWith("entity:") ? load : null; // aggiornata quando cambia lo stato di Home Assistant
-      el.querySelectorAll(".abar button, .abl button").forEach((b) => b.addEventListener("click", (e) => {
-        e.stopPropagation(); // il tasto fa la sua azione, non è un tocco sulla finestra
-        if (Date.now() - (this._longAt || 0) < 500) return;
-        this._addonButton(a, el, w.buttons[+b.dataset.b]);
-      }));
+      el.querySelectorAll(".abar button, .abl button").forEach((b) => {
+        const bb = w.buttons[+b.dataset.b];
+        // ⏭: tenuto premuto (sul telefono) o toccato due volte di fila (sullo schermo dell'auto, dove il tocco lungo non
+        // arriva) apre a tutto schermo l'elenco dei brani (o delle radio) da scegliere
+        const isNext = /media_next_track$/.test(bb?.service || "") || bb?.cycle === "next";
+        let lpT = null, lpDone = false, tapT = null;
+        if (isNext) {
+          b.addEventListener("pointerdown", () => { lpDone = false; clearTimeout(lpT); lpT = setTimeout(() => { lpDone = true; this._addonQueue(a, el); }, 650); });
+          for (const ev of ["pointerup", "pointercancel", "pointerleave"]) b.addEventListener(ev, () => clearTimeout(lpT));
+        }
+        b.addEventListener("click", (e) => {
+          e.stopPropagation(); // il tasto fa la sua azione, non è un tocco sulla finestra
+          if (Date.now() - (this._longAt || 0) < 500) return;
+          if (isNext && lpDone) { lpDone = false; return; } // era un tocco lungo: l'elenco è già aperto
+          if (isNext && this._isCarScreen()) {
+            if (tapT) { clearTimeout(tapT); tapT = null; this._addonQueue(a, el); return; }
+            tapT = setTimeout(() => { tapT = null; this._addonButton(a, el, bb); }, 380);
+            return;
+          }
+          this._addonButton(a, el, bb);
+        });
+      });
       el._fmtNext = () => { if (alts) pick((sel + 1) % alts.length); };
       el._title = w.title || a.name;
       el.querySelectorAll(".abtns button").forEach((b) => b.addEventListener("click", (e) => {
@@ -9661,7 +9694,7 @@ class NavigatorPanel extends HTMLElement {
     if (typeof A?.setDragOrigin !== "function") return;
     const root = this.shadowRoot;
     // il più in alto fra quelli aperti: elenco di un add-on, menu dei km/h, pannello delle destinazioni
-    const cand = [root.querySelector(".addwin .alp"), this.$?.("addmenu"),
+    const cand = [root.querySelector("#aqueue .aql"), root.querySelector(".addwin .alp"), this.$?.("addmenu"),
       this.classList.contains("sideopen") ? root.querySelector(".main .side") : null].find((x) => x && x.offsetParent !== null);
     let fx = -1, fy = -1;
     if (cand) {
@@ -10470,6 +10503,53 @@ class NavigatorPanel extends HTMLElement {
       catch (err) { this._alog(`${a.id}: ${b.service} ERRORE ${err.message || err.code || err}`); this._msg(`${a.name}: ${err.message || err}`); }
       finally { if (ent) setTimeout(() => this._alog(`${a.id}: ${ent} 3 s dopo: ${this._hass.states?.[ent]?.state ?? "assente"}`), 3000); }
     }
+  }
+
+  // elenco a tutto schermo dei brani della playlist in corso (o delle radio, se si sta ascoltando una radio dell'elenco):
+  // tocco su una voce = parte da lì (la playlist continua con i brani dopo); ▲▼ per scorrere, ✕ per chiudere
+  async _addonQueue(a, el) {
+    const wrap = this.$("mapwrap");
+    const ent = this._addonFill(String(a.window.image || "").replace(/^entity:/, ""), this._addonVarsA(a));
+    if (!wrap || !this._hass.states?.[ent]) { this._msg("Scegli il lettore nelle impostazioni dell'add-on"); return; }
+    this.$("aqueue")?.remove();
+    const box = document.createElement("div");
+    box.id = "aqueue"; box.className = "aqueue";
+    box.innerHTML = `<div class="aqh"><b>${esc(a.window.title || a.name)}</b><button data-x title="Chiudi">✕</button></div>
+      <div class="aql">Carico…</div><div class="aqn"><button data-s="-1" title="Su">▲</button><button data-s="1" title="Giù">▼</button></div>`;
+    wrap.appendChild(box);
+    const list = box.querySelector(".aql");
+    box.addEventListener("click", (e) => e.stopPropagation());
+    box.querySelector("[data-x]").onclick = () => box.remove();
+    box.querySelectorAll("[data-s]").forEach((b) => { b.onclick = () => list.scrollBy({ top: +b.dataset.s * list.clientHeight * 0.85, behavior: "smooth" }); });
+    let items = [], play = null;
+    try {
+      if (el._cyc?.items?.length) { // radio (o altro elenco che cicla) in corso
+        items = el._cyc.items.map((c) => ({ title: c.title, thumb: c.thumbnail, c }));
+        play = (i) => { el._cyc.idx = i; return el._cyc.play(items[i].c); };
+      } else {
+        let last = null;
+        try { last = JSON.parse(localStorage.getItem(`${STORE_KEY}-alast-${a.id}`) || "null"); } catch (e) { last = null; }
+        const id = last?.id || last?.uri;
+        if (!id) throw new Error("fai partire prima una playlist dall'elenco");
+        const node = await this._hass.callWS({ type: "media_player/browse_media", entity_id: ent, media_content_id: id,
+          media_content_type: last.type || last.mt || "playlist" });
+        items = (node.children || []).filter((c) => c.can_play).map((c) => ({ title: c.title, thumb: c.thumbnail, id: c.media_content_id }));
+        if (!items.length) throw new Error("playlist vuota");
+        play = (i) => this._hass.callService("music_assistant", "play_media", { entity_id: ent,
+          media_id: items.slice(i, i + 200).map((x) => x.id), media_type: "track" })
+          .catch(() => this._hass.callService("media_player", "play_media", { entity_id: ent, media_content_id: items[i].id, media_content_type: "music" }));
+      }
+    } catch (err) { list.textContent = `Elenco non disponibile: ${err.message || err}`; return; }
+    const now = this._hass.states[ent]?.attributes?.media_title || this._hass.states[ent]?.attributes?.media_channel || "";
+    list.innerHTML = items.map((x, i) => `<button data-i="${i}" class="${x.title === now ? "on" : ""}">${x.thumb && /^https:|^\//.test(x.thumb) ? `<img src="${esc(x.thumb)}" alt="">` : "<i>🎵</i>"}<span>${esc(x.title || "")}</span></button>`).join("");
+    list.querySelectorAll("img").forEach((im) => { im.onerror = () => im.replaceWith(Object.assign(document.createElement("i"), { textContent: "🎵" })); });
+    list.querySelector(".on")?.scrollIntoView({ block: "center" });
+    list.querySelectorAll("[data-i]").forEach((b) => b.addEventListener("click", async () => {
+      const i = +b.dataset.i;
+      box.remove();
+      this._addonLoading(el, items[i].title || "");
+      try { await play(i); } catch (err) { this._addonLoading(el, null); this._msg(`${a.name}: ${err.message || err}`); }
+    }));
   }
 
   // elenco dentro l'add-on: contenuti di un lettore sfogliati come nel pannello Media di Home Assistant (es. le
