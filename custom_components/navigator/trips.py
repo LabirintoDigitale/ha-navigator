@@ -568,14 +568,31 @@ class Trips:
         return addons
 
     def set_layout(self, profile: str, data: dict) -> dict:
-        """Posizioni dei riquadri spostati a mano (frazioni 0..1 della mappa) per un profilo (es. "auto")."""
-        clean = {}
-        for name, pos in list((data or {}).items())[:40]:  # barra, croce, velocità e i tasti all'arrivo
-            if not isinstance(pos, dict):
-                continue
-            item = {k: round(min(1.0, max(0.0, float(pos[k]))), 4) for k in ("x", "y") if isinstance(pos.get(k), (int, float))}
-            if item:
-                clean[str(name)[:80]] = item
+        """Posizioni (e grandezze) dei riquadri spostati a mano per un profilo (es. "auto", lo schermo di Android Auto).
+        Separate in guida ("g") e fuori dalla guida ("p"). Ogni posizione: agganciata al bordo più vicino in pixel
+        (ax "l"/"r", ay "t"/"b", dx, dy) o, come prima, in frazioni della mappa (x, y); "size:<riquadro>": grandezza."""
+
+        def one(d: Any) -> dict:
+            out = {}
+            for name, pos in list((d or {}).items())[:60] if isinstance(d, dict) else []:
+                name = str(name)[:80]
+                if name.startswith("size:"):
+                    if isinstance(pos, (int, float)):
+                        out[name] = round(min(3.0, max(0.3, float(pos))), 2)
+                    continue
+                if not isinstance(pos, dict):
+                    continue
+                item = {k: round(min(1.0, max(0.0, float(pos[k]))), 4) for k in ("x", "y") if isinstance(pos.get(k), (int, float))}
+                if pos.get("ax") in ("l", "r") and pos.get("ay") in ("t", "b") \
+                        and isinstance(pos.get("dx"), (int, float)) and isinstance(pos.get("dy"), (int, float)):
+                    item = {"ax": pos["ax"], "ay": pos["ay"], "dx": int(min(5000, max(-200, pos["dx"]))),
+                            "dy": int(min(5000, max(-200, pos["dy"])))}
+                if item:
+                    out[name] = item
+            return out
+
+        data = data if isinstance(data, dict) else {}
+        clean = {"g": one(data.get("g")), "p": one(data.get("p"))} if ("g" in data or "p" in data) else one(data)
         self.layouts[str(profile)[:40]] = clean
         self._save()
         return clean

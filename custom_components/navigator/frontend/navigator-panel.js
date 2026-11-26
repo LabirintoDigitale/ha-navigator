@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.44";
+const PANEL_VERSION = "1.14.45";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -10700,6 +10700,21 @@ class NavigatorPanel extends HTMLElement {
     }
     clearTimeout(this._vehPickT);
     if (!list.length || (car?.key && list.some((v) => v.car === car.key))) return;
+    // auto che non si fa riconoscere (alcuni schermi e adattatori non danno marca e modello): niente domanda a ogni
+    // avvio, si riprende il mezzo scelto l'ultima volta su questo schermo
+    if (!car?.key) {
+      let last = null;
+      try { last = localStorage.getItem(`${STORE_KEY}-carveh`); } catch (e) { last = null; }
+      if (last && (last === "base" || list.some((v) => v.id === last))) {
+        if (this._vehicleId() !== last) {
+          this._vehSel = last;
+          try { localStorage.setItem(`${STORE_KEY}-veh`, last); } catch (e) { /* storage non disponibile */ }
+          this._hass.callWS({ type: "navigator/garage_select", vehicle_id: last }).catch(() => { /* integrazione vecchia */ });
+          this._renderPlanSel(); this._applyVehicle(true); this._syncSplashes();
+        }
+        return;
+      }
+    }
     this._vehAsked = true;
     const el = this.$("vehpop");
     if (!el) return;
@@ -10709,7 +10724,7 @@ class NavigatorPanel extends HTMLElement {
       const box = this.$("navveh");
       if (box) box.value = id;
       this._vehSel = id;
-      try { localStorage.setItem(`${STORE_KEY}-veh`, id); } catch (e) { /* storage non disponibile */ }
+      try { localStorage.setItem(`${STORE_KEY}-veh`, id); localStorage.setItem(`${STORE_KEY}-carveh`, id); } catch (e) { /* storage non disponibile */ }
       this._hass.callWS({ type: "navigator/garage_select", vehicle_id: id }).catch(() => { /* integrazione vecchia */ });
       this._renderPlanSel();
       this._applyVehicle(true);
