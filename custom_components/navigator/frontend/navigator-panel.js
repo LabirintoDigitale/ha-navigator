@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.46";
+const PANEL_VERSION = "1.14.47";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1792,6 +1792,7 @@ const STYLE = `
     flex-direction: column; color: #fff; box-shadow: 0 4px 20px rgba(0,0,0,.6); overflow: hidden; }
   .aqueue .aqh { display: flex; align-items: center; padding: 10px 12px; gap: 10px; font: 700 18px sans-serif; }
   .aqueue .aqh b { flex: 1; }
+  .aqueue .aqh button svg { width: 28px; height: 28px; display: block; margin: auto; }
   .aqueue .aqh button, .aqueue .aqn button { border: none; border-radius: 12px; background: rgba(255,255,255,.14); color: #fff;
     font: 700 22px sans-serif; min-width: 56px; height: 50px; cursor: pointer; }
   .aqueue .aql { flex: 1; overflow-y: auto; padding: 0 8px; display: flex; flex-direction: column; gap: 4px; }
@@ -9557,7 +9558,7 @@ class NavigatorPanel extends HTMLElement {
         // ⏭: tenuto premuto (sul telefono) o toccato due volte di fila (sullo schermo dell'auto, dove il tocco lungo non
         // arriva) apre a tutto schermo l'elenco dei brani (o delle radio) da scegliere
         const isNext = /media_next_track$/.test(bb?.service || "") || bb?.cycle === "next";
-        let lpT = null, lpDone = false, tapT = null;
+        let lpT = null, lpDone = false;
         if (isNext) {
           b.addEventListener("pointerdown", () => { lpDone = false; clearTimeout(lpT); lpT = setTimeout(() => { lpDone = true; this._addonQueue(a, el); }, 650); });
           for (const ev of ["pointerup", "pointercancel", "pointerleave"]) b.addEventListener(ev, () => clearTimeout(lpT));
@@ -9566,11 +9567,6 @@ class NavigatorPanel extends HTMLElement {
           e.stopPropagation(); // il tasto fa la sua azione, non è un tocco sulla finestra
           if (Date.now() - (this._longAt || 0) < 500) return;
           if (isNext && lpDone) { lpDone = false; return; } // era un tocco lungo: l'elenco è già aperto
-          if (isNext && this._isCarScreen()) {
-            if (tapT) { clearTimeout(tapT); tapT = null; this._addonQueue(a, el); return; }
-            tapT = setTimeout(() => { tapT = null; this._addonButton(a, el, bb); }, 380);
-            return;
-          }
           this._addonButton(a, el, bb);
         });
       });
@@ -10459,7 +10455,17 @@ class NavigatorPanel extends HTMLElement {
   async _addonButton(a, el, b) {
     if (!b) return;
     const v = this._addonVarsA(a);
-    if (b.list) { this._addonList(a, el, b); return; }
+    if (b.list) {
+      // brani di una playlist in riproduzione (non una radio): il tasto apre i brani di quella playlist, a tutto schermo
+      // (da lì "Playlist e radio" porta all'elenco di sempre)
+      const ent0 = this._addonFill(String(a.window.image || "").replace(/^entity:/, ""), v);
+      const st0 = this._hass.states?.[ent0]?.state;
+      let last = null;
+      try { last = JSON.parse(localStorage.getItem(`${STORE_KEY}-alast-${a.id}`) || "null"); } catch (e) { last = null; }
+      if (!el._cyc && last && ["playing", "paused", "buffering"].includes(st0)) { this._addonQueue(a, el, b); return; }
+      this._addonList(a, el, b);
+      return;
+    }
     // tasto "successivo" mentre suona una voce di un elenco che cicla (es. le radio): passa alla voce dopo, a giro
     if (b.cycle && el._cyc?.items?.length) {
       const c = el._cyc, n = c.items.length;
@@ -10507,19 +10513,22 @@ class NavigatorPanel extends HTMLElement {
 
   // elenco a tutto schermo dei brani della playlist in corso (o delle radio, se si sta ascoltando una radio dell'elenco):
   // tocco su una voce = parte da lì (la playlist continua con i brani dopo); ▲▼ per scorrere, ✕ per chiudere
-  async _addonQueue(a, el) {
+  async _addonQueue(a, el, listBtn = null) {
     const wrap = this.$("mapwrap");
     const ent = this._addonFill(String(a.window.image || "").replace(/^entity:/, ""), this._addonVarsA(a));
     if (!wrap || !this._hass.states?.[ent]) { this._msg("Scegli il lettore nelle impostazioni dell'add-on"); return; }
     this.$("aqueue")?.remove();
     const box = document.createElement("div");
     box.id = "aqueue"; box.className = "aqueue";
-    box.innerHTML = `<div class="aqh"><b>${esc(a.window.title || a.name)}</b><button data-x title="Chiudi">✕</button></div>
+    const lb = listBtn || (a.window.buttons || []).find((x) => x.list);
+    box.innerHTML = `<div class="aqh"><b>${esc(a.window.title || a.name)}</b>${lb ? `<button data-pl title="Playlist e radio">${ADDON_ICONS("playlist")}</button>` : ""}<button data-x title="Chiudi">✕</button></div>
       <div class="aql">Carico…</div><div class="aqn"><button data-s="-1" title="Su">▲</button><button data-s="1" title="Giù">▼</button></div>`;
     wrap.appendChild(box);
     const list = box.querySelector(".aql");
     box.addEventListener("click", (e) => e.stopPropagation());
     box.querySelector("[data-x]").onclick = () => box.remove();
+    const plb = box.querySelector("[data-pl]");
+    if (plb) plb.onclick = () => { box.remove(); this._addonList(a, el, lb); }; // all'elenco di playlist e radio
     box.querySelectorAll("[data-s]").forEach((b) => { b.onclick = () => list.scrollBy({ top: +b.dataset.s * list.clientHeight * 0.85, behavior: "smooth" }); });
     let items = [], play = null;
     try {
