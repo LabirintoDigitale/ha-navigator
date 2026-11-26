@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.60";
+const PANEL_VERSION = "1.14.61";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -10753,8 +10753,10 @@ class NavigatorPanel extends HTMLElement {
       // nota degli 0 e 1
       const isDyn = (c) => /builtin/i.test(`${c.uri || ""} ${c.media_content_id || ""} ${c.thumbnail || ""}`)
         || /random|casual|recent|favou?rit|preferit|mix|recommend|consigli|endless|smart|top ?\d|most played|più ascolt/i.test(c.title || "");
-      const icon = (c) => isPl && isDyn(c) ? `<i class="pli">${ADDON_ICONS("playlistdyn")}</i>`
-        : c.thumbnail ? `<img data-src="${esc(c.thumbnail)}" alt="">` : isPl ? `<i class="pli">${ADDON_ICONS("playlist")}</i>` : "<i>🎵</i>";
+      // playlist: sempre le nostre icone (le copertine fatte col mosaico degli album erano brutte); album, radio e il
+      // resto tengono la loro copertina
+      const icon = (c) => isPl ? `<i class="pli">${ADDON_ICONS(isDyn(c) ? "playlistdyn" : "playlist")}</i>`
+        : c.thumbnail ? `<img data-src="${esc(c.thumbnail)}" alt="">` : "<i>🎵</i>";
       list.innerHTML = items.map((c, i) => `<button data-i="${i}" class="${isLast(c) ? "on" : ""}">${icon(c)}<span>${esc(c.title || "")}</span></button>`).join("");
       requestAnimationFrame(() => this._centerIn(list, list.querySelector(".on"))); // quella in corso al centro
       // copertine: quelle interne di Home Assistant (/api/…) si aprono solo con la firma, come nel pannello Media; quelle
