@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.37";
+const PANEL_VERSION = "1.14.38";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -7228,7 +7228,7 @@ class NavigatorPanel extends HTMLElement {
 
   _floatKey(el) { return el.id.startsWith("addon-") ? `addon:${el.id.slice(6)}` : el.id; }
 
-  // grandezza scelta per un riquadro libero (non nel blocco della guida): 0.5, 1, 1.5, 2 o 3 volte
+  // grandezza scelta per un riquadro libero (non nel blocco della guida): 0.7, 1, 1.2, 1.3, 1.4 o 1.5 volte
   _floatScale(key) { return +(this._layout?.[`size:${key}`]) || 1; }
 
   // tasto ⤢ in alto a destra del riquadro scelto (modalità spostamento): a ogni tocco la grandezza successiva
@@ -7245,7 +7245,7 @@ class NavigatorPanel extends HTMLElement {
         const sel = this._editSel;
         if (!sel) return;
         const key = this._floatKey(sel);
-        const STEPS = [0.5, 1, 1.5, 2, 3];
+        const STEPS = [0.7, 1, 1.2, 1.3, 1.4, 1.5];
         const cur = this._floatScale(key);
         const next = STEPS[(STEPS.findIndex((x) => x >= cur - 0.01) + 1) % STEPS.length];
         (this._layout ||= {})[`size:${key}`] = next;
