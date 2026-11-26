@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.33";
+const PANEL_VERSION = "1.14.34";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1712,6 +1712,10 @@ const STYLE = `
   .mapwrap.editing .pitchctl, .mapwrap.editing .spdbox, .mapwrap.editing .addwin:not(.addock .addwin) { outline: 2px dashed rgba(255,255,255,.7); outline-offset: 2px; }
   .mapwrap.editing .editsel { outline: 3px solid #1a73e8; background: rgba(26,115,232,.22) !important; }
   .mapwrap.editing .editsel > * { visibility: hidden; }
+  .editsz { position: absolute; z-index: 1101; display: flex; align-items: center; gap: 2px; border: none; border-radius: 10px;
+    background: #1a73e8; color: #fff; padding: 6px 8px; box-shadow: 0 2px 8px rgba(0,0,0,.45); cursor: pointer; }
+  .editsz small { font: 700 12px sans-serif; }
+  :host(.carscr) .editsz { padding: 10px 12px; } :host(.carscr) .editsz svg { width: 26px; height: 26px; } :host(.carscr) .editsz small { font-size: 16px; }
   .editbar { position: absolute; z-index: 1100; left: 50%; bottom: calc(12px + var(--nvb, 0px)); transform: translateX(-50%); display: flex;
     align-items: center; gap: 12px; background: #1a73e8; color: #fff; border-radius: 14px; padding: 8px 10px 8px 16px;
     font: 600 16px sans-serif; box-shadow: 0 2px 12px rgba(0,0,0,.4); white-space: nowrap; }
@@ -7194,6 +7198,7 @@ class NavigatorPanel extends HTMLElement {
       this._editSel?.classList.remove("editsel");
       this._editSel = null;
       this.$("editbar")?.remove();
+      this.$("editsz")?.remove();
       return;
     }
     let bar = this.$("editbar");
@@ -7209,10 +7214,46 @@ class NavigatorPanel extends HTMLElement {
   _editPick(el) {
     this._editSel?.classList.remove("editsel");
     this._editSel = el;
-    if (!el) return;
+    if (!el) { this.$("editsz")?.remove(); return; }
     el.classList.add("editsel", "moved");
     el.style.right = "auto";
     el.style.left = `${el.offsetLeft}px`; el.style.top = `${el.offsetTop}px`;
+    this._editSizeBtn();
+  }
+
+  _floatKey(el) { return el.id.startsWith("addon-") ? `addon:${el.id.slice(6)}` : el.id; }
+
+  // grandezza scelta per un riquadro libero (non nel blocco della guida): 0.5, 1, 1.5, 2 o 3 volte
+  _floatScale(key) { return +(this._layout?.[`size:${key}`]) || 1; }
+
+  // tasto ⤢ in alto a destra del riquadro scelto (modalità spostamento): a ogni tocco la grandezza successiva
+  _editSizeBtn() {
+    const wrap = this.$("mapwrap"), el = this._editSel;
+    let b = this.$("editsz");
+    if (!this._editing || !el || !wrap) { b?.remove(); return; }
+    if (!b) {
+      b = document.createElement("button");
+      b.id = "editsz"; b.className = "editsz"; b.title = "Grandezza del riquadro";
+      wrap.appendChild(b);
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const sel = this._editSel;
+        if (!sel) return;
+        const key = this._floatKey(sel);
+        const STEPS = [0.5, 1, 1.5, 2, 3];
+        const cur = this._floatScale(key);
+        const next = STEPS[(STEPS.findIndex((x) => x >= cur - 0.01) + 1) % STEPS.length];
+        (this._layout ||= {})[`size:${key}`] = next;
+        this._applyFloat(sel.id, key);
+        (this._layout)[key] = this._posOf(sel.offsetLeft, sel.offsetTop, sel, wrap);
+        this._saveLayout();
+        this._editSizeBtn();
+      });
+    }
+    const r = el.getBoundingClientRect(), wr = wrap.getBoundingClientRect();
+    b.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></svg><small>${this._floatScale(this._floatKey(el))}×</small>`;
+    b.style.left = `${Math.max(4, r.right - wr.left - 34)}px`;
+    b.style.top = `${Math.max(4, r.top - wr.top - 14)}px`;
   }
 
   _bindEditMode() {
@@ -7220,7 +7261,7 @@ class NavigatorPanel extends HTMLElement {
     if (!wrap) return;
     let down = null;
     const movable = (t) => t.closest?.("#pitchctl, #spdbox, .addwin");
-    const stop = (e) => { if (!this._editing || e.target.closest?.("#editbar")) return false; e.stopPropagation(); if (e.cancelable) e.preventDefault(); return true; };
+    const stop = (e) => { if (!this._editing || e.target.closest?.("#editbar, #editsz")) return false; e.stopPropagation(); if (e.cancelable) e.preventDefault(); return true; };
     wrap.addEventListener("pointerdown", (e) => {
       if (!stop(e)) return;
       const m = movable(e.target);
@@ -7236,6 +7277,7 @@ class NavigatorPanel extends HTMLElement {
       const x = Math.max(4, Math.min(wrap.clientWidth - el.offsetWidth - 4, down.l + e.clientX - down.x));
       const y = Math.max(4, Math.min(wrap.clientHeight - el.offsetHeight - 4, down.t + e.clientY - down.y));
       el.style.left = `${x}px`; el.style.top = `${y}px`;
+      this._editSizeBtn();
     }, true);
     const up = (e) => {
       if (!stop(e) || !down) return;
@@ -7350,6 +7392,10 @@ class NavigatorPanel extends HTMLElement {
     const el = this.$(id);
     const wrap = this.$("mapwrap");
     if (!el || !wrap || el.hidden) return;
+    // grandezza scelta (modalità spostamento ⤢): solo per i riquadri liberi, non nel blocco della guida
+    const sc = el.closest(".addock") ? 1 : this._floatScale(key);
+    el.style.scale = sc === 1 ? "" : String(sc);
+    el.style.transformOrigin = sc === 1 ? "" : "top left";
     const pos = this._layout?.[key];
     if (!pos) {
       if (id === "spdbox") { el.classList.remove("moved"); el.style.left = ""; el.style.top = this._floatDefTop(); }
@@ -7357,8 +7403,8 @@ class NavigatorPanel extends HTMLElement {
     }
     el.classList.add("moved");
     const [px, py] = this._posXY(pos, el, wrap);
-    const x = Math.max(4, Math.min(wrap.clientWidth - el.offsetWidth - 4, px));
-    const y = Math.max(4, Math.min(wrap.clientHeight - el.offsetHeight - 4, py));
+    const x = Math.max(4, Math.min(wrap.clientWidth - el.offsetWidth * sc - 4, px));
+    const y = Math.max(4, Math.min(wrap.clientHeight - el.offsetHeight * sc - 4, py));
     el.style.left = `${x}px`; el.style.top = `${y}px`;
   }
 
@@ -10011,7 +10057,7 @@ class NavigatorPanel extends HTMLElement {
       }, true);
     }
     const list = dock.querySelector(".alist"), cr = dock.querySelector(".across");
-    for (const w of wins) if (w.parentNode !== list) list.appendChild(w);
+    for (const w of wins) { if (w.parentNode !== list) list.appendChild(w); w.style.scale = ""; } // nel blocco: grandezza normale
     if (mode === "top" && pc.parentNode !== cr) cr.insertBefore(pc, cr.firstChild);
     const n = wins.length, k = (((this._dockIdx || 0) % n) + n) % n;
     wins.forEach((w, i) => { w.style.display = i === k ? "" : "none"; });
