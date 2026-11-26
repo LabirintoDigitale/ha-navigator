@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.38";
+const PANEL_VERSION = "1.14.39";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -1810,9 +1810,9 @@ const STYLE = `
   @keyframes amq { 0%, 8% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
   .addwin .abar { position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); display: flex; gap: 6px; }
   .addwin .abar button, .addwin .abl button { border: none; border-radius: 10px; background: rgba(0,0,0,.55); color: #fff;
-    font-size: 16px; min-width: 40px; height: 36px; padding: 0 8px; cursor: pointer; display: flex; align-items: center;
+    font-size: 18px; min-width: 50px; height: 46px; padding: 0 10px; cursor: pointer; display: flex; align-items: center;
     justify-content: center; backdrop-filter: blur(2px); }
-  .addwin .abar button svg, .addwin .abl button svg { display: block; }
+  .addwin .abar button svg, .addwin .abl button svg { display: block; width: 28px; height: 28px; }
   /* elenco (es. playlist) in alto a sinistra, allineato al primo tasto in basso; il titolo del brano parte dopo */
   .addwin .abl { position: absolute; left: 6px; top: 6px; display: flex; gap: 6px; z-index: 1; }
   .addwin .abl ~ .abar, .addwin.botmode .abar { left: 6px; transform: none; }
