@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.41";
+const PANEL_VERSION = "1.14.42";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -3453,6 +3453,7 @@ class NavigatorPanel extends HTMLElement {
     clearTimeout(nav.popTimer);
     this._nav = null;
     this._spdBox(null, false); // via il riquadro della velocità
+    this._autoHideShow(); // fuori dalla guida niente nascondi automatico: tutto torna visibile
     this._navClock(null); // la croce torna a mostrare solo l'ora attuale
     this._idleWatchSync();
     this._updateAwake();
@@ -7381,7 +7382,8 @@ class NavigatorPanel extends HTMLElement {
       clearTimeout(this._ahT);
       if (!this._ahCfg().on || this._editing) return;
       this._ahT = setTimeout(() => {
-        if (this._ahCfg().on && !this._editing && !this._dragging) { this._autoHideMark(); wrap.classList.add("autohid"); }
+        // solo in navigazione: fuori dalla guida i riquadri scelti (es. la Musica) restano sempre visibili
+        if (this._ahCfg().on && !this._editing && !this._dragging && this._nav && this._isGuida()) { this._autoHideMark(); wrap.classList.add("autohid"); }
       }, 10000);
     };
     this._autoHideArm = arm;
