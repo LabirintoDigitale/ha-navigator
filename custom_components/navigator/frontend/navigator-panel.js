@@ -4,7 +4,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.40";
+const PANEL_VERSION = "1.14.41";
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -2210,9 +2210,18 @@ class NavigatorPanel extends HTMLElement {
     this.$ = $;
     this.classList.toggle("carscr", this._isCarScreen()); // schermo dell'auto: tasti più grandi
     // "tic" dolce alla pressione dei pulsanti (anche sullo schermo dell'auto); la mappa e i campi di testo no
+    const tickTarget = (e) => e.target.closest?.('button, [role="button"], select, a, input[type="checkbox"], input[type="radio"], .arrsq');
+    // sullo schermo dell'auto il tocco arriva con un po' di ritardo e il comando ancora dopo: il "tic" parte appena il dito
+    // tocca il tasto (prima di tutto il resto), così si sente subito che la pressione è stata presa
+    root.addEventListener("pointerdown", (e) => {
+      if (this._settings.clickSnd === false || !this._isCarScreen()) return;
+      const t = tickTarget(e);
+      if (t && !t.disabled) { this._tick(); this._tickAt = Date.now(); }
+    }, true);
     root.addEventListener("click", (e) => {
       if (this._settings.clickSnd === false) return;
-      const t = e.target.closest?.('button, [role="button"], select, a, input[type="checkbox"], input[type="radio"], .arrsq');
+      if (Date.now() - (this._tickAt || 0) < 1500) return; // già suonato alla pressione
+      const t = tickTarget(e);
       if (t && !t.disabled) this._tick();
     }, true);
     this._menuBtn = root.querySelector("ha-menu-button");
@@ -7793,7 +7802,8 @@ class NavigatorPanel extends HTMLElement {
   // suono breve e morbido per i tocchi: sinusoide che scende appena di tono, attacco e coda dolci, volume basso
   _tick() {
     try {
-      this._unlockAudio();
+      // leggero: solo l'audio della pagina (senza ripreparare la voce a ogni tocco)
+      if (!this._ac) this._unlockAudio(); else if (this._ac.state !== "running") this._ac.resume?.();
       const ac = this._ac;
       if (!ac) return;
       const t = ac.currentTime;
