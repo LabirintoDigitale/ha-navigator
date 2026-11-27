@@ -62,12 +62,12 @@ class Players:
         self.entities[pid] = ent
         self.add_entities([ent])
 
-    async def register(self, pid: str, name: str) -> None:
+    async def register(self, pid: str, name: str, old_name: str | None = None) -> None:
         # stesso telefono registrato due volte (vecchia app con codice casuale, prima di quello fisso del telefono):
-        # via il doppione con lo stesso nome. Solo i codici casuali vecchi: due telefoni uguali hanno lo stesso
+        # via il doppione con lo stesso nome (anche quello vecchio "App telefono", senza utente). Solo i codici casuali vecchi: due telefoni uguali hanno lo stesso
         # modello (e magari lo stesso utente) ma codici fissi diversi, e restano entrambi.
         dup = [k for k, v in self.players.items()
-               if k != pid and v.get("name") == name and re.fullmatch(r"[a-z]+_[0-9a-f]{10}", k)]
+               if k != pid and v.get("name") in (name, old_name) and re.fullmatch(r"[a-z]+_[0-9a-f]{10}", k)]
         if dup:
             from homeassistant.helpers import entity_registry as er
 

@@ -712,7 +712,7 @@ _PID = vol.All(str, vol.Match(r"^[a-z0-9_]{4,40}$"))
 @websocket_api.async_response
 async def ws_player_register(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
     user = connection.user.name if connection.user else None
-    await _data(hass).players.register(msg["player_id"], Players.full_name(msg["name"], user))
+    await _data(hass).players.register(msg["player_id"], Players.full_name(msg["name"], user), " ".join(msg["name"].split()))
     connection.send_result(msg["id"], {"ok": True})
 
 
