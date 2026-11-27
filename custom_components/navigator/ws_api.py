@@ -13,6 +13,7 @@ from homeassistant.core import HomeAssistant, callback
 import homeassistant.helpers.config_validation as cv
 
 from .api import NavigatorError
+from .players import Players
 from .pois import PoiError
 from .weather import WeatherError
 from .const import DATA_WS_REGISTERED, DOMAIN, LANGUAGES, MAX_EXCLUDE, MAX_POINTS, MODES, VERSION
@@ -710,7 +711,8 @@ _PID = vol.All(str, vol.Match(r"^[a-z0-9_]{4,40}$"))
 })
 @websocket_api.async_response
 async def ws_player_register(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
-    await _data(hass).players.register(msg["player_id"], msg["name"])
+    user = connection.user.name if connection.user else None
+    await _data(hass).players.register(msg["player_id"], Players.full_name(msg["name"], user))
     connection.send_result(msg["id"], {"ok": True})
 
 

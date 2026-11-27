@@ -3,6 +3,7 @@ Assistant (o chiunque) può farci suonare la musica. Home Assistant passa i coma
 (websocket) e fa da ponte per il flusso audio (/api/navigator/stream/<codice>), così si sente anche fuori casa."""
 from __future__ import annotations
 
+import re
 import secrets
 import time
 from collections.abc import Callable
@@ -40,6 +41,17 @@ class Players:
         data = await self._store.async_load() or {}
         self.players = {k: v for k, v in (data.get("players") or {}).items() if isinstance(v, dict)}
 
+    @staticmethod
+    def full_name(name: str, user: str | None) -> str:
+        """Nome del lettore "App - utente - telefono" (es. "NaviHA - Luca - SM-S918B"): l'app manda "App telefono",
+        l'utente è quello di Home Assistant collegato, così due telefoni uguali di persone diverse si distinguono."""
+        name = " ".join(name.split())
+        if " - " in name:
+            return name[:60]
+        app, _, model = name.partition(" ")
+        user = " ".join((user or "").split())
+        return " - ".join(x for x in (app, user, model) if x)[:60]
+
     @callback
     def make_entity(self, pid: str) -> None:
         if pid in self.entities or self.add_entities is None:
@@ -51,9 +63,11 @@ class Players:
         self.add_entities([ent])
 
     async def register(self, pid: str, name: str) -> None:
-        # stesso telefono registrato due volte (vecchia app: telefono e auto insieme): via il doppione spento
-        # (stesso nome = stesso telefono: resta solo quello che si è appena registrato)
-        dup = [k for k, v in self.players.items() if k != pid and v.get("name") == name]
+        # stesso telefono registrato due volte (vecchia app con codice casuale, prima di quello fisso del telefono):
+        # via il doppione con lo stesso nome. Solo i codici casuali vecchi: due telefoni uguali hanno lo stesso
+        # modello (e magari lo stesso utente) ma codici fissi diversi, e restano entrambi.
+        dup = [k for k, v in self.players.items()
+               if k != pid and v.get("name") == name and re.fullmatch(r"[a-z]+_[0-9a-f]{10}", k)]
         if dup:
             from homeassistant.helpers import entity_registry as er
 
