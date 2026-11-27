@@ -330,8 +330,7 @@ Edifici: [OpenFreeMap](https://openfreemap.org), © [OpenMapTiles](https://openm
 
 [PolyForm Strict 1.0.0](LICENSE) © LabirintoDigitale: Navigator si può **installare e usare gratis** da chiunque, anche a scopo
 commerciale (aziende, professionisti: permesso aggiuntivo in testa al file LICENSE), ma il codice **non si può modificare, ridistribuire né riutilizzare** per creare altri
-progetti o prodotti simili. Le versioni fino alla 1.9.2 erano sotto licenza MIT. Leaflet e MapLibre, inclusi nel pannello,
-mantengono le loro licenze BSD.
+progetti o prodotti simili. Leaflet e MapLibre, inclusi nel pannello, mantengono le loro licenze BSD.
 
 ---
 
