@@ -1,5 +1,13 @@
 """Navigator: mappe, ricerca di destinazioni e itinerari nella barra laterale di Home Assistant."""
 
+# === Navigator per Home Assistant ======================================
+# © 2026 LabirintoDigitale — Licenza PolyForm Strict 1.0.0 (file LICENSE).
+# Uso e installazione gratuiti, anche commerciali; è vietato modificare,
+# ridistribuire o riutilizzare questo codice per creare progetti o
+# prodotti simili. https://github.com/LabirintoDigitale/ha-navigator
+# =======================================================================
+
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -40,6 +48,8 @@ PLATFORMS = ["sensor", "media_player"]
 
 
 @dataclass
+# --- Nota di licenza: codice protetto, PolyForm Strict 1.0.0 (© LabirintoDigitale) — vedi LICENSE. ---
+
 class NavigatorData:
     maps: MapServices
     places: Places

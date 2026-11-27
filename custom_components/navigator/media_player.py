@@ -1,4 +1,12 @@
 """Lettore di Home Assistant per ogni telefono con l'app NaviHA (vedi players.py)."""
+
+# === Navigator per Home Assistant ======================================
+# © 2026 LabirintoDigitale — Licenza PolyForm Strict 1.0.0 (file LICENSE).
+# Uso e installazione gratuiti, anche commerciali; è vietato modificare,
+# ridistribuire o riutilizzare questo codice per creare progetti o
+# prodotti simili. https://github.com/LabirintoDigitale/ha-navigator
+# =======================================================================
+
 from __future__ import annotations
 
 from typing import Any
@@ -38,6 +46,9 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddE
         players.make_entity(pid)
 
 
+# --- Nota di licenza: codice protetto, PolyForm Strict 1.0.0 (© LabirintoDigitale) — vedi LICENSE. ---
+
+# rev ld-c6069ccbac69
 class NaviHAPlayer(MediaPlayerEntity):
     _attr_should_poll = False
     _attr_has_entity_name = False

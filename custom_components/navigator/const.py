@@ -1,7 +1,17 @@
 """Costanti dell'integrazione Navigator."""
 
+# === Navigator per Home Assistant ======================================
+# © 2026 LabirintoDigitale — Licenza PolyForm Strict 1.0.0 (file LICENSE).
+# Uso e installazione gratuiti, anche commerciali; è vietato modificare,
+# ridistribuire o riutilizzare questo codice per creare progetti o
+# prodotti simili. https://github.com/LabirintoDigitale/ha-navigator
+# =======================================================================
+
+
 DOMAIN = "navigator"
-VERSION = "1.14.65"
+VERSION = "1.14.66"
+# firma di origine del sorgente (marcatore anti-copia)
+BUILD_SIG = "ld-c6069ccbac69"
 
 PANEL_URL = "navigator"
 PANEL_TITLE = "Navigator"

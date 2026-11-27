@@ -9,6 +9,14 @@ database e tolti dal file.
 Le operazioni sul database girano fuori dal ciclo di Home Assistant (executor), una alla volta.
 """
 
+# === Navigator per Home Assistant ======================================
+# © 2026 LabirintoDigitale — Licenza PolyForm Strict 1.0.0 (file LICENSE).
+# Uso e installazione gratuiti, anche commerciali; è vietato modificare,
+# ridistribuire o riutilizzare questo codice per creare progetti o
+# prodotti simili. https://github.com/LabirintoDigitale/ha-navigator
+# =======================================================================
+
+
 from __future__ import annotations
 
 import json
@@ -289,6 +297,7 @@ _ENTIMG = re.compile(r"^entity:(\{[a-z0-9_]+\}|[a-z0-9_]+\.[a-z0-9_]+)$")
 _KEY = re.compile(r"^[a-z0-9_]{1,30}$")
 
 
+# rev interna ld-c6069ccbac69
 def _addon_buttons(lst: Any) -> list[dict]:
     """Tasti sull'immagine: {"icon", "label", "service", "data"} oppure {"icon", "label", "list": {"browse", "path"}}
     (elenco dei contenuti di un lettore, sfogliato come nel pannello Media di Home Assistant)."""
@@ -354,6 +363,8 @@ def _addon_click(c: Any) -> Any:
                 return {"service": c["service"], "data": data}
     return "close"
 
+
+# --- Nota di licenza: codice protetto, PolyForm Strict 1.0.0 (© LabirintoDigitale) — vedi LICENSE. ---
 
 def _bg(u: Any) -> str:
     u = str(u or "").strip()[:500]

@@ -3,6 +3,14 @@
 Non dipende da Home Assistant: riceve una sessione aiohttp e gli indirizzi dei server.
 """
 
+# === Navigator per Home Assistant ======================================
+# © 2026 LabirintoDigitale — Licenza PolyForm Strict 1.0.0 (file LICENSE).
+# Uso e installazione gratuiti, anche commerciali; è vietato modificare,
+# ridistribuire o riutilizzare questo codice per creare progetti o
+# prodotti simili. https://github.com/LabirintoDigitale/ha-navigator
+# =======================================================================
+
+
 from __future__ import annotations
 
 import asyncio
@@ -174,6 +182,8 @@ def _photon_label(props: dict[str, Any]) -> tuple[str, str]:
         parts = [p for p in parts if p != name]
     return name, ", ".join(parts)
 
+
+# --- Nota di licenza: codice protetto, PolyForm Strict 1.0.0 (© LabirintoDigitale) — vedi LICENSE. ---
 
 class MapServices:
     """Ricerca di luoghi e calcolo dei percorsi sui server gratuiti."""

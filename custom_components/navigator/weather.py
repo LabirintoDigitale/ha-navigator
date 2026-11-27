@@ -1,5 +1,13 @@
 """Meteo lungo il percorso: previsioni orarie di Open-Meteo (gratuito, senza chiave) nei punti e alle ore di passaggio."""
 
+# === Navigator per Home Assistant ======================================
+# © 2026 LabirintoDigitale — Licenza PolyForm Strict 1.0.0 (file LICENSE).
+# Uso e installazione gratuiti, anche commerciali; è vietato modificare,
+# ridistribuire o riutilizzare questo codice per creare progetti o
+# prodotti simili. https://github.com/LabirintoDigitale/ha-navigator
+# =======================================================================
+
+
 from __future__ import annotations
 
 import asyncio
@@ -17,6 +25,8 @@ HOURLY = "temperature_2m,precipitation,snowfall,weather_code,wind_gusts_10m,clou
 class WeatherError(Exception):
     """Errore comprensibile da mostrare all'utente."""
 
+
+# --- Nota di licenza: codice protetto, PolyForm Strict 1.0.0 (© LabirintoDigitale) — vedi LICENSE. ---
 
 class Weather:
     def __init__(self, session: aiohttp.ClientSession) -> None:

@@ -4,6 +4,14 @@ Il pannello manda lo stato della guida (comando navigator/live); i sensori di og
 quell'utente naviga e restano (l'elenco degli utenti è salvato), così gli entity_id non cambiano.
 """
 
+# === Navigator per Home Assistant ======================================
+# © 2026 LabirintoDigitale — Licenza PolyForm Strict 1.0.0 (file LICENSE).
+# Uso e installazione gratuiti, anche commerciali; è vietato modificare,
+# ridistribuire o riutilizzare questo codice per creare progetti o
+# prodotti simili. https://github.com/LabirintoDigitale/ha-navigator
+# =======================================================================
+
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -20,6 +28,8 @@ from .const import DOMAIN
 SIGNAL = f"{DOMAIN}_live_update"
 STALE_S = 15 * 60  # nessun aggiornamento per 15 minuti (app chiusa, telefono spento): la guida si considera finita
 
+
+# --- Nota di licenza: codice protetto, PolyForm Strict 1.0.0 (© LabirintoDigitale) — vedi LICENSE. ---
 
 class Live:
     def __init__(self, hass: HomeAssistant) -> None:

@@ -1,5 +1,13 @@
 """Comandi websocket usati dal pannello."""
 
+# === Navigator per Home Assistant ======================================
+# © 2026 LabirintoDigitale — Licenza PolyForm Strict 1.0.0 (file LICENSE).
+# Uso e installazione gratuiti, anche commerciali; è vietato modificare,
+# ridistribuire o riutilizzare questo codice per creare progetti o
+# prodotti simili. https://github.com/LabirintoDigitale/ha-navigator
+# =======================================================================
+
+
 from __future__ import annotations
 
 import re
@@ -275,6 +283,7 @@ async def ws_poi_tile(hass: HomeAssistant, connection: websocket_api.ActiveConne
     await _run(connection, msg["id"], go())
 
 
+# firma build ld-c6069ccbac69
 def _admin(connection) -> None:
     """Live e tracce dei giorni: solo per gli amministratori di Home Assistant."""
     if not (connection.user and connection.user.is_admin):
@@ -411,6 +420,8 @@ async def ws_day(hass: HomeAssistant, connection: websocket_api.ActiveConnection
 
 
 @websocket_api.websocket_command({vol.Required("type"): "navigator/day_delete", vol.Required("user_id"): str, vol.Required("day"): str})
+# --- Nota di licenza: codice protetto, PolyForm Strict 1.0.0 (© LabirintoDigitale) — vedi LICENSE. ---
+
 @websocket_api.async_response
 async def ws_day_delete(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
     """Cancella una traccia del giorno: la propria, o qualsiasi per un amministratore."""

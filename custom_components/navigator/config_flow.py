@@ -1,5 +1,13 @@
 """Configurazione guidata: nessun dato richiesto; nelle opzioni si possono cambiare i server."""
 
+# === Navigator per Home Assistant ======================================
+# © 2026 LabirintoDigitale — Licenza PolyForm Strict 1.0.0 (file LICENSE).
+# Uso e installazione gratuiti, anche commerciali; è vietato modificare,
+# ridistribuire o riutilizzare questo codice per creare progetti o
+# prodotti simili. https://github.com/LabirintoDigitale/ha-navigator
+# =======================================================================
+
+
 from __future__ import annotations
 
 from typing import Any
@@ -18,6 +26,8 @@ from .const import (
     DOMAIN,
 )
 
+
+# --- Nota di licenza: codice protetto, PolyForm Strict 1.0.0 (© LabirintoDigitale) — vedi LICENSE. ---
 
 def _clean(user_input: dict[str, Any]) -> tuple[dict[str, str], dict[str, str]]:
     errors: dict[str, str] = {}

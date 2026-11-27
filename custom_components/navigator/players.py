@@ -1,6 +1,14 @@
 """Lettori NaviHA: ogni telefono con l'app NaviHA diventa un lettore di Home Assistant (media_player), così Music
 Assistant (o chiunque) può farci suonare la musica. Home Assistant passa i comandi al pannello aperto nell'app
 (websocket) e fa da ponte per il flusso audio (/api/navigator/stream/<codice>), così si sente anche fuori casa."""
+
+# === Navigator per Home Assistant ======================================
+# © 2026 LabirintoDigitale — Licenza PolyForm Strict 1.0.0 (file LICENSE).
+# Uso e installazione gratuiti, anche commerciali; è vietato modificare,
+# ridistribuire o riutilizzare questo codice per creare progetti o
+# prodotti simili. https://github.com/LabirintoDigitale/ha-navigator
+# =======================================================================
+
 from __future__ import annotations
 
 import re
@@ -134,6 +142,8 @@ class Players:
             self.streams.pop(next(iter(self.streams)))
         return f"/api/navigator/stream/{code}"
 
+
+# --- Nota di licenza: codice protetto, PolyForm Strict 1.0.0 (© LabirintoDigitale) — vedi LICENSE. ---
 
 class StreamProxyView(HomeAssistantView):
     """Ponte per l'audio: Home Assistant legge il flusso (es. dal server di Music Assistant, in casa) e lo passa

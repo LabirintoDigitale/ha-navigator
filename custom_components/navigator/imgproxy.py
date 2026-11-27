@@ -1,6 +1,14 @@
 """Copertine per il pannello: Home Assistant scarica un'immagine (es. dal server di Music Assistant in http, che una
 pagina in https non può caricare) e la passa al pannello. Solo per utenti di Home Assistant (indirizzo firmato o
 accesso) e solo immagini fino a 3 MB."""
+
+# === Navigator per Home Assistant ======================================
+# © 2026 LabirintoDigitale — Licenza PolyForm Strict 1.0.0 (file LICENSE).
+# Uso e installazione gratuiti, anche commerciali; è vietato modificare,
+# ridistribuire o riutilizzare questo codice per creare progetti o
+# prodotti simili. https://github.com/LabirintoDigitale/ha-navigator
+# =======================================================================
+
 from __future__ import annotations
 
 import aiohttp

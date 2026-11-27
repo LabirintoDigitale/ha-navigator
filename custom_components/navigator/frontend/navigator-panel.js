@@ -1,10 +1,17 @@
 // Pannello "Navigator" per Home Assistant: mappa, ricerca di destinazioni e itinerari
 // con servizi gratuiti basati su OpenStreetMap (Valhalla / OSRM per i percorsi, Photon / Nominatim per la ricerca).
+/* === Pannello Navigator per Home Assistant ============================
+ * © 2026 LabirintoDigitale — Licenza PolyForm Strict 1.0.0 (file LICENSE).
+ * Uso e installazione gratuiti, anche commerciali; è vietato modificare,
+ * ridistribuire o riutilizzare questo codice per creare progetti simili.
+ * https://github.com/LabirintoDigitale/ha-navigator
+ * ===================================================================== */
 
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.65";
+const PANEL_VERSION = "1.14.66";
+const BUILD_SIG = "ld-c6069ccbac69"; // marcatore di origine
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
 // vista 3D: MapLibre GL JS (BSD-3-Clause), incluso in frontend/maplibre e caricato solo quando serve
@@ -6011,6 +6018,7 @@ class NavigatorPanel extends HTMLElement {
   }
 
   // costruisce il mezzo come un unico gruppo di forme solide, con la targa sul retro
+  /* Nota di licenza: codice protetto, PolyForm Strict 1.0.0 (© LabirintoDigitale) — vedi LICENSE. */
   _buildCar3dMesh(kind, color) {
     if (kind === "suv" || kind === "jeep") {
       const v0 = this._curVehicle();

@@ -1,5 +1,13 @@
 """Servizio navigator.plan_route: tempo e distanza di un percorso, utilizzabile nelle automazioni."""
 
+# === Navigator per Home Assistant ======================================
+# © 2026 LabirintoDigitale — Licenza PolyForm Strict 1.0.0 (file LICENSE).
+# Uso e installazione gratuiti, anche commerciali; è vietato modificare,
+# ridistribuire o riutilizzare questo codice per creare progetti o
+# prodotti simili. https://github.com/LabirintoDigitale/ha-navigator
+# =======================================================================
+
+
 from __future__ import annotations
 
 import re
@@ -52,6 +60,8 @@ async def _resolve(hass: HomeAssistant, value: str) -> dict:
     r = results[0]
     return {"lat": r["lat"], "lon": r["lon"], "name": r["name"], "address": r["address"]}
 
+
+# --- Nota di licenza: codice protetto, PolyForm Strict 1.0.0 (© LabirintoDigitale) — vedi LICENSE. ---
 
 @callback
 def async_setup(hass: HomeAssistant) -> None:

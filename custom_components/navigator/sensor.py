@@ -1,5 +1,13 @@
 """Sensori di Navigator: per ogni utente orario di arrivo, tempo e distanza rimanenti della guida in corso."""
 
+# === Navigator per Home Assistant ======================================
+# © 2026 LabirintoDigitale — Licenza PolyForm Strict 1.0.0 (file LICENSE).
+# Uso e installazione gratuiti, anche commerciali; è vietato modificare,
+# ridistribuire o riutilizzare questo codice per creare progetti o
+# prodotti simili. https://github.com/LabirintoDigitale/ha-navigator
+# =======================================================================
+
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -57,6 +65,8 @@ class _NavSensor(SensorEntity):
     def _active(self) -> bool:
         return bool(self._st.get("active"))
 
+
+# --- Nota di licenza: codice protetto, PolyForm Strict 1.0.0 (© LabirintoDigitale) — vedi LICENSE. ---
 
 class NavArrival(_NavSensor):
     _key = "arrivo"

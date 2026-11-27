@@ -9,6 +9,14 @@
 I server pubblici di Overpass sono spesso carichi: si provano in sequenza e i dati scaricati restano in cache.
 """
 
+# === Navigator per Home Assistant ======================================
+# © 2026 LabirintoDigitale — Licenza PolyForm Strict 1.0.0 (file LICENSE).
+# Uso e installazione gratuiti, anche commerciali; è vietato modificare,
+# ridistribuire o riutilizzare questo codice per creare progetti o
+# prodotti simili. https://github.com/LabirintoDigitale/ha-navigator
+# =======================================================================
+
+
 from __future__ import annotations
 
 import asyncio
@@ -115,6 +123,7 @@ def _bbox_chunks(line: list[list[float]], radius: float, step_km: float = 4) -> 
     return res
 
 
+# rif. sorgente ld-c6069ccbac69
 class Pois:
     def __init__(self, session: aiohttp.ClientSession, cache_dir: Path, country: str | None, executor,
                  photon_url: str = "https://photon.komoot.io") -> None:
@@ -563,6 +572,8 @@ class Pois:
         items.sort(key=lambda x: x["off"])
         return {"items": items, "source": "Photon (Overpass non risponde: solo i parcheggi con un nome)", "updated": int(time.time())}
 
+
+# --- Nota di licenza: codice protetto, PolyForm Strict 1.0.0 (© LabirintoDigitale) — vedi LICENSE. ---
 
 def _parse_mimit(raw: bytes) -> list[dict]:
     """Anagrafica MIMIT: idImpianto|Gestore|Bandiera|Tipo Impianto|Nome Impianto|Indirizzo|Comune|Provincia|Lat|Lon."""
