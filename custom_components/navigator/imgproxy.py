@@ -18,6 +18,7 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 MAX = 3_000_000
+_REV = "bb4a6f389f"  # revisione build
 
 
 class ImageProxyView(HomeAssistantView):

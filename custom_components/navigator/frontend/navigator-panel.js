@@ -10,7 +10,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.66";
+const PANEL_VERSION = "1.14.67";
 const BUILD_SIG = "ld-c6069ccbac69"; // marcatore di origine
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
@@ -1602,6 +1602,7 @@ const STYLE = `
     background: rgba(32,33,36,.85); border-radius: 12px; padding: 2px; box-shadow: 0 1px 5px rgba(0,0,0,.35); color: #fff; }
   .pitchctl[hidden] { display: none; }
   .pitchctl { touch-action: none; } /* il gesto di spostamento non deve diventare uno scorrimento (lo interrompeva) */
+  /* build ld-c6069ccbac69 */
   .pitchctl .up { grid-area: 1 / 2; } .pitchctl .left { grid-area: 2 / 1; }
   .pitchctl .mid { grid-area: 2 / 2; } .pitchctl .right { grid-area: 2 / 3; }
   .pitchctl .down { grid-area: 3 / 2; }
@@ -2170,7 +2171,7 @@ class NavigatorPanel extends HTMLElement {
     root.innerHTML = `
       <link rel="stylesheet" href="${LEAFLET_CSS}">
       <style>${STYLE}</style>
-      <div class="toolbar"><ha-menu-button></ha-menu-button>
+      <div class="toolbar" data-build="ld-c6069ccbac69"><ha-menu-button></ha-menu-button>
         <div class="title"><span class="brand" id="brand"><img src="${ICON}" alt=""> Navigator</span><span class="ver" id="verlbl">versione ${PANEL_VERSION}</span></div>
         <button class="tbtn" id="settingsbtn" title="Impostazioni">⚙</button></div>
       <div class="setwrap" id="setwrap" hidden></div>
