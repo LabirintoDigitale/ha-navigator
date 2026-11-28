@@ -10,7 +10,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.68";
+const PANEL_VERSION = "1.14.69";
 const BUILD_SIG = "ld-c6069ccbac69"; // marcatore di origine
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
@@ -3192,9 +3192,13 @@ class NavigatorPanel extends HTMLElement {
     // la posizione seguita ("Segui la posizione di") è il veicolo del mezzo scelto, come in guida (dove c'è già il suo)
     if (this._me && !this._nav) {
       const src = this._me.src && this._me.src !== "gps" ? this._hass?.states?.[this._me.src]?.attributes?.friendly_name : "";
-      L.marker([this._me.lat, this._me.lon], { title: src ? `${src} (posizione da Home Assistant)` : "Questo dispositivo",
+      // il mezzo punta nella direzione di marcia anche senza navigazione (la mappa resta col nord in alto)
+      const dir = this._meDir ?? 0;
+      const m = L.marker([this._me.lat, this._me.lon], { title: src ? `${src} (posizione da Home Assistant)` : "Questo dispositivo",
         icon: L.divIcon({ className: "", html: `<div class="nav-car">${this._vehSvg()}</div>`,
           iconSize: [47, 47], iconAnchor: [23.5, 23.5] }), zIndexOffset: 900, isMe: true }).addTo(this._markerLayer);
+      const svg = m.getElement()?.querySelector("svg");
+      if (svg) svg.style.transform = `rotate(${dir}deg)`;
     }
   }
 

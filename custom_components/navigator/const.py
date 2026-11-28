@@ -9,7 +9,7 @@
 
 
 DOMAIN = "navigator"
-VERSION = "1.14.68"
+VERSION = "1.14.69"
 # firma di origine del sorgente (marcatore anti-copia)
 BUILD_SIG = "ld-c6069ccbac69"
 
