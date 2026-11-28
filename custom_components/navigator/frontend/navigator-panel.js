@@ -10,7 +10,7 @@
 import * as L from "./leaflet/leaflet-src.esm.js";
 
 // deve coincidere con VERSION in const.py: se il backend ne riporta un'altra manca un riavvio
-const PANEL_VERSION = "1.14.67";
+const PANEL_VERSION = "1.14.68";
 const BUILD_SIG = "ld-c6069ccbac69"; // marcatore di origine
 
 const LEAFLET_CSS = new URL("./leaflet/leaflet.css", import.meta.url).href;
@@ -2091,6 +2091,7 @@ class NavigatorPanel extends HTMLElement {
       this._meTurn(ms.attributes.latitude, ms.attributes.longitude);
       this._me = { lat: ms.attributes.latitude, lon: ms.attributes.longitude, src: this._me.src, upd: ms.last_updated };
       this._drawMarkers();
+      this._meKeepInView();
       this._autoDestCheck(this._me);
     }
     // Home Assistant passa hass prima di inserire il pannello nella pagina: la mappa va creata solo quando è visibile
@@ -2357,7 +2358,7 @@ class NavigatorPanel extends HTMLElement {
       this._mapClick(this._rotated() && e.originalEvent ? this._unrotLatLng(e.originalEvent) : e.latlng);
     });
     this._bindLongPress(this.$("map"), (ev) => (this._rotated() ? this._unrotLatLng(ev) : this._map.mouseEventToLatLng(ev)));
-    this._map.on("dragstart", () => this._userMoved());
+    this._map.on("dragstart zoomstart", () => { this._userMoved(); if (!this._nav) this._idlePanUntil = Date.now() + 12000; });
     this._bindGuidaGestures();
     // logo in alto a sinistra: nell'app NaviHA chiede se uscire e chiude l'app; in Home Assistant (browser) non fa nulla
     const brand = $("brand");
@@ -2709,6 +2710,7 @@ class NavigatorPanel extends HTMLElement {
         this._meTurn(lat, lon);
         this._me = { lat, lon, src: "gps" };
         this._drawMarkers();
+        this._meKeepInView();
         this._autoDestCheck(this._me);
         if (this._settings.arrNoNav) this._arrivalButtons(); // tasti all'arrivo anche senza guida, vicino a Casa
         this._idleSpeed(lat, lon, pos.coords.speed, pos.coords.heading);
@@ -4677,6 +4679,7 @@ class NavigatorPanel extends HTMLElement {
         }
         if (ev === "zoomstart" && this._nav) this._nav.manualZoomUntil = Date.now() + 20000;
         if (ev !== "pitchstart") this._userMoved();
+        if (!this._nav && ev !== "pitchstart") this._idlePanUntil = Date.now() + 12000; // guardando altrove in 3D: non seguire subito
       });
     }
     for (const kind of ["zoom", "rotate", "pitch"]) {
@@ -5367,6 +5370,28 @@ class NavigatorPanel extends HTMLElement {
     if (this._me && lat != null && lon != null && distM([this._me.lat, this._me.lon], [lat, lon]) > 15) {
       this._meDir = bearing([this._me.lat, this._me.lon], [lat, lon]);
     }
+  }
+
+  // Fuori dalla navigazione la mappa non seguiva il mezzo: spostandosi usciva dal centro fino a sparire e non si
+  // sapeva più dov'era. Ora, a ogni posizione nuova, se il mezzo arriva vicino al bordo la mappa lo riporta in vista.
+  // Se stai spostando la mappa a mano (per guardarti intorno) aspetta qualche secondo prima di riprendere a seguirlo.
+  _meKeepInView() {
+    if (this._nav || !this._me) return;
+    if (Date.now() < (this._keepViewUntil || 0)) return; // appena riaperto: resta l'inquadratura di prima
+    if (Date.now() < (this._idlePanUntil || 0)) return;  // stai guardando altrove: non ti strappo la mappa
+    const lat = this._me.lat, lon = this._me.lon;
+    if (lat == null || lon == null) return;
+    if (this._3d && this._g3 && this._g3ok) {
+      try {
+        const g = this._g3, b = g.getBounds(), sw = b.getSouthWest(), ne = b.getNorthEast();
+        const mx = (ne.lng - sw.lng) * 0.18, my = (ne.lat - sw.lat) * 0.18;
+        if (lon < sw.lng + mx || lon > ne.lng - mx || lat < sw.lat + my || lat > ne.lat - my) g.panTo([lon, lat], { duration: 600 });
+      } catch (e) { /* mappa 3D non pronta */ }
+      return;
+    }
+    if (!this._map) return;
+    const ll = L.latLng(lat, lon);
+    if (!this._map.getBounds().pad(-0.18).contains(ll)) this._map.panTo(ll, { animate: true });
   }
 
   // posizione del mezzo 3D: quella della guida, altrimenti quella seguita ("La mia posizione", prima di partire)
